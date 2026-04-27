@@ -42,6 +42,7 @@ class _DetailPageState extends State<DetailPage> {
         title: _tmdb?.englishTitle ?? widget.content.title,
         episodes: widget.content.episodes,
         initialEpisodeIndex: episodeIndex,
+        tmdbId: _tmdb?.id?.toString(),
       ),
     ));
   }

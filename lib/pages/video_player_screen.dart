@@ -1,8 +1,12 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:path_provider/path_provider.dart';
 import '../core/theme.dart';
 import '../models/episode.dart';
 import '../services/subtitle_service.dart';
@@ -12,6 +16,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final String title;
   final List<Episode> episodes;
   final int initialEpisodeIndex;
+  final String? tmdbId;
 
   const VideoPlayerScreen({
     super.key,
@@ -19,6 +24,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.title = '',
     this.episodes = const [],
     this.initialEpisodeIndex = 0,
+    this.tmdbId,
   });
 
   @override
@@ -30,9 +36,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final VideoController _controller;
   bool _showControls = true;
   bool _showEpisodes = false;
+  bool _showSubtitles = false;
   bool _hasError = false;
   late int _currentEpIndex;
   String? _currentTitle;
+  List<SubtitleItem> _availableSubs = [];
+  SubtitleItem? _selectedSub;
+  bool _loadingSubs = false;
 
   @override
   void initState() {
@@ -48,17 +58,80 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _openMedia(String url) async {
     try {
       await _player.open(Media(url));
-      _tryLoadSubtitles();
+      _fetchSubtitles();
     } catch (_) {
       if (mounted) setState(() => _hasError = true);
     }
   }
 
-  Future<void> _tryLoadSubtitles() async {
-    final searchTitle = _currentTitle ?? widget.title;
-    final url = await SubtitleService.getSubtitleUrl(searchTitle);
-    if (url != null && mounted) {
-      await _player.setSubtitleTrack(SubtitleTrack.uri(url, title: 'English', language: 'en'));
+  Future<void> _fetchSubtitles() async {
+    if (mounted) setState(() => _loadingSubs = true);
+    try {
+      final subs = await SubtitleService.searchSubtitles(_currentTitle ?? '', tmdbId: widget.tmdbId);
+      if (mounted) {
+        setState(() {
+          _availableSubs = subs;
+          _loadingSubs = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingSubs = false);
+    }
+  }
+
+  Future<void> _testSubtitles() async {
+    const hardcodedSrt = '''
+1
+00:00:00,500 --> 00:01:00,000
+HELLO! SUBTITLES ARE WORKING!
+''';
+    final tempDir = await getTemporaryDirectory();
+    final file = File('${tempDir.path}/test_sub.srt');
+    await file.writeAsString(hardcodedSrt);
+    
+    await _player.setSubtitleTrack(SubtitleTrack.uri(
+      file.path,
+      title: 'TEST',
+      language: 'en',
+    ));
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Test Subtitle Injected!')),
+      );
+    }
+  }
+
+  Future<void> _selectSubtitle(SubtitleItem item) async {
+    print('Selecting subtitle: ${item.fileName}');
+    if (mounted) setState(() {
+      _selectedSub = item;
+      _showSubtitles = false; // Close immediately for better UX
+    });
+    
+    // 1. Download and save to a local file (most reliable for mpv/media_kit)
+    final filePath = await SubtitleService.saveSubtitleToFile(item);
+    
+    if (filePath != null && mounted) {
+      // Convert to a proper file:// URI for Windows compatibility
+      final fileUri = File(filePath).uri.toString();
+      
+      await _player.setSubtitleTrack(SubtitleTrack.uri(
+        fileUri,
+        title: item.fileName,
+        language: item.language,
+      ));
+      
+      // Flash a brief confirmation message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Subtitles active: ${item.language.toUpperCase()}'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
     }
   }
 
@@ -69,6 +142,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _currentEpIndex = index;
       _hasError = false;
       _showEpisodes = false;
+      _showSubtitles = false;
+      _selectedSub = null;
     });
     _openMedia(ep.url);
   }
@@ -111,7 +186,30 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Video(controller: _controller),
+              Video(
+                controller: _controller,
+                controls: NoVideoControls,
+              ),
+              IgnorePointer(
+                ignoring: true,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 60), // Push up from the bottom
+                  child: SubtitleView(
+                    controller: _controller,
+                    configuration: const SubtitleViewConfiguration(
+                      style: TextStyle(
+                        fontSize: 28, // Even larger
+                        color: Colors.yellow, // High contrast yellow
+                        fontWeight: FontWeight.w800,
+                        shadows: [
+                          Shadow(blurRadius: 15, color: Colors.black, offset: Offset(2, 2)),
+                          Shadow(blurRadius: 15, color: Colors.black, offset: Offset(-2, -2)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
               // Error state
               if (_hasError)
@@ -125,6 +223,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   ignoring: !_showControls,
                   child: _buildControls(context, currentEpName, hasEpisodes),
                 ),
+              ),
+
+              // Subtitle panel (slides from right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: 0, bottom: 0,
+                right: _showSubtitles ? 0 : -300,
+                width: 300,
+                child: _buildSubtitlePanel(),
               ),
 
               // Episode panel (slides from right)
@@ -196,9 +304,40 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis),
                 ),
-                if (hasEpisodes)
+                const SizedBox(width: 16),
+                GestureDetector(
+                  onTap: _testSubtitles,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text('DEBUG', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _showSubtitles = !_showSubtitles;
+                    _showEpisodes = false;
+                  }),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _showSubtitles ? AppTheme.accent : Colors.black54,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
+                  ),
+                ),
+                if (hasEpisodes) ...[
+                  const SizedBox(width: 16),
                   GestureDetector(
-                    onTap: () => setState(() => _showEpisodes = !_showEpisodes),
+                    onTap: () => setState(() {
+                      _showEpisodes = !_showEpisodes;
+                      _showSubtitles = false;
+                    }),
                     child: Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
@@ -209,6 +348,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       child: const Icon(LucideIcons.list, color: Colors.white, size: 20),
                     ),
                   ),
+                ],
               ],
             ),
           ),
@@ -220,15 +360,28 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               builder: (context, snap) {
                 final playing = snap.data ?? false;
                 return GestureDetector(
-                  onTap: () { _player.playOrPause(); setState(() {}); },
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppTheme.accent.withOpacity(0.9),
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: AppTheme.accent.withOpacity(0.4), blurRadius: 30, spreadRadius: 4)],
+                  onTap: () {
+                    _player.playOrPause();
+                    setState(() {});
+                  },
+                  child: ClipOval(
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.all(28),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(_showControls ? 0.15 : 0.0),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Icon(
+                          playing ? LucideIcons.pause : LucideIcons.play,
+                          color: Colors.white.withOpacity(0.9),
+                          size: 38,
+                        ),
+                      ),
                     ),
-                    child: Icon(playing ? LucideIcons.pause : LucideIcons.play, color: Colors.white, size: 42),
                   ),
                 );
               },
@@ -237,7 +390,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
           // Bottom progress + time
           Positioned(
-            bottom: 32, left: 32, right: 32,
+            bottom: 32,
+            left: 32,
+            right: 32,
             child: StreamBuilder(
               stream: _player.stream.position,
               builder: (context, posSnap) => StreamBuilder(
@@ -245,14 +400,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 builder: (context, durSnap) {
                   final pos = posSnap.data ?? Duration.zero;
                   final dur = durSnap.data ?? Duration.zero;
-                  final progress = dur.inMilliseconds > 0 ? pos.inMilliseconds / dur.inMilliseconds : 0.0;
+                  final progress = dur.inMilliseconds > 0
+                      ? pos.inMilliseconds / dur.inMilliseconds
+                      : 0.0;
                   return Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(_fmt(pos), style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                          Text(_fmt(dur), style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text(_fmt(pos),
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 13)),
+                          Text(_fmt(dur),
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 13)),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -262,14 +423,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           thumbColor: AppTheme.accent,
                           activeTrackColor: AppTheme.accent,
                           inactiveTrackColor: Colors.white24,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                          thumbShape:
+                              const RoundSliderThumbShape(enabledThumbRadius: 7),
+                          overlayShape:
+                              const RoundSliderOverlayShape(overlayRadius: 14),
                         ),
                         child: Slider(
                           value: progress.clamp(0.0, 1.0),
                           onChanged: (v) {
                             if (dur != Duration.zero) {
-                              _player.seek(Duration(milliseconds: (v * dur.inMilliseconds).round()));
+                              _player.seek(Duration(
+                                  milliseconds:
+                                      (v * dur.inMilliseconds).round()));
                             }
                           },
                         ),
@@ -285,18 +450,122 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
-  Widget _buildEpisodePanel() {
+  Widget _buildSubtitlePanel() {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface.withOpacity(0.95),
-        boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
-            child: Text('Episodes', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+            child: Text('Subtitles',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700)),
+          ),
+          if (_loadingSubs)
+            const Expanded(
+              child: Center(
+                  child: CircularProgressIndicator(color: AppTheme.accent)),
+            )
+          else if (_availableSubs.isEmpty)
+            const Expanded(
+              child: Center(
+                  child: Text('No subtitles found',
+                      style: TextStyle(color: AppTheme.textSecondary))),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: _availableSubs.length + 1,
+                itemBuilder: (context, i) {
+                  if (i == 0) {
+                    // Off option
+                    final isActive = _selectedSub == null;
+                    return GestureDetector(
+                      onTap: () {
+                        _player.setSubtitleTrack(SubtitleTrack.no());
+                        setState(() {
+                          _selectedSub = null;
+                          _showSubtitles = false;
+                        });
+                      },
+                      child: _panelTile('Off', isActive),
+                    );
+                  }
+
+                  final sub = _availableSubs[i - 1];
+                  final isActive = _selectedSub?.id == sub.id;
+                  return GestureDetector(
+                    onTap: () => _selectSubtitle(sub),
+                    child: _panelTile(
+                      '${sub.language.toUpperCase()} - ${sub.fileName}',
+                      isActive,
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _panelTile(String title, bool isActive) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isActive ? AppTheme.accent : Colors.transparent,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(isActive ? LucideIcons.checkCircle : LucideIcons.circle,
+              color: isActive ? AppTheme.accent : AppTheme.textSecondary,
+              size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: isActive ? Colors.white : AppTheme.textSecondary,
+                fontSize: 13,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEpisodePanel() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface.withOpacity(0.95),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
+            child: Text('Episodes',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700)),
           ),
           Expanded(
             child: ListView.builder(
@@ -307,34 +576,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 final isActive = i == _currentEpIndex;
                 return GestureDetector(
                   onTap: () => _playEpisode(i),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isActive ? AppTheme.accent : Colors.transparent,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(isActive ? LucideIcons.playCircle : LucideIcons.circle,
-                            color: isActive ? AppTheme.accent : AppTheme.textSecondary, size: 16),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            ep.name.isNotEmpty ? ep.name : 'Episode ${i + 1}',
-                            style: TextStyle(
-                              color: isActive ? Colors.white : AppTheme.textSecondary,
-                              fontSize: 13,
-                              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                            ),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
+                  child: _panelTile(
+                    ep.name.isNotEmpty ? ep.name : 'Episode ${i + 1}',
+                    isActive,
                   ),
                 );
               },

@@ -14,6 +14,7 @@ const Map<int, String> _genreNames = {
 };
 
 class TmdbResult {
+  final int? id;
   final String englishTitle;
   final String overview;
   final String posterUrl;
@@ -23,6 +24,7 @@ class TmdbResult {
   final List<String> genres;
 
   const TmdbResult({
+    this.id,
     required this.englishTitle,
     required this.overview,
     required this.posterUrl,
@@ -121,6 +123,7 @@ class TmdbService {
       final hitYear = dateStr.length >= 4 ? dateStr.substring(0, 4) : '';
 
       final result = TmdbResult(
+        id: hit['id'] as int?,
         englishTitle: (hit['title'] ?? hit['name'] ?? title) as String,
         overview: (hit['overview'] ?? '') as String,
         posterUrl: hit['poster_path'] != null ? '$_imageBase${hit['poster_path']}' : '',

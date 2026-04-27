@@ -3,4 +3,4 @@ const String tmdbApiKey = '0eca402bce9c731c02509d4671c72d6f';
 
 // OpenSubtitles REST API key — register free at https://www.opensubtitles.com/en/consumers
 // Leave empty string to disable subtitles.
-const String openSubtitlesApiKey = '';
+const String openSubtitlesApiKey = 'ixETaiNX2eq0uEkJvM0ri59VyHrudWBC';
