@@ -32,7 +32,7 @@ class _VideoCardState extends State<VideoCard> {
   }
 
   Future<void> _loadTmdb() async {
-    final r = await TmdbService.search(widget.content.title);
+    final r = await TmdbService.search(widget.content.title, year: widget.content.year);
     if (r != null && mounted) {
       setState(() {
         if (r.backdropUrl.isNotEmpty) _tmdbBackdropUrl = r.backdropUrl;
@@ -59,6 +59,7 @@ class _VideoCardState extends State<VideoCard> {
     final controller = VideoController(player);
     await player.setVolume(0);
     await player.open(Media(widget.content.m3u8Url));
+    await player.seek(const Duration(minutes: 5));
     if (mounted && _isHovered) {
       setState(() {
         _previewPlayer = player;

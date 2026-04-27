@@ -39,26 +39,74 @@ class TmdbService {
 
   static final Map<String, TmdbResult?> _cache = {};
 
-  static Future<TmdbResult?> search(String title) async {
+  /// Cleans titles for better TMDB matching.
+  /// Removes "Season X", "Complete", "Version", etc.
+  static String _cleanTitle(String title) {
+    String cleaned = title;
+    
+    // 1. Remove Season information like "第一季", "第1季", "S01"
+    cleaned = cleaned.replaceAll(RegExp(r'第[一二三四五六七八九十\d]+季'), '');
+    cleaned = cleaned.replaceAll(RegExp(r'[Ss][0-9]{1,2}'), '');
+    
+    // 2. Remove common suffixes
+    cleaned = cleaned.replaceAll('完结', '');
+    cleaned = cleaned.replaceAll('更新至', '');
+    cleaned = cleaned.replaceAll('电影版', '');
+    cleaned = cleaned.replaceAll('电视剧版', '');
+    cleaned = cleaned.replaceAll('动漫版', '');
+    cleaned = cleaned.replaceAll('版', '');
+    cleaned = cleaned.replaceAll('国语', '');
+    cleaned = cleaned.replaceAll('粤语', '');
+    cleaned = cleaned.replaceAll('中字', '');
+    
+    // 3. Remove content in brackets/parentheses
+    cleaned = cleaned.replaceAll(RegExp(r'[\(\[（【].*?[\)\]）】]'), '');
+    
+    // 4. Remove year if it's at the end
+    cleaned = cleaned.replaceAll(RegExp(r'\d{4}$'), '');
+    
+    // 5. Trim and cleanup double spaces
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+    
+    // If we cleaned it too much and it's empty, return original
+    return cleaned.isNotEmpty ? cleaned : title;
+  }
+
+  static Future<TmdbResult?> search(String title, {String? year}) async {
     if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return null;
 
-    final cacheKey = title.trim();
+    final cleanedTitle = _cleanTitle(title);
+    final cacheKey = '${cleanedTitle}_${year ?? ''}'.trim();
+    
     if (_cache.containsKey(cacheKey)) return _cache[cacheKey];
 
     try {
-      final uri = Uri.https('api.themoviedb.org', '/3/search/multi', {
+      final params = {
         'api_key': tmdbApiKey,
-        'query': cacheKey,
+        'query': cleanedTitle,
         'language': 'en-US',
         'include_adult': 'false',
-      });
+      };
+      
+      // If we have a year, passing it significantly improves accuracy
+      if (year != null && year.length == 4) {
+        params['year'] = year;
+        params['first_air_date_year'] = year;
+      }
+
+      final uri = Uri.https('api.themoviedb.org', '/3/search/multi', params);
 
       final res = await http.get(uri).timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) { _cache[cacheKey] = null; return null; }
 
       final body = json.decode(res.body) as Map<String, dynamic>;
       final results = (body['results'] as List<dynamic>? ?? []);
-      if (results.isEmpty) { _cache[cacheKey] = null; return null; }
+      if (results.isEmpty) { 
+        // If search with year failed, try without year as fallback
+        if (year != null) return search(title);
+        _cache[cacheKey] = null; 
+        return null; 
+      }
 
       final withPoster = results.where((r) => r['poster_path'] != null).toList();
       final hit = withPoster.isNotEmpty ? withPoster.first : results.first;
@@ -69,9 +117,8 @@ class TmdbService {
           .take(3)
           .toList();
 
-      // Extract year from release_date or first_air_date
       final dateStr = (hit['release_date'] ?? hit['first_air_date'] ?? '') as String;
-      final year = dateStr.length >= 4 ? dateStr.substring(0, 4) : '';
+      final hitYear = dateStr.length >= 4 ? dateStr.substring(0, 4) : '';
 
       final result = TmdbResult(
         englishTitle: (hit['title'] ?? hit['name'] ?? title) as String,
@@ -79,7 +126,7 @@ class TmdbService {
         posterUrl: hit['poster_path'] != null ? '$_imageBase${hit['poster_path']}' : '',
         backdropUrl: hit['backdrop_path'] != null ? '$_backdropBase${hit['backdrop_path']}' : '',
         voteAverage: ((hit['vote_average'] ?? 0) as num).toDouble(),
-        year: year,
+        year: hitYear,
         genres: genreIds.cast<String>(),
       );
 

@@ -25,10 +25,19 @@ class _HomePageState extends State<HomePage> {
   List<ContentModel> _westernSeries = [];
   bool _isLoading = true;
 
+  final ScrollController _scrollController = ScrollController();
+  bool _isScrolled = false;
+
   @override
   void initState() {
     super.initState();
     _loadContent();
+    _scrollController.addListener(() {
+      final isScrolled = _scrollController.offset > 50;
+      if (isScrolled != _isScrolled) {
+        setState(() => _isScrolled = isScrolled);
+      }
+    });
   }
 
   Future<void> _loadContent() async {
@@ -85,6 +94,7 @@ class _HomePageState extends State<HomePage> {
           Container(color: AppTheme.background),
 
           SingleChildScrollView(
+            controller: _scrollController,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -160,7 +170,10 @@ class _HomePageState extends State<HomePage> {
           ),
 
           // Fixed Navbar
-          const Positioned(top: 0, left: 0, right: 0, child: Navbar()),
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: Navbar(isScrolled: _isScrolled),
+          ),
         ],
       ),
     );

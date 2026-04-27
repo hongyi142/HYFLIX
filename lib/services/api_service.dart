@@ -45,6 +45,8 @@ class ApiService {
     );
     final landscapeBanner = 'https://picsum.photos/seed/$titleSeed/1920/1080';
 
+    final year = (json['vod_year'] as String? ?? '');
+
     return ContentModel(
       title: json['vod_name'] as String? ?? '',
       description: blurb,
@@ -55,6 +57,7 @@ class ApiService {
       episodes: episodes,
       rating: rating,
       progress: 0.0,
+      year: year,
     );
   }
 

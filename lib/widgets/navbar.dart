@@ -1,85 +1,107 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 
 class Navbar extends StatelessWidget {
-  const Navbar({super.key});
+  final bool isScrolled;
+  const Navbar({super.key, this.isScrolled = false});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacing64, vertical: AppTheme.spacing24),
-      color: Colors.transparent,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // Left: Logo only (upsized)
-          Row(
-            children: [
-              Image.asset(
-                'assets/Logo.png',
-                height: 32,
-                errorBuilder: (context, error, stackTrace) => const Icon(LucideIcons.image, color: Colors.white, size: 32),
-              ),
-            ],
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.spacing64,
+        vertical: AppTheme.spacing16,
+      ),
+      decoration: BoxDecoration(
+        color: isScrolled ? AppTheme.background.withOpacity(0.7) : Colors.transparent,
+      ),
+      child: ClipRRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: isScrolled ? 15 : 0,
+            sigmaY: isScrolled ? 15 : 0,
           ),
-          
-          // Center: Links
-          Row(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _NavLink(title: 'Home', isActive: true),
-              _NavLink(title: 'Movies'),
-              _NavLink(title: 'TV Shows'),
-              _NavLink(title: 'My List'),
-            ],
-          ),
-          
-          // Right: Icons & Profile
-          Row(
-            children: [
-              _NavIcon(icon: LucideIcons.search),
-              const SizedBox(width: AppTheme.spacing16),
-              Stack(
-                clipBehavior: Clip.none,
+              // Left: Logo only
+              Row(
                 children: [
-                  _NavIcon(icon: LucideIcons.bell),
-                  Positioned(
-                    right: 4,
-                    top: 4,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.accent,
-                        shape: BoxShape.circle,
+                  Image.asset(
+                    'assets/Logo.png',
+                    height: 32,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const Icon(LucideIcons.image, color: Colors.white, size: 32),
+                  ),
+                ],
+              ),
+
+              // Center: Links
+              Row(
+                children: [
+                  _NavLink(title: 'Home', isActive: true),
+                  _NavLink(title: 'Movies'),
+                  _NavLink(title: 'TV Shows'),
+                  _NavLink(title: 'My List'),
+                ],
+              ),
+
+              // Right: Icons & Profile
+              Row(
+                children: [
+                  _NavIcon(icon: LucideIcons.search),
+                  const SizedBox(width: AppTheme.spacing16),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      _NavIcon(icon: LucideIcons.bell),
+                      Positioned(
+                        right: 4,
+                        top: 4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.accent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Text(
+                            '3',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ),
-                      child: const Text(
-                        '3',
-                        style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                    ],
+                  ),
+                  const SizedBox(width: AppTheme.spacing16),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppTheme.cardLight,
+                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                    ),
+                    child: ClipOval(
+                      child: Image.network(
+                        'https://i.pravatar.cc/150?img=32',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(LucideIcons.user, size: 20, color: AppTheme.textSecondary),
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(width: AppTheme.spacing16),
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppTheme.cardLight,
-                  border: Border.all(color: Colors.white.withOpacity(0.2)),
-                ),
-                child: ClipOval(
-                  child: Image.network(
-                    'https://i.pravatar.cc/150?img=32',
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => const Icon(LucideIcons.user, size: 20, color: AppTheme.textSecondary),
-                  ),
-                ),
-              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }

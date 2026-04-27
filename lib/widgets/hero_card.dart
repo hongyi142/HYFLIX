@@ -49,7 +49,10 @@ class _HeroSectionState extends State<HeroSection> {
 
   Future<void> _preloadTmdb() async {
     for (int i = 0; i < widget.featuredContent.length; i++) {
-      final result = await TmdbService.search(widget.featuredContent[i].title);
+      final result = await TmdbService.search(
+        widget.featuredContent[i].title,
+        year: widget.featuredContent[i].year,
+      );
       if (result != null && mounted) {
         setState(() => _tmdbCache[i] = result);
       }

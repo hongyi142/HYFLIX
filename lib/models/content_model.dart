@@ -10,6 +10,7 @@ class ContentModel {
   final List<Episode> episodes;
   final double rating;
   final double progress;
+  final String year;
 
   const ContentModel({
     required this.title,
@@ -21,6 +22,7 @@ class ContentModel {
     this.episodes = const [],
     this.rating = 0.0,
     this.progress = 0.0,
+    this.year = '',
   });
 
   ContentModel copyWith({
@@ -33,6 +35,7 @@ class ContentModel {
     List<Episode>? episodes,
     double? rating,
     double? progress,
+    String? year,
   }) {
     return ContentModel(
       title: title ?? this.title,
@@ -44,6 +47,7 @@ class ContentModel {
       episodes: episodes ?? this.episodes,
       rating: rating ?? this.rating,
       progress: progress ?? this.progress,
+      year: year ?? this.year,
     );
   }
 }
