@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
+import '../pages/search_page.dart';
 
 class Navbar extends StatelessWidget {
   final bool isScrolled;
@@ -52,7 +53,13 @@ class Navbar extends StatelessWidget {
               // Right: Icons & Profile
               Row(
                 children: [
-                  _NavIcon(icon: LucideIcons.search),
+                  _NavIcon(
+                icon: LucideIcons.search,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SearchPage()),
+                ),
+              ),
                   const SizedBox(width: AppTheme.spacing16),
                   Stack(
                     clipBehavior: Clip.none,
@@ -155,8 +162,9 @@ class _NavLinkState extends State<_NavLink> {
 
 class _NavIcon extends StatefulWidget {
   final IconData icon;
+  final VoidCallback? onTap;
 
-  const _NavIcon({required this.icon});
+  const _NavIcon({required this.icon, this.onTap});
 
   @override
   State<_NavIcon> createState() => _NavIconState();
@@ -176,7 +184,7 @@ class _NavIconState extends State<_NavIcon> {
           color: _isHovered ? AppTheme.textPrimary : AppTheme.textSecondary,
           size: 20,
         ),
-        onPressed: () {},
+        onPressed: widget.onTap ?? () {},
         splashRadius: 24,
       ),
     );

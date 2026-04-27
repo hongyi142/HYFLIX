@@ -137,4 +137,58 @@ class TmdbService {
       return null;
     }
   }
+
+  /// Searches TMDB for an English title and returns potential Chinese titles
+  static Future<List<String>> findChineseTitles(String englishQuery) async {
+    final candidates = <String>{};
+    try {
+      // 1. Search for the movie/show using English query
+      final searchUri = Uri.https('api.themoviedb.org', '/3/search/multi', {
+        'api_key': tmdbApiKey,
+        'query': englishQuery,
+        'language': 'en-US',
+      });
+
+      final searchRes = await http.get(searchUri).timeout(const Duration(seconds: 5));
+      if (searchRes.statusCode != 200) return [];
+
+      final searchBody = json.decode(searchRes.body);
+      final results = searchBody['results'] as List;
+      if (results.isEmpty) return [];
+
+      // Look at top 3 results
+      for (final hit in results.take(3)) {
+        final id = hit['id'];
+        final mediaType = hit['media_type'];
+        if (mediaType != 'movie' && mediaType != 'tv') continue;
+
+        // Try to get Chinese name from translation list
+        final transUri = Uri.https('api.themoviedb.org', '/3/$mediaType/$id/translations', {
+          'api_key': tmdbApiKey,
+        });
+
+        final transRes = await http.get(transUri).timeout(const Duration(seconds: 3));
+        if (transRes.statusCode == 200) {
+          final transBody = json.decode(transRes.body);
+          final translations = transBody['translations'] as List;
+          
+          for (final trans in translations) {
+            final iso = trans['iso_639_1'] as String;
+            if (iso == 'zh') {
+              final data = trans['data'] as Map<String, dynamic>;
+              final name = (data['title'] ?? data['name']) as String?;
+              if (name != null && name.isNotEmpty) candidates.add(name);
+            }
+          }
+        }
+        
+        // Also add the primary name if it looks Chinese
+        final primaryName = (hit['title'] ?? hit['name'] ?? '') as String;
+        if (RegExp(r'[\u4e00-\u9fa5]').hasMatch(primaryName)) {
+          candidates.add(primaryName);
+        }
+      }
+    } catch (_) {}
+    return candidates.toList();
+  }
 }

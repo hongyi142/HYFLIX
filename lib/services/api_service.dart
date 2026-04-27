@@ -88,4 +88,7 @@ class ApiService {
       _fetch(Uri.parse('$_baseUrl?ac=videolist&t=18&pg=$page'));
   Future<List<ContentModel>> fetchWesternSeries({int page = 1}) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&t=15&pg=$page'));
+
+  Future<List<ContentModel>> searchByTitle(String query) =>
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&wd=$query'));
 }
