@@ -97,23 +97,39 @@ class _HeroSectionState extends State<HeroSection> {
                     Image.network(banner, fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight)),
                     // Gradient
+                    // Main content gradient (bottom-left focus)
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          begin: Alignment.centerRight,
-                          end: Alignment.centerLeft,
+                          begin: Alignment.bottomLeft,
+                          end: Alignment.topRight,
                           colors: [
-                            Colors.transparent,
-                            AppTheme.background.withOpacity(0.75),
                             AppTheme.background,
+                            AppTheme.background.withOpacity(0.8),
+                            Colors.transparent,
                           ],
+                          stops: const [0.0, 0.45, 0.85],
+                        ),
+                      ),
+                    ),
+                    // Top gradient for Navbar visibility
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            AppTheme.background.withOpacity(0.6),
+                            Colors.transparent,
+                          ],
+                          stops: const [0.0, 0.25],
                         ),
                       ),
                     ),
                     // Text Content
                     Positioned(
                       left: AppTheme.spacing64,
-                      top: 90,
+                      bottom: 80,
                       width: 540,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

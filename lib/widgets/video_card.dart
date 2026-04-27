@@ -130,7 +130,10 @@ class _VideoCardState extends State<VideoCard> {
                         AnimatedOpacity(
                           opacity: _showPreview ? 1.0 : 0.0,
                           duration: const Duration(milliseconds: 400),
-                          child: Video(controller: _previewController!),
+                          child: Video(
+                            controller: _previewController!,
+                            controls: NoVideoControls,
+                          ),
                         ),
                       // Play icon
                       if (!_showPreview)

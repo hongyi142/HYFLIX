@@ -124,7 +124,10 @@ class _MovieCardState extends State<MovieCard> {
                         AnimatedOpacity(
                           opacity: 1.0,
                           duration: const Duration(milliseconds: 400),
-                          child: Video(controller: _previewController!),
+                          child: Video(
+                            controller: _previewController!,
+                            controls: NoVideoControls,
+                          ),
                         ),
                       // Hover overlay when NOT showing video
                       if (!_showPreview)
