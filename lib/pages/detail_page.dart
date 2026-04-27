@@ -25,7 +25,7 @@ class _DetailPageState extends State<DetailPage> {
     super.initState();
     _tmdb = widget.initialTmdb;
     if (_tmdb == null) {
-      TmdbService.search(widget.content.title).then((r) {
+      TmdbService.search(widget.content.title, year: widget.content.year).then((r) {
         if (mounted) setState(() { _tmdb = r; _loading = false; });
       });
     } else {

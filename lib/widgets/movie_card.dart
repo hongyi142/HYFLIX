@@ -24,6 +24,7 @@ class _MovieCardState extends State<MovieCard> {
   Player? _previewPlayer;
   VideoController? _previewController;
   bool _showPreview = false;
+  TmdbResult? _tmdbResult;
 
   @override
   void initState() {
@@ -35,6 +36,7 @@ class _MovieCardState extends State<MovieCard> {
     final r = await TmdbService.search(widget.content.title, year: widget.content.year);
     if (r != null && mounted) {
       setState(() {
+        _tmdbResult = r;
         if (r.posterUrl.isNotEmpty) _tmdbPosterUrl = r.posterUrl;
         if (r.englishTitle.isNotEmpty) _tmdbTitle = r.englishTitle;
       });
@@ -92,7 +94,10 @@ class _MovieCardState extends State<MovieCard> {
 
     return GestureDetector(
       onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => DetailPage(content: widget.content))),
+          MaterialPageRoute(builder: (_) => DetailPage(
+            content: widget.content,
+            initialTmdb: _tmdbResult,
+          ))),
       child: MouseRegion(
         onEnter: (_) => _onEnter(),
         onExit: (_) => _onExit(),

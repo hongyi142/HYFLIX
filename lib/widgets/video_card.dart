@@ -24,6 +24,7 @@ class _VideoCardState extends State<VideoCard> {
   Player? _previewPlayer;
   VideoController? _previewController;
   bool _showPreview = false;
+  TmdbResult? _tmdbResult;
 
   @override
   void initState() {
@@ -35,6 +36,7 @@ class _VideoCardState extends State<VideoCard> {
     final r = await TmdbService.search(widget.content.title, year: widget.content.year);
     if (r != null && mounted) {
       setState(() {
+        _tmdbResult = r;
         if (r.backdropUrl.isNotEmpty) _tmdbBackdropUrl = r.backdropUrl;
         if (r.englishTitle.isNotEmpty) _tmdbTitle = r.englishTitle;
       });
@@ -96,7 +98,10 @@ class _VideoCardState extends State<VideoCard> {
 
     return GestureDetector(
       onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => DetailPage(content: widget.content))),
+          MaterialPageRoute(builder: (_) => DetailPage(
+            content: widget.content,
+            initialTmdb: _tmdbResult,
+          ))),
       child: MouseRegion(
         onEnter: (_) => _onEnter(),
         onExit: (_) => _onExit(),
