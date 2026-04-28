@@ -98,7 +98,7 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 90),
+                const SizedBox(height: 60),
 
                 // ── Hero ──────────────────────────────────────────────
                 if (heroItems.isNotEmpty)

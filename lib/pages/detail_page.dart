@@ -34,6 +34,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _play(int episodeIndex) {
+    final isTvShow = widget.content.episodes.length > 1;
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => VideoPlayerScreen(
         videoUrl: widget.content.episodes.isNotEmpty
@@ -43,6 +44,7 @@ class _DetailPageState extends State<DetailPage> {
         episodes: widget.content.episodes,
         initialEpisodeIndex: episodeIndex,
         tmdbId: _tmdb?.id?.toString(),
+        isTvShow: isTvShow,
       ),
     ));
   }

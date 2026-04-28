@@ -64,7 +64,7 @@ class _HeroSectionState extends State<HeroSection> {
     if (widget.featuredContent.isEmpty) return const SizedBox();
 
     return Container(
-      height: 580,
+      height: 480,
       margin: const EdgeInsets.symmetric(horizontal: AppTheme.spacing32, vertical: AppTheme.spacing24),
       decoration: BoxDecoration(
         borderRadius: AppTheme.radius16,
@@ -132,7 +132,7 @@ class _HeroSectionState extends State<HeroSection> {
                     // Text Content
                     Positioned(
                       left: AppTheme.spacing64,
-                      bottom: 80,
+                      bottom: 40,
                       width: 540,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -198,23 +198,29 @@ class _HeroSectionState extends State<HeroSection> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 24),
-                          // Pagination pills
-                          Row(
-                            children: List.generate(widget.featuredContent.length, (i) {
-                              return AnimatedContainer(
-                                duration: const Duration(milliseconds: 300),
-                                margin: const EdgeInsets.only(right: 8),
-                                height: 4,
-                                width: _currentPage == i ? 24 : 6,
-                                decoration: BoxDecoration(
-                                  color: _currentPage == i ? AppTheme.accent : Colors.white30,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              );
-                            }),
-                          ),
+                          const SizedBox(height: 16),
                         ],
+                      ),
+                    ),
+                    // Centered Pagination pills
+                    Positioned(
+                      bottom: 24,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(widget.featuredContent.length, (i) {
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            margin: const EdgeInsets.only(right: 8),
+                            height: 4,
+                            width: _currentPage == i ? 24 : 6,
+                            decoration: BoxDecoration(
+                              color: _currentPage == i ? AppTheme.accent : Colors.white30,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          );
+                        }),
                       ),
                     ),
                   ],

@@ -1,12 +1,9 @@
-import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:path_provider/path_provider.dart';
 import '../core/theme.dart';
 import '../models/episode.dart';
 import '../services/subtitle_service.dart';
@@ -17,6 +14,8 @@ class VideoPlayerScreen extends StatefulWidget {
   final List<Episode> episodes;
   final int initialEpisodeIndex;
   final String? tmdbId;
+  final bool isTvShow;
+  final int? seasonNumber;
 
   const VideoPlayerScreen({
     super.key,
@@ -25,6 +24,8 @@ class VideoPlayerScreen extends StatefulWidget {
     this.episodes = const [],
     this.initialEpisodeIndex = 0,
     this.tmdbId,
+    this.isTvShow = false,
+    this.seasonNumber,
   });
 
   @override
@@ -67,7 +68,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _fetchSubtitles() async {
     if (mounted) setState(() => _loadingSubs = true);
     try {
-      final subs = await SubtitleService.searchSubtitles(_currentTitle ?? '', tmdbId: widget.tmdbId);
+      final currentEpisode = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
+      final subs = await SubtitleService.searchSubtitles(
+        _currentTitle ?? '',
+        tmdbId: widget.tmdbId,
+        seasonNumber: widget.seasonNumber,
+        episodeName: currentEpisode?.name,
+        isTvShow: widget.isTvShow,
+      );
       if (mounted) {
         setState(() {
           _availableSubs = subs;
@@ -79,50 +87,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
-  Future<void> _testSubtitles() async {
-    const hardcodedSrt = '''
-1
-00:00:00,500 --> 00:01:00,000
-HELLO! SUBTITLES ARE WORKING!
-''';
-    final tempDir = await getTemporaryDirectory();
-    final file = File('${tempDir.path}/test_sub.srt');
-    await file.writeAsString(hardcodedSrt);
-    
-    await _player.setSubtitleTrack(SubtitleTrack.uri(
-      file.path,
-      title: 'TEST',
-      language: 'en',
-    ));
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Test Subtitle Injected!')),
-      );
-    }
-  }
-
   Future<void> _selectSubtitle(SubtitleItem item) async {
-    print('Selecting subtitle: ${item.fileName}');
-    if (mounted) setState(() {
-      _selectedSub = item;
-      _showSubtitles = false; // Close immediately for better UX
-    });
-    
-    // 1. Download and save to a local file (most reliable for mpv/media_kit)
-    final filePath = await SubtitleService.saveSubtitleToFile(item);
-    
-    if (filePath != null && mounted) {
-      // Convert to a proper file:// URI for Windows compatibility
-      final fileUri = File(filePath).uri.toString();
-      
-      await _player.setSubtitleTrack(SubtitleTrack.uri(
-        fileUri,
+    if (mounted) {
+      setState(() {
+        _selectedSub = item;
+        _showSubtitles = false;
+      });
+    }
+
+    final srtContent = await SubtitleService.fetchSubtitleContent(item);
+
+    if (srtContent != null && srtContent.trim().isNotEmpty && mounted) {
+      await _player.setSubtitleTrack(SubtitleTrack.data(
+        srtContent,
         title: item.fileName,
         language: item.language,
       ));
-      
-      // Flash a brief confirmation message
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -132,6 +113,13 @@ HELLO! SUBTITLES ARE WORKING!
           ),
         );
       }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to load subtitle content'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -144,6 +132,7 @@ HELLO! SUBTITLES ARE WORKING!
       _showEpisodes = false;
       _showSubtitles = false;
       _selectedSub = null;
+      _availableSubs = [];
     });
     _openMedia(ep.url);
   }
@@ -305,17 +294,6 @@ HELLO! SUBTITLES ARE WORKING!
                       overflow: TextOverflow.ellipsis),
                 ),
                 const SizedBox(width: 16),
-                GestureDetector(
-                  onTap: _testSubtitles,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text('DEBUG', style: TextStyle(color: Colors.white, fontSize: 10)),
-                  ),
-                ),
                 GestureDetector(
                   onTap: () => setState(() {
                     _showSubtitles = !_showSubtitles;
