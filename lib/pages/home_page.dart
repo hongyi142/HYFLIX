@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../services/api_service.dart';
+import '../services/user_service.dart';
+import '../services/auth_service.dart';
 import '../widgets/navbar.dart';
 import '../widgets/hero_card.dart';
 import '../widgets/video_card.dart';
@@ -23,6 +25,7 @@ class _HomePageState extends State<HomePage> {
   List<ContentModel> _animation = [];
   List<ContentModel> _koreanDramas = [];
   List<ContentModel> _westernSeries = [];
+  List<Map<String, dynamic>> _watchHistory = [];
   bool _isLoading = true;
 
   final ScrollController _scrollController = ScrollController();
@@ -50,6 +53,12 @@ class _HomePageState extends State<HomePage> {
       _api.fetchWesternSeries(page: 1),
     ]);
 
+    // Load watch history for Continue Watching section
+    List<Map<String, dynamic>> history = [];
+    if (AuthService.isLoggedIn) {
+      history = await UserService.getWatchHistory();
+    }
+
     if (!mounted) return;
     setState(() {
       _latest = results[0];
@@ -58,6 +67,7 @@ class _HomePageState extends State<HomePage> {
       _animation = results[3];
       _koreanDramas = results[4];
       _westernSeries = results[5];
+      _watchHistory = history;
       _isLoading = false;
     });
   }
@@ -82,11 +92,38 @@ class _HomePageState extends State<HomePage> {
 
     final heroItems = _latest.where((c) => c.m3u8Url.isNotEmpty).take(6).toList();
 
-    // Continue watching — inject fake progress values for demo
-    final progressValues = [0.65, 0.15, 0.85, 0.40, 0.90, 0.10, 0.55, 0.30];
-    final watchingItems = _latest.skip(6).take(8).toList().asMap().entries.map((e) {
-      return e.value.copyWith(progress: progressValues[e.key % progressValues.length]);
-    }).toList();
+    // Continue watching — match watch history with loaded content
+    final allContent = [..._latest, ..._movies, ..._tvSeries, ..._animation, ..._koreanDramas, ..._westernSeries];
+    final watchingItems = <ContentModel>[];
+    for (final history in _watchHistory.take(8)) {
+      final title = history['title'] as String? ?? '';
+      final originalTitle = history['originalTitle'] as String? ?? '';
+      final posterUrl = history['posterUrl'] as String? ?? '';
+      final progress = (history['progress'] as num?)?.toDouble() ?? 0.0;
+      // Try matching by original title first (Chinese), then by English title
+      ContentModel? match;
+      if (originalTitle.isNotEmpty) {
+        match = allContent.where((c) => c.title == originalTitle).firstOrNull;
+      }
+      match ??= allContent.where((c) => c.title == title).firstOrNull;
+      if (match != null) {
+        watchingItems.add(match.copyWith(progress: progress));
+      } else if (title.isNotEmpty) {
+        // Fallback: create a minimal ContentModel from history data
+        watchingItems.add(ContentModel(
+          title: originalTitle.isNotEmpty ? originalTitle : title,
+          subtitle: '',
+          description: '',
+          thumbnailUrl: posterUrl,
+          bannerUrl: posterUrl,
+          m3u8Url: '',
+          year: '',
+          rating: 0,
+          episodes: const [],
+          progress: progress,
+        ));
+      }
+    }
 
     return Scaffold(
       body: Stack(

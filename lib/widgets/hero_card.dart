@@ -173,28 +173,12 @@ class _HeroSectionState extends State<HeroSection> {
                               PrimaryButton(
                                 text: 'Play Now',
                                 icon: LucideIcons.play,
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => DetailPage(
-                                      content: item,
-                                      initialTmdb: tmdb,
-                                    ),
-                                  ),
-                                ),
+                                onTap: () => DetailPage.show(context, item, initialTmdb: tmdb),
                               ),
                               const SizedBox(width: 14),
                               SecondaryButton(
                                 text: 'More Info',
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => DetailPage(
-                                      content: item,
-                                      initialTmdb: tmdb,
-                                    ),
-                                  ),
-                                ),
+                                onTap: () => DetailPage.show(context, item, initialTmdb: tmdb),
                               ),
                             ],
                           ),

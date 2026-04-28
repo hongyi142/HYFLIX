@@ -93,11 +93,7 @@ class _MovieCardState extends State<MovieCard> {
     final displayTitle = _tmdbTitle ?? widget.content.title;
 
     return GestureDetector(
-      onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => DetailPage(
-            content: widget.content,
-            initialTmdb: _tmdbResult,
-          ))),
+      onTap: () => DetailPage.show(context, widget.content, initialTmdb: _tmdbResult),
       child: MouseRegion(
         onEnter: (_) => _onEnter(),
         onExit: (_) => _onExit(),

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 import '../pages/search_page.dart';
+import '../pages/profile_page.dart';
+import '../services/auth_service.dart';
 
 class Navbar extends StatelessWidget {
   final bool isScrolled;
@@ -87,20 +89,24 @@ class Navbar extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(width: AppTheme.spacing16),
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AppTheme.cardLight,
-                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ProfilePage()),
                     ),
-                    child: ClipOval(
-                      child: Image.network(
-                        'https://i.pravatar.cc/150?img=32',
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const Icon(LucideIcons.user, size: 20, color: AppTheme.textSecondary),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppTheme.accent,
+                        border: Border.all(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      child: Center(
+                        child: Text(
+                          (AuthService.displayName?.isNotEmpty == true ? AuthService.displayName![0] : 'U').toUpperCase(),
+                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ),

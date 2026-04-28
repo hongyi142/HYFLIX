@@ -7,25 +7,31 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 import '../models/episode.dart';
 import '../services/subtitle_service.dart';
+import '../services/auth_service.dart';
+import '../services/user_service.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
   final String videoUrl;
   final String title;
+  final String originalTitle;
   final List<Episode> episodes;
   final int initialEpisodeIndex;
   final String? tmdbId;
   final bool isTvShow;
   final int? seasonNumber;
+  final String posterUrl;
 
   const VideoPlayerScreen({
     super.key,
     required this.videoUrl,
     this.title = '',
+    this.originalTitle = '',
     this.episodes = const [],
     this.initialEpisodeIndex = 0,
     this.tmdbId,
     this.isTvShow = false,
     this.seasonNumber,
+    this.posterUrl = '',
   });
 
   @override
@@ -44,10 +50,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   List<SubtitleItem> _availableSubs = [];
   SubtitleItem? _selectedSub;
   bool _loadingSubs = false;
+  DateTime? _startTime;
 
   @override
   void initState() {
     super.initState();
+    _startTime = DateTime.now();
     _currentEpIndex = widget.initialEpisodeIndex;
     _currentTitle = widget.title;
     _player = Player();
@@ -150,8 +158,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _saveWatchData();
     _player.dispose();
     super.dispose();
+  }
+
+  void _saveWatchData() {
+    if (AuthService.uid == null) return;
+    final elapsed = _startTime != null ? DateTime.now().difference(_startTime!).inSeconds : 0;
+    if (elapsed > 5) {
+      UserService.addWatchTime(elapsed);
+    }
+    // Calculate actual progress from player position/duration
+    final position = _player.state.position;
+    final duration = _player.state.duration;
+    final progress = duration.inSeconds > 0
+        ? (position.inSeconds / duration.inSeconds).clamp(0.0, 1.0)
+        : 0.0;
+    final currentEp = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
+    if (currentEp != null || widget.videoUrl.isNotEmpty) {
+      UserService.saveWatchHistory(
+        contentId: widget.tmdbId ?? widget.title,
+        title: widget.title,
+        posterUrl: widget.posterUrl,
+        progress: progress,
+        originalTitle: widget.originalTitle,
+      );
+    }
   }
 
   @override
@@ -171,32 +204,27 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body: GestureDetector(
-          onTap: _toggleControls,
+          onTap: () {
+            if (_showSubtitles || _showEpisodes) {
+              setState(() { _showSubtitles = false; _showEpisodes = false; });
+            } else {
+              _toggleControls();
+            }
+          },
           child: Stack(
             fit: StackFit.expand,
             children: [
               Video(
                 controller: _controller,
                 controls: NoVideoControls,
-              ),
-              IgnorePointer(
-                ignoring: true,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 60), // Push up from the bottom
-                  child: SubtitleView(
-                    controller: _controller,
-                    configuration: const SubtitleViewConfiguration(
-                      style: TextStyle(
-                        fontSize: 28, // Even larger
-                        color: Colors.yellow, // High contrast yellow
-                        fontWeight: FontWeight.w800,
-                        shadows: [
-                          Shadow(blurRadius: 15, color: Colors.black, offset: Offset(2, 2)),
-                          Shadow(blurRadius: 15, color: Colors.black, offset: Offset(-2, -2)),
-                        ],
-                      ),
-                    ),
+                subtitleViewConfiguration: const SubtitleViewConfiguration(
+                  style: TextStyle(
+                    fontSize: 28,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    backgroundColor: Color(0xDD000000),
                   ),
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 ),
               ),
 
@@ -429,11 +457,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildSubtitlePanel() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface.withOpacity(0.95),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
-      ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {}, // absorb taps so they don't close the panel
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -491,6 +522,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
         ],
       ),
+      ),
     );
   }
 
@@ -529,40 +561,44 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildEpisodePanel() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface.withOpacity(0.95),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
-            child: Text('Episodes',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700)),
-          ),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: widget.episodes.length,
-              itemBuilder: (context, i) {
-                final ep = widget.episodes[i];
-                final isActive = i == _currentEpIndex;
-                return GestureDetector(
-                  onTap: () => _playEpisode(i),
-                  child: _panelTile(
-                    ep.name.isNotEmpty ? ep.name : 'Episode ${i + 1}',
-                    isActive,
-                  ),
-                );
-              },
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {}, // absorb taps so they don't close the panel
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
+              child: Text('Episodes',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
             ),
-          ),
-        ],
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: widget.episodes.length,
+                itemBuilder: (context, i) {
+                  final ep = widget.episodes[i];
+                  final isActive = i == _currentEpIndex;
+                  return GestureDetector(
+                    onTap: () => _playEpisode(i),
+                    child: _panelTile(
+                      ep.name.isNotEmpty ? ep.name : 'Episode ${i + 1}',
+                      isActive,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

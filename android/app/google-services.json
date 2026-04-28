@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "925546886966",
+    "firebase_url": "https://hyflix-56557-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "hyflix-56557",
+    "storage_bucket": "hyflix-56557.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:925546886966:android:478c5482aa8dd11a2ee597",
+        "android_client_info": {
+          "package_name": "com.stream.hyflix"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "925546886966-6lsoe4qjet10eg09qeij42aqbmkb1m06.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7MxOV-w0rEejih4KAlxW-W7fnUYuC_aU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "925546886966-6lsoe4qjet10eg09qeij42aqbmkb1m06.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

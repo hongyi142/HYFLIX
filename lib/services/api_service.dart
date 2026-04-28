@@ -11,7 +11,7 @@ class ApiService {
   ApiService._internal();
 
   /// Parse ALL episodes from vod_play_url. Format: "EpName$url#EpName$url#..."
-  static List<Episode> _parseEpisodes(String playUrl) {
+  static List<Episode> _parseEpisodes(String playUrl, {String imageUrl = ''}) {
     final episodes = <Episode>[];
     try {
       for (final part in playUrl.split('#')) {
@@ -21,7 +21,7 @@ class ApiService {
           final name = trimmed.substring(0, idx).trim();
           final url = trimmed.substring(idx + 1).trim();
           if (url.startsWith('http')) {
-            episodes.add(Episode(name: name, url: url));
+            episodes.add(Episode(name: name, url: url, imageUrl: imageUrl));
           }
         }
       }
@@ -31,9 +31,9 @@ class ApiService {
 
   static ContentModel _fromJson(Map<String, dynamic> json) {
     final playUrl = (json['vod_play_url'] as String? ?? '');
-    final episodes = _parseEpisodes(playUrl);
-    final m3u8 = episodes.isNotEmpty ? episodes.first.url : '';
     final pic = (json['vod_pic'] as String? ?? '').replaceAll(r'\/', '/');
+    final episodes = _parseEpisodes(playUrl, imageUrl: pic);
+    final m3u8 = episodes.isNotEmpty ? episodes.first.url : '';
     final score = json['vod_douban_score'];
     double rating = 0;
     if (score is String) rating = double.tryParse(score) ?? 0;

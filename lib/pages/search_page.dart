@@ -84,6 +84,8 @@ class _SearchPageState extends State<SearchPage> {
             hintText: 'Search for movies, TV shows...',
             hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
             border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
             suffixIcon: IconButton(
               icon: const Icon(LucideIcons.x, color: Colors.white70),
               onPressed: () => _controller.clear(),
