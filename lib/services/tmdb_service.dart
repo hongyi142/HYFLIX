@@ -16,22 +16,34 @@ const Map<int, String> _genreNames = {
 class TmdbResult {
   final int? id;
   final String englishTitle;
+  final String originalTitle;
   final String overview;
   final String posterUrl;
   final String backdropUrl;
   final double voteAverage;
   final String year;
   final List<String> genres;
+  final List<int> genreIds;
+  final String mediaType;
+  final String originalLanguage;
+  final List<String> originCountries;
+  final String releaseDate;
 
   const TmdbResult({
     this.id,
     required this.englishTitle,
+    this.originalTitle = '',
     required this.overview,
     required this.posterUrl,
     required this.backdropUrl,
     this.voteAverage = 0,
     this.year = '',
     this.genres = const [],
+    this.genreIds = const [],
+    this.mediaType = 'movie',
+    this.originalLanguage = '',
+    this.originCountries = const [],
+    this.releaseDate = '',
   });
 }
 
@@ -40,6 +52,48 @@ class TmdbService {
   static const String _backdropBase = 'https://image.tmdb.org/t/p/w1280';
 
   static final Map<String, TmdbResult?> _cache = {};
+
+  static List<TmdbResult> _mapResults(List<dynamic> results, {int? count}) {
+    final mapped = results.map((hit) {
+      final genreIdsRaw = (hit['genre_ids'] as List<dynamic>? ?? []);
+      final genreIds = (hit['genre_ids'] as List<dynamic>? ?? [])
+          .map((id) => _genreNames[id as int] ?? '')
+          .where((g) => g.isNotEmpty)
+          .take(3)
+          .toList();
+
+      final dateStr =
+          (hit['release_date'] ?? hit['first_air_date'] ?? '') as String;
+      final hitYear = dateStr.length >= 4 ? dateStr.substring(0, 4) : '';
+
+      return TmdbResult(
+        id: hit['id'] as int?,
+        englishTitle: (hit['title'] ?? hit['name'] ?? '') as String,
+        originalTitle:
+            (hit['original_title'] ?? hit['original_name'] ?? '') as String,
+        overview: (hit['overview'] ?? '') as String,
+        posterUrl:
+            hit['poster_path'] != null ? '$_imageBase${hit['poster_path']}' : '',
+        backdropUrl: hit['backdrop_path'] != null
+            ? '$_backdropBase${hit['backdrop_path']}'
+            : '',
+        voteAverage: ((hit['vote_average'] ?? 0) as num).toDouble(),
+        year: hitYear,
+        genres: genreIds.cast<String>(),
+        genreIds: genreIdsRaw.whereType<int>().toList(),
+        mediaType: (hit['media_type'] as String?) ??
+            (hit['title'] != null ? 'movie' : 'tv'),
+        originalLanguage: (hit['original_language'] ?? '') as String,
+        originCountries: (hit['origin_country'] as List<dynamic>? ?? [])
+            .whereType<String>()
+            .toList(),
+        releaseDate: dateStr,
+      );
+    }).toList();
+
+    if (count == null) return mapped;
+    return mapped.take(count).toList();
+  }
 
   /// Fetches top trending movies from TMDB for the current period.
   static Future<List<TmdbResult>> fetchTrendingMovies({int count = 8}) async {
@@ -57,31 +111,197 @@ class TmdbService {
       final body = json.decode(res.body) as Map<String, dynamic>;
       final results = (body['results'] as List<dynamic>? ?? []);
 
-      return results.take(count).map((hit) {
-        final genreIds = (hit['genre_ids'] as List<dynamic>? ?? [])
-            .map((id) => _genreNames[id as int] ?? '')
-            .where((g) => g.isNotEmpty)
-            .take(3)
-            .toList();
-
-        final dateStr = (hit['release_date'] ?? '') as String;
-        final hitYear = dateStr.length >= 4 ? dateStr.substring(0, 4) : '';
-
-        return TmdbResult(
-          id: hit['id'] as int?,
-          englishTitle: (hit['title'] ?? hit['name'] ?? '') as String,
-          overview: (hit['overview'] ?? '') as String,
-          posterUrl: hit['poster_path'] != null ? '$_imageBase${hit['poster_path']}' : '',
-          backdropUrl: hit['backdrop_path'] != null ? '$_backdropBase${hit['backdrop_path']}' : '',
-          voteAverage: ((hit['vote_average'] ?? 0) as num).toDouble(),
-          year: hitYear,
-          genres: genreIds.cast<String>(),
-        );
-      }).toList();
+      return _mapResults(results, count: count);
     } catch (_) {
       return [];
     }
   }
+
+  /// Fetches recent popular movies within the last [withinDays] days.
+  static Future<List<TmdbResult>> fetchRecentPopularMovies({
+    int count = 8,
+    int withinDays = 60,
+  }) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+
+    try {
+      final today = DateTime.now();
+      final cutoff = today.subtract(Duration(days: withinDays));
+      final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
+        'api_key': tmdbApiKey,
+        'language': 'en-US',
+        'include_adult': 'false',
+        'include_video': 'false',
+        'sort_by': 'popularity.desc',
+        'primary_release_date.gte': cutoff.toIso8601String().split('T').first,
+        'primary_release_date.lte': today.toIso8601String().split('T').first,
+        'page': '1',
+      });
+
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return [];
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final results = (body['results'] as List<dynamic>? ?? []);
+      return _mapResults(results, count: count);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<List<TmdbResult>> _discoverMedia({
+    required String mediaType,
+    required Map<String, String> params,
+    int count = 10,
+    int maxPages = 3,
+    bool Function(TmdbResult result)? predicate,
+  }) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+
+    final items = <TmdbResult>[];
+    final seenIds = <int>{};
+
+    try {
+      for (int page = 1; page <= maxPages && items.length < count; page++) {
+        final query = <String, String>{
+          'api_key': tmdbApiKey,
+          'language': 'en-US',
+          'include_adult': 'false',
+          'sort_by': 'popularity.desc',
+          'page': '$page',
+          ...params,
+        };
+
+        if (mediaType == 'movie') {
+          query['include_video'] = 'false';
+        } else {
+          query['include_null_first_air_dates'] = 'false';
+        }
+
+        final uri = Uri.https('api.themoviedb.org', '/3/discover/$mediaType', query);
+        final res = await http.get(uri).timeout(const Duration(seconds: 10));
+        if (res.statusCode != 200) break;
+
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        final results = _mapResults(
+          (body['results'] as List<dynamic>? ?? []).map((item) {
+            final map = Map<String, dynamic>.from(item as Map);
+            map['media_type'] = mediaType;
+            return map;
+          }).toList(),
+        );
+
+        if (results.isEmpty) break;
+
+        for (final item in results) {
+          if (item.id == null || !seenIds.add(item.id!)) continue;
+          if (predicate != null && !predicate(item)) continue;
+          items.add(item);
+          if (items.length >= count) break;
+        }
+      }
+    } catch (_) {
+      return items;
+    }
+
+    return items;
+  }
+
+  static Map<String, String> _recentDateParams({
+    required String mediaType,
+    required int withinDays,
+  }) {
+    final today = DateTime.now();
+    final cutoff = today.subtract(Duration(days: withinDays));
+    final start = cutoff.toIso8601String().split('T').first;
+    final end = today.toIso8601String().split('T').first;
+
+    if (mediaType == 'movie') {
+      return {
+        'primary_release_date.gte': start,
+        'primary_release_date.lte': end,
+      };
+    }
+
+    return {
+      'first_air_date.gte': start,
+      'first_air_date.lte': end,
+    };
+  }
+
+  static Future<List<TmdbResult>> fetchRecentPopularTVSeries({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _discoverMedia(
+        mediaType: 'tv',
+        count: count,
+        params: {
+          ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
+          'without_genres': '16',
+        },
+      );
+
+  static Future<List<TmdbResult>> fetchRecentPopularKoreanDramas({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _discoverMedia(
+        mediaType: 'tv',
+        count: count,
+        params: {
+          ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
+          'with_original_language': 'ko',
+          'without_genres': '16',
+        },
+      );
+
+  static Future<List<TmdbResult>> fetchRecentPopularChineseDramas({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _discoverMedia(
+        mediaType: 'tv',
+        count: count,
+        params: {
+          ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
+          'with_original_language': 'zh',
+          'without_genres': '16',
+        },
+      );
+
+  static Future<List<TmdbResult>> fetchRecentPopularChineseAnimation({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _discoverMedia(
+        mediaType: 'tv',
+        count: count,
+        params: {
+          ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
+          'with_original_language': 'zh',
+          'with_genres': '16',
+        },
+      );
+
+  static Future<List<TmdbResult>> fetchRecentPopularWesternSeries({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _discoverMedia(
+        mediaType: 'tv',
+        count: count,
+        params: {
+          ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
+          'with_original_language': 'en',
+          'without_genres': '16',
+        },
+        predicate: (item) {
+          if (item.originCountries.isEmpty) return true;
+          const western = {'US', 'GB', 'CA', 'AU', 'NZ', 'IE'};
+          return item.originCountries.any(western.contains);
+        },
+      );
 
   /// Cleans titles for better TMDB matching.
   /// Removes "Season X", "Complete", "Version", etc.
@@ -167,12 +387,22 @@ class TmdbService {
       final result = TmdbResult(
         id: hit['id'] as int?,
         englishTitle: (hit['title'] ?? hit['name'] ?? title) as String,
+        originalTitle:
+            (hit['original_title'] ?? hit['original_name'] ?? title) as String,
         overview: (hit['overview'] ?? '') as String,
         posterUrl: hit['poster_path'] != null ? '$_imageBase${hit['poster_path']}' : '',
         backdropUrl: hit['backdrop_path'] != null ? '$_backdropBase${hit['backdrop_path']}' : '',
         voteAverage: ((hit['vote_average'] ?? 0) as num).toDouble(),
         year: hitYear,
         genres: genreIds.cast<String>(),
+        genreIds: (hit['genre_ids'] as List<dynamic>? ?? []).whereType<int>().toList(),
+        mediaType: (hit['media_type'] as String?) ??
+            (hit['title'] != null ? 'movie' : 'tv'),
+        originalLanguage: (hit['original_language'] ?? '') as String,
+        originCountries: (hit['origin_country'] as List<dynamic>? ?? [])
+            .whereType<String>()
+            .toList(),
+        releaseDate: dateStr,
       );
 
       _cache[cacheKey] = result;

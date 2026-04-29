@@ -85,6 +85,25 @@ class FirestoreService {
     await _patch('$_usersPath.json', {'email': email});
   }
 
+  // ── Intro Timestamps ───────────────────────────────────────────────
+
+  static Future<void> saveIntroTimestamp({
+    required String contentId,
+    required int startSeconds,
+    required int endSeconds,
+  }) async {
+    final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
+    await _put('$_usersPath/skipIntros/$safeId.json', {
+      'startSeconds': startSeconds,
+      'endSeconds': endSeconds,
+    });
+  }
+
+  static Future<Map<String, dynamic>?> getIntroTimestamp(String contentId) async {
+    final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
+    return await _get('$_usersPath/skipIntros/$safeId.json');
+  }
+
   // ── Watch History Management ────────────────────────────────────────
 
   static Future<void> clearWatchHistory() async {

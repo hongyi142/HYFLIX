@@ -20,10 +20,10 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final ApiService _api = ApiService();
 
-  List<ContentModel> _latest = [];
-  List<ContentModel> _movies = [];
-  List<ContentModel> _tvSeries = [];
-  List<ContentModel> _animation = [];
+  List<ContentModel> _trendingMovies = [];
+  List<ContentModel> _trendingSeries = [];
+  List<ContentModel> _chineseDramas = [];
+  List<ContentModel> _chineseAnimation = [];
   List<ContentModel> _koreanDramas = [];
   List<ContentModel> _westernSeries = [];
   List<Map<String, dynamic>> _watchHistory = [];
@@ -48,16 +48,16 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadContent() async {
     final results = await Future.wait([
-      _api.fetchLatest(page: 1),
-      _api.fetchMovies(page: 1),
-      _api.fetchTVSeries(page: 1),
-      _api.fetchAnimation(page: 1),
-      _api.fetchKoreanDramas(page: 1),
-      _api.fetchWesternSeries(page: 1),
+      _api.fetchMatchedRecentPopularMovies(),
+      _api.fetchMatchedRecentPopularTVSeries(),
+      _api.fetchMatchedRecentPopularChineseDramas(),
+      _api.fetchMatchedRecentPopularChineseAnimation(),
+      _api.fetchMatchedRecentPopularKoreanDramas(),
+      _api.fetchMatchedRecentPopularWesternSeries(),
     ]);
 
-    // Fetch trending movies for hero section
-    final trendingTmdbResults = await TmdbService.fetchTrendingMovies(count: 8);
+    // Fetch recent popular movies for hero section
+    final trendingTmdbResults = await TmdbService.fetchRecentPopularMovies(count: 8);
 
     // Load watch history for Continue Watching section
     List<Map<String, dynamic>> history = [];
@@ -84,10 +84,10 @@ class _HomePageState extends State<HomePage> {
 
     if (!mounted) return;
     setState(() {
-      _latest = results[0];
-      _movies = results[1];
-      _tvSeries = results[2];
-      _animation = results[3];
+      _trendingMovies = results[0];
+      _trendingSeries = results[1];
+      _chineseDramas = results[2];
+      _chineseAnimation = results[3];
       _koreanDramas = results[4];
       _westernSeries = results[5];
       _watchHistory = history;
@@ -127,7 +127,14 @@ class _HomePageState extends State<HomePage> {
     final heroItems = _trendingItems;
 
     // Continue watching — match watch history with loaded content
-    final allContent = [..._latest, ..._movies, ..._tvSeries, ..._animation, ..._koreanDramas, ..._westernSeries];
+    final allContent = [
+      ..._trendingMovies,
+      ..._trendingSeries,
+      ..._chineseDramas,
+      ..._chineseAnimation,
+      ..._koreanDramas,
+      ..._westernSeries,
+    ];
     final watchingItems = <ContentModel>[];
     for (final history in _watchHistory.take(8)) {
       final title = history['title'] as String? ?? '';
@@ -195,52 +202,61 @@ class _HomePageState extends State<HomePage> {
                   ),
 
                 // ── Movies ────────────────────────────────────────────
-                if (_movies.isNotEmpty)
+                if (_trendingMovies.isNotEmpty)
                   _buildHorizontalSection(
-                    title: 'Popular Movies',
+                    title: 'Top 10 Trending Movies',
                     height: 310,
                     itemWidth: 150,
-                    count: _movies.take(15).length,
-                    builder: (i) => MovieCard(content: _movies[i]),
+                    count: _trendingMovies.take(10).length,
+                    builder: (i) => MovieCard(content: _trendingMovies[i]),
                   ),
 
                 // ── TV Series ─────────────────────────────────────────
-                if (_tvSeries.isNotEmpty)
+                if (_trendingSeries.isNotEmpty)
                   _buildHorizontalSection(
-                    title: 'TV Series',
+                    title: 'Top 10 Trending TV Series',
                     height: 310,
                     itemWidth: 150,
-                    count: _tvSeries.take(15).length,
-                    builder: (i) => MovieCard(content: _tvSeries[i]),
+                    count: _trendingSeries.take(10).length,
+                    builder: (i) => MovieCard(content: _trendingSeries[i]),
                   ),
 
                 // ── Animation ─────────────────────────────────────────
-                if (_animation.isNotEmpty)
+                if (_chineseDramas.isNotEmpty)
                   _buildHorizontalSection(
-                    title: 'Animation',
+                    title: 'Top 10 Trending Chinese Dramas',
                     height: 310,
                     itemWidth: 150,
-                    count: _animation.take(15).length,
-                    builder: (i) => MovieCard(content: _animation[i]),
+                    count: _chineseDramas.take(10).length,
+                    builder: (i) => MovieCard(content: _chineseDramas[i]),
+                  ),
+
+                if (_chineseAnimation.isNotEmpty)
+                  _buildHorizontalSection(
+                    title: 'Top 10 Trending Chinese Animation',
+                    height: 310,
+                    itemWidth: 150,
+                    count: _chineseAnimation.take(10).length,
+                    builder: (i) => MovieCard(content: _chineseAnimation[i]),
                   ),
 
                 // ── Korean Dramas ─────────────────────────────────────
                 if (_koreanDramas.isNotEmpty)
                   _buildHorizontalSection(
-                    title: 'Korean Dramas',
+                    title: 'Top 10 Trending K-Dramas',
                     height: 310,
                     itemWidth: 150,
-                    count: _koreanDramas.take(15).length,
+                    count: _koreanDramas.take(10).length,
                     builder: (i) => MovieCard(content: _koreanDramas[i]),
                   ),
 
                 // ── Western Series ────────────────────────────────────
                 if (_westernSeries.isNotEmpty)
                   _buildHorizontalSection(
-                    title: 'Western & American Series',
+                    title: 'Top 10 Trending Western Series',
                     height: 310,
                     itemWidth: 150,
-                    count: _westernSeries.take(15).length,
+                    count: _westernSeries.take(10).length,
                     builder: (i) => MovieCard(content: _westernSeries[i]),
                   ),
 

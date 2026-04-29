@@ -55,6 +55,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _loadingSubs = false;
   DateTime? _startTime;
   StreamSubscription<bool>? _bufferingSub;
+  StreamSubscription<Duration>? _positionSub;
+  Map<String, dynamic>? _introTimestamp;
+  bool _showSkipIntro = false;
 
   @override
   void initState() {
@@ -65,6 +68,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _player = Player();
     _controller = VideoController(_player);
     _openMedia(widget.videoUrl, seekToSeconds: widget.seekToSeconds);
+    _loadIntroTimestamp();
+    _listenPosition();
     _scheduleHideControls();
   }
 
@@ -88,6 +93,54 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _fetchSubtitles();
     } catch (_) {
       if (mounted) setState(() => _hasError = true);
+    }
+  }
+
+  /// Series-level content ID for intro timestamps (same across all episodes).
+  String get _seriesContentId => widget.tmdbId ?? widget.originalTitle;
+
+  Future<void> _loadIntroTimestamp() async {
+    final data = await UserService.getIntroTimestamp(_seriesContentId);
+    if (data != null && mounted) {
+      setState(() => _introTimestamp = data);
+    }
+  }
+
+  void _listenPosition() {
+    _positionSub = _player.stream.position.listen((pos) {
+      if (!mounted) return;
+      final sec = pos.inSeconds;
+      bool shouldShow = false;
+
+      if (_introTimestamp != null) {
+        // Existing timestamp: show during the intro window
+        final start = (_introTimestamp!['startSeconds'] as num?)?.toInt() ?? 0;
+        final end = (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
+        shouldShow = sec >= start && sec < end;
+      } else {
+        // No timestamp yet: show during first 3 minutes so user can set one
+        shouldShow = sec < 180;
+      }
+
+      if (shouldShow != _showSkipIntro) {
+        setState(() => _showSkipIntro = shouldShow);
+      }
+    });
+  }
+
+  Future<void> _skipIntro() async {
+    final pos = _player.state.position.inSeconds;
+    final end = pos + 90;
+    await UserService.saveIntroTimestamp(
+      contentId: _seriesContentId,
+      startSeconds: pos,
+      endSeconds: end,
+    );
+    if (mounted) {
+      setState(() {
+        _introTimestamp = {'startSeconds': pos, 'endSeconds': end};
+      });
+      _player.seek(Duration(seconds: end));
     }
   }
 
@@ -161,6 +214,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _availableSubs = [];
     });
     _openMedia(ep.url);
+    _loadIntroTimestamp();
   }
 
   void _scheduleHideControls() {
@@ -177,6 +231,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void dispose() {
     _bufferingSub?.cancel();
+    _positionSub?.cancel();
     _player.dispose();
     super.dispose();
   }
@@ -225,6 +280,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       onKeyEvent: (e) {
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) _exitPlayer();
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.space) _player.playOrPause();
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) _skipIntro();
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -264,6 +320,52 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 child: IgnorePointer(
                   ignoring: !_showControls,
                   child: _buildControls(context, currentEpName, hasEpisodes),
+                ),
+              ),
+
+              // Skip Intro button (bottom-left, first 3 minutes)
+              Positioned(
+                bottom: 100,
+                left: 24,
+                child: AnimatedOpacity(
+                  opacity: _showSkipIntro ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: _showSkipIntro
+                      ? GestureDetector(
+                          onTap: _skipIntro,
+                          child: StreamBuilder<Duration>(
+                            stream: _player.stream.position,
+                            builder: (context, snap) {
+                              final pos = snap.data ?? Duration.zero;
+                              final mins = pos.inMinutes;
+                              final secs = pos.inSeconds % 60;
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.7),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(LucideIcons.skipForward, color: Colors.white, size: 16),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Skip Intro $mins:${secs.toString().padLeft(2, '0')}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        )
+                      : const SizedBox(),
                 ),
               ),
 

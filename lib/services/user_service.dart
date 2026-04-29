@@ -67,4 +67,20 @@ class UserService {
   static Future<void> clearWatchHistory() async {
     await FirestoreService.clearWatchHistory();
   }
+
+  static Future<void> saveIntroTimestamp({
+    required String contentId,
+    required int startSeconds,
+    required int endSeconds,
+  }) async {
+    await FirestoreService.saveIntroTimestamp(
+      contentId: contentId,
+      startSeconds: startSeconds,
+      endSeconds: endSeconds,
+    );
+  }
+
+  static Future<Map<String, dynamic>?> getIntroTimestamp(String contentId) async {
+    return await FirestoreService.getIntroTimestamp(contentId);
+  }
 }
