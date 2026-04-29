@@ -55,4 +55,16 @@ class UserService {
   static Future<List<String>> getFavouriteIds() async {
     return await FirestoreService.getFavouriteIds();
   }
+
+  static Future<void> updateDisplayName(String displayName) async {
+    await FirestoreService.updateDisplayName(displayName);
+  }
+
+  static Future<void> updateEmail(String email) async {
+    await FirestoreService.updateEmail(email);
+  }
+
+  static Future<void> clearWatchHistory() async {
+    await FirestoreService.clearWatchHistory();
+  }
 }

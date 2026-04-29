@@ -177,18 +177,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void dispose() {
     _bufferingSub?.cancel();
-    _saveWatchData();
     _player.dispose();
     super.dispose();
   }
 
-  void _saveWatchData() {
+  Future<void> _exitPlayer() async {
+    await _saveWatchData();
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _saveWatchData() async {
     if (AuthService.uid == null) return;
     final elapsed = _startTime != null ? DateTime.now().difference(_startTime!).inSeconds : 0;
     if (elapsed > 5) {
       UserService.addWatchTime(elapsed);
     }
-    // Calculate actual progress from player position/duration
+    // Capture player state before disposal
     final position = _player.state.position;
     final duration = _player.state.duration;
     final progress = duration.inSeconds > 0
@@ -196,7 +200,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         : 0.0;
     final currentEp = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
     if (currentEp != null || widget.videoUrl.isNotEmpty) {
-      UserService.saveWatchHistory(
+      await UserService.saveWatchHistory(
         contentId: widget.tmdbId ?? widget.title,
         title: widget.title,
         posterUrl: widget.posterUrl,
@@ -219,7 +223,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       focusNode: FocusNode()..requestFocus(),
       autofocus: true,
       onKeyEvent: (e) {
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) Navigator.pop(context);
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) _exitPlayer();
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.space) _player.playOrPause();
       },
       child: Scaffold(
@@ -300,7 +304,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           const SizedBox(height: 16),
           const Text('Failed to load stream.', style: TextStyle(color: Colors.white, fontSize: 18)),
           const SizedBox(height: 24),
-          TextButton(onPressed: () => Navigator.pop(context),
+          TextButton(onPressed: _exitPlayer,
               child: const Text('Go Back', style: TextStyle(color: AppTheme.accent, fontSize: 16))),
         ],
       ),
@@ -325,7 +329,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             child: Row(
               children: [
                 GestureDetector(
-                  onTap: () => Navigator.pop(context),
+                  onTap: _exitPlayer,
                   child: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(

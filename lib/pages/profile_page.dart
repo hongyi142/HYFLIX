@@ -5,6 +5,7 @@ import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/tmdb_service.dart';
+import 'settings_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -113,6 +114,21 @@ class _ProfilePageState extends State<ProfilePage> {
             style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
           ),
           const Spacer(),
+          // Settings
+          GestureDetector(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage()))
+                .then((_) => _loadData()),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.cardDark,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: const Icon(LucideIcons.settings, color: AppTheme.textSecondary, size: 20),
+            ),
+          ),
+          const SizedBox(width: 10),
           // Sign out
           GestureDetector(
             onTap: _signOut,
@@ -133,7 +149,10 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildProfileInfo() {
     final email = _profile?.email ?? '';
-    final username = email.contains('@') ? email.split('@').first : (_profile?.displayName ?? 'User');
+    final displayName = _profile?.displayName ?? '';
+    final username = displayName.isNotEmpty
+        ? displayName
+        : (email.contains('@') ? email.split('@').first : 'User');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),

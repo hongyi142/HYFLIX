@@ -75,6 +75,22 @@ class FirestoreService {
     return items;
   }
 
+  // ── Profile Updates ──────────────────────────────────────────────────
+
+  static Future<void> updateDisplayName(String displayName) async {
+    await _patch('$_usersPath.json', {'displayName': displayName});
+  }
+
+  static Future<void> updateEmail(String email) async {
+    await _patch('$_usersPath.json', {'email': email});
+  }
+
+  // ── Watch History Management ────────────────────────────────────────
+
+  static Future<void> clearWatchHistory() async {
+    await _put('$_usersPath/watchHistory.json', {});
+  }
+
   // ── Watch Time ───────────────────────────────────────────────────────
 
   static Future<void> addWatchTime(int seconds) async {

@@ -11,7 +11,8 @@ import '../services/tmdb_service.dart';
 
 class VideoCard extends StatefulWidget {
   final ContentModel content;
-  const VideoCard({super.key, required this.content});
+  final VoidCallback? onWatchHistoryChanged;
+  const VideoCard({super.key, required this.content, this.onWatchHistoryChanged});
 
   @override
   State<VideoCard> createState() => _VideoCardState();
@@ -117,9 +118,10 @@ class _VideoCardState extends State<VideoCard> {
               posterUrl: widget.content.thumbnailUrl,
               seekToSeconds: widget.content.resumePositionSeconds ?? 0,
             ),
-          ));
+          )).then((_) => widget.onWatchHistoryChanged?.call());
         } else {
-          DetailPage.show(context, widget.content, initialTmdb: _tmdbResult);
+          DetailPage.show(context, widget.content, initialTmdb: _tmdbResult)
+              .then((_) => widget.onWatchHistoryChanged?.call());
         }
       },
       child: MouseRegion(

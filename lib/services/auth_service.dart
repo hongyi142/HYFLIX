@@ -199,15 +199,13 @@ class AuthService {
         _idToken = body['id_token'];
         _refreshToken = body['refresh_token'];
         _uid = body['user_id'];
-        // Restore email and displayName from SharedPreferences if not set
+        // Always fetch fresh user info from Firebase Auth after refresh
+        await _fetchUserInfo();
+        // Fallback to SharedPreferences if Firebase Auth didn't return values
         if (_email == null || _displayName == null) {
           final prefs = await SharedPreferences.getInstance();
           _email ??= prefs.getString('fb_email');
           _displayName ??= prefs.getString('fb_displayName');
-        }
-        // Fetch fresh user info from Firebase Auth if still missing
-        if (_email == null || _displayName == null) {
-          await _fetchUserInfo();
         }
         await _saveToPrefs();
       } else {
@@ -239,11 +237,126 @@ class AuthService {
         final body = json.decode(res.body);
         final users = body['users'] as List?;
         if (users != null && users.isNotEmpty) {
-          _displayName = users[0]['displayName'];
-          _email = users[0]['email'];
+          final fbDisplayName = users[0]['displayName'] as String?;
+          final fbEmail = users[0]['email'] as String?;
+          // Only use Firebase Auth values as fallback — don't overwrite
+          // a displayName that was just updated via settings
+          if (_displayName == null || _displayName!.isEmpty) {
+            _displayName = fbDisplayName;
+          }
+          if (_email == null || _email!.isEmpty) {
+            _email = fbEmail;
+          }
         }
       }
     } catch (_) {}
+  }
+
+  // ── Update Profile ──────────────────────────────────────────────────
+
+  static Future<void> updateDisplayName(String newDisplayName) async {
+    if (_idToken == null) throw Exception('Not authenticated');
+    try {
+      final res = await http.post(
+        Uri.parse('$_authBase:update?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'idToken': _idToken,
+          'displayName': newDisplayName,
+          'returnSecureToken': true,
+        }),
+      );
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        _idToken = body['idToken'];
+        // accounts:update does NOT return refreshToken — preserve the existing one
+        _displayName = newDisplayName;
+        await _saveToPrefs();
+      } else {
+        final body = json.decode(res.body);
+        throw Exception(body['error']?['message'] ?? 'Failed to update display name');
+      }
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('Failed to update display name');
+    }
+  }
+
+  static Future<void> updateEmail(String newEmail, String password) async {
+    if (_idToken == null) throw Exception('Not authenticated');
+    try {
+      // Re-authenticate first
+      await _reauthenticate(password);
+      // Update email
+      final res = await http.post(
+        Uri.parse('$_authBase:update?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'idToken': _idToken,
+          'email': newEmail,
+          'returnSecureToken': true,
+        }),
+      );
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        _idToken = body['idToken'];
+        // accounts:update does NOT return refreshToken — preserve the existing one
+        _email = newEmail;
+        await _saveToPrefs();
+      } else {
+        final body = json.decode(res.body);
+        throw Exception(body['error']?['message'] ?? 'Failed to update email');
+      }
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('Failed to update email');
+    }
+  }
+
+  static Future<void> updatePassword(String newPassword, String currentPassword) async {
+    if (_idToken == null) throw Exception('Not authenticated');
+    try {
+      // Re-authenticate first
+      await _reauthenticate(currentPassword);
+      // Update password
+      final res = await http.post(
+        Uri.parse('$_authBase:update?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'idToken': _idToken,
+          'password': newPassword,
+          'returnSecureToken': true,
+        }),
+      );
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        _idToken = body['idToken'];
+        // accounts:update does NOT return refreshToken — preserve the existing one
+        await _saveToPrefs();
+      } else {
+        final body = json.decode(res.body);
+        throw Exception(body['error']?['message'] ?? 'Failed to update password');
+      }
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('Failed to update password');
+    }
+  }
+
+  static Future<void> _reauthenticate(String password) async {
+    if (_email == null) throw Exception('No email available');
+    final res = await http.post(
+      Uri.parse('$_authBase:signInWithPassword?key=$_apiKey'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'email': _email,
+        'password': password,
+        'returnSecureToken': true,
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Current password is incorrect');
+    }
   }
 
   // ── Sign Out ─────────────────────────────────────────────────────────

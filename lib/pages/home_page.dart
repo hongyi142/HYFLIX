@@ -97,6 +97,15 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _refreshWatchHistory() async {
+    if (!AuthService.isLoggedIn) return;
+    final history = await UserService.getWatchHistory();
+    if (!mounted) return;
+    setState(() {
+      _watchHistory = history;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -179,7 +188,10 @@ class _HomePageState extends State<HomePage> {
                     height: 220,
                     itemWidth: 280,
                     count: watchingItems.length,
-                    builder: (i) => VideoCard(content: watchingItems[i]),
+                    builder: (i) => VideoCard(
+                      content: watchingItems[i],
+                      onWatchHistoryChanged: _refreshWatchHistory,
+                    ),
                   ),
 
                 // ── Movies ────────────────────────────────────────────
