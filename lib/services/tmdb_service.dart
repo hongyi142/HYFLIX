@@ -41,6 +41,48 @@ class TmdbService {
 
   static final Map<String, TmdbResult?> _cache = {};
 
+  /// Fetches top trending movies from TMDB for the current period.
+  static Future<List<TmdbResult>> fetchTrendingMovies({int count = 8}) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+
+    try {
+      final uri = Uri.https('api.themoviedb.org', '/3/trending/movie/week', {
+        'api_key': tmdbApiKey,
+        'language': 'en-US',
+      });
+
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return [];
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final results = (body['results'] as List<dynamic>? ?? []);
+
+      return results.take(count).map((hit) {
+        final genreIds = (hit['genre_ids'] as List<dynamic>? ?? [])
+            .map((id) => _genreNames[id as int] ?? '')
+            .where((g) => g.isNotEmpty)
+            .take(3)
+            .toList();
+
+        final dateStr = (hit['release_date'] ?? '') as String;
+        final hitYear = dateStr.length >= 4 ? dateStr.substring(0, 4) : '';
+
+        return TmdbResult(
+          id: hit['id'] as int?,
+          englishTitle: (hit['title'] ?? hit['name'] ?? '') as String,
+          overview: (hit['overview'] ?? '') as String,
+          posterUrl: hit['poster_path'] != null ? '$_imageBase${hit['poster_path']}' : '',
+          backdropUrl: hit['backdrop_path'] != null ? '$_backdropBase${hit['backdrop_path']}' : '',
+          voteAverage: ((hit['vote_average'] ?? 0) as num).toDouble(),
+          year: hitYear,
+          genres: genreIds.cast<String>(),
+        );
+      }).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Cleans titles for better TMDB matching.
   /// Removes "Season X", "Complete", "Version", etc.
   static String _cleanTitle(String title) {

@@ -132,6 +132,9 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildProfileInfo() {
+    final email = _profile?.email ?? '';
+    final username = email.contains('@') ? email.split('@').first : (_profile?.displayName ?? 'User');
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
       child: Row(
@@ -145,7 +148,7 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             child: Center(
               child: Text(
-                (_profile?.displayName.isNotEmpty == true ? _profile!.displayName[0] : 'U').toUpperCase(),
+                (username.isNotEmpty ? username[0] : 'U').toUpperCase(),
                 style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w800),
               ),
             ),
@@ -157,17 +160,17 @@ class _ProfilePageState extends State<ProfilePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _profile?.displayName ?? 'User',
+                  username,
                   style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '@${(_profile?.displayName ?? 'user').toLowerCase().replaceAll(' ', '')}',
+                  '@${username.toLowerCase().replaceAll(' ', '')}',
                   style: const TextStyle(color: AppTheme.accent, fontSize: 14, fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _profile?.email ?? '',
+                  email,
                   style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                 ),
               ],

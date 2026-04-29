@@ -40,6 +40,8 @@ class FirestoreService {
     required String posterUrl,
     required double progress,
     String originalTitle = '',
+    int episodeIndex = 0,
+    int positionSeconds = 0,
   }) async {
     final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
     await _put('$_usersPath/watchHistory/$safeId.json', {
@@ -47,6 +49,8 @@ class FirestoreService {
       'originalTitle': originalTitle,
       'posterUrl': posterUrl,
       'progress': progress,
+      'episodeIndex': episodeIndex,
+      'positionSeconds': positionSeconds,
       'lastWatched': DateTime.now().toUtc().toIso8601String(),
     });
   }

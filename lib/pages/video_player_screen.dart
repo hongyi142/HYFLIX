@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final bool isTvShow;
   final int? seasonNumber;
   final String posterUrl;
+  final int seekToSeconds;
 
   const VideoPlayerScreen({
     super.key,
@@ -32,6 +34,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.isTvShow = false,
     this.seasonNumber,
     this.posterUrl = '',
+    this.seekToSeconds = 0,
   });
 
   @override
@@ -51,6 +54,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   SubtitleItem? _selectedSub;
   bool _loadingSubs = false;
   DateTime? _startTime;
+  StreamSubscription<bool>? _bufferingSub;
 
   @override
   void initState() {
@@ -60,13 +64,27 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _currentTitle = widget.title;
     _player = Player();
     _controller = VideoController(_player);
-    _openMedia(widget.videoUrl);
+    _openMedia(widget.videoUrl, seekToSeconds: widget.seekToSeconds);
     _scheduleHideControls();
   }
 
-  Future<void> _openMedia(String url) async {
+  Future<void> _openMedia(String url, {int seekToSeconds = 0}) async {
     try {
+      _bufferingSub?.cancel();
       await _player.open(Media(url));
+      // Wait for the player to finish buffering before seeking
+      if (seekToSeconds > 0) {
+        bool hasSeeked = false;
+        _bufferingSub = _player.stream.buffering.listen((buffering) {
+          if (!buffering && !hasSeeked && mounted) {
+            hasSeeked = true;
+            _player.seek(Duration(seconds: seekToSeconds));
+            _bufferingSub?.cancel();
+          }
+        });
+        // Also try immediate seek in case player is already ready
+        await _player.seek(Duration(seconds: seekToSeconds));
+      }
       _fetchSubtitles();
     } catch (_) {
       if (mounted) setState(() => _hasError = true);
@@ -158,6 +176,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _bufferingSub?.cancel();
     _saveWatchData();
     _player.dispose();
     super.dispose();
@@ -183,6 +202,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         posterUrl: widget.posterUrl,
         progress: progress,
         originalTitle: widget.originalTitle,
+        episodeIndex: _currentEpIndex,
+        positionSeconds: position.inSeconds,
       );
     }
   }

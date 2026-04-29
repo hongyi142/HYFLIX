@@ -9,7 +9,8 @@ import 'buttons.dart';
 
 class HeroSection extends StatefulWidget {
   final List<ContentModel> featuredContent;
-  const HeroSection({super.key, required this.featuredContent});
+  final Map<int, TmdbResult>? preloadedTmdb;
+  const HeroSection({super.key, required this.featuredContent, this.preloadedTmdb});
 
   @override
   State<HeroSection> createState() => _HeroSectionState();
@@ -24,7 +25,11 @@ class _HeroSectionState extends State<HeroSection> {
   @override
   void initState() {
     super.initState();
-    _preloadTmdb();
+    if (widget.preloadedTmdb != null && widget.preloadedTmdb!.isNotEmpty) {
+      _tmdbCache.addAll(widget.preloadedTmdb!);
+    } else {
+      _preloadTmdb();
+    }
     _startAutoCarousel();
   }
 

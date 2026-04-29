@@ -18,6 +18,8 @@ class UserService {
     required String posterUrl,
     required double progress,
     String originalTitle = '',
+    int episodeIndex = 0,
+    int positionSeconds = 0,
   }) async {
     await FirestoreService.saveWatchHistory(
       contentId: contentId,
@@ -25,6 +27,8 @@ class UserService {
       posterUrl: posterUrl,
       progress: progress,
       originalTitle: originalTitle,
+      episodeIndex: episodeIndex,
+      positionSeconds: positionSeconds,
     );
   }
 

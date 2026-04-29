@@ -199,6 +199,16 @@ class AuthService {
         _idToken = body['id_token'];
         _refreshToken = body['refresh_token'];
         _uid = body['user_id'];
+        // Restore email and displayName from SharedPreferences if not set
+        if (_email == null || _displayName == null) {
+          final prefs = await SharedPreferences.getInstance();
+          _email ??= prefs.getString('fb_email');
+          _displayName ??= prefs.getString('fb_displayName');
+        }
+        // Fetch fresh user info from Firebase Auth if still missing
+        if (_email == null || _displayName == null) {
+          await _fetchUserInfo();
+        }
         await _saveToPrefs();
       } else {
         // Token refresh failed, clear session

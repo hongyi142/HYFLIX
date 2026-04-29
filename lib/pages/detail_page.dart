@@ -160,7 +160,7 @@ class _DetailPageState extends State<DetailPage> {
                               const SizedBox(height: 16),
                               Text(
                                 overview.isNotEmpty ? overview : 'No description available.',
-                                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.6, decoration: TextDecoration.none),
+                                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.6, fontWeight: FontWeight.normal, decoration: TextDecoration.none),
                               ),
                             ],
                           ),
@@ -493,19 +493,6 @@ class _DetailPageState extends State<DetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Match info
-        Material(
-          type: MaterialType.transparency,
-          child: Row(
-            children: [
-              const Text('This show is: ',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, decoration: TextDecoration.none)),
-              Text(genres.isNotEmpty ? genres.first : 'Drama',
-                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600, decoration: TextDecoration.none)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
         // Genres
         if (genres.isNotEmpty) ...[
           _sidebarRow('Genres:', genres.join(', ')),

@@ -11,6 +11,8 @@ class ContentModel {
   final double rating;
   final double progress;
   final String year;
+  final int? resumeEpisodeIndex;
+  final int? resumePositionSeconds;
 
   const ContentModel({
     required this.title,
@@ -23,6 +25,8 @@ class ContentModel {
     this.rating = 0.0,
     this.progress = 0.0,
     this.year = '',
+    this.resumeEpisodeIndex,
+    this.resumePositionSeconds,
   });
 
   ContentModel copyWith({
@@ -36,6 +40,8 @@ class ContentModel {
     double? rating,
     double? progress,
     String? year,
+    int? resumeEpisodeIndex,
+    int? resumePositionSeconds,
   }) {
     return ContentModel(
       title: title ?? this.title,
@@ -48,6 +54,8 @@ class ContentModel {
       rating: rating ?? this.rating,
       progress: progress ?? this.progress,
       year: year ?? this.year,
+      resumeEpisodeIndex: resumeEpisodeIndex ?? this.resumeEpisodeIndex,
+      resumePositionSeconds: resumePositionSeconds ?? this.resumePositionSeconds,
     );
   }
 }

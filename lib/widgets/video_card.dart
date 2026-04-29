@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
+import '../pages/video_player_screen.dart';
 import '../services/tmdb_service.dart';
 
 class VideoCard extends StatefulWidget {
@@ -97,7 +98,30 @@ class _VideoCardState extends State<VideoCard> {
         : widget.content.description;
 
     return GestureDetector(
-      onTap: () => DetailPage.show(context, widget.content, initialTmdb: _tmdbResult),
+      onTap: () {
+        // If this is a continue watching item with resume data, go directly to the player
+        if (widget.content.resumeEpisodeIndex != null && widget.content.m3u8Url.isNotEmpty) {
+          final epIndex = widget.content.resumeEpisodeIndex!;
+          final videoUrl = widget.content.episodes.isNotEmpty && epIndex < widget.content.episodes.length
+              ? widget.content.episodes[epIndex].url
+              : widget.content.m3u8Url;
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => VideoPlayerScreen(
+              videoUrl: videoUrl,
+              title: displayTitle,
+              originalTitle: widget.content.title,
+              episodes: widget.content.episodes,
+              initialEpisodeIndex: epIndex,
+              tmdbId: _tmdbResult?.id?.toString(),
+              isTvShow: widget.content.episodes.length > 1,
+              posterUrl: widget.content.thumbnailUrl,
+              seekToSeconds: widget.content.resumePositionSeconds ?? 0,
+            ),
+          ));
+        } else {
+          DetailPage.show(context, widget.content, initialTmdb: _tmdbResult);
+        }
+      },
       child: MouseRegion(
         onEnter: (_) => _onEnter(),
         onExit: (_) => _onExit(),

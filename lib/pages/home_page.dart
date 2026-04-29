@@ -4,6 +4,7 @@ import '../models/content_model.dart';
 import '../services/api_service.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../services/tmdb_service.dart';
 import '../widgets/navbar.dart';
 import '../widgets/hero_card.dart';
 import '../widgets/video_card.dart';
@@ -26,6 +27,8 @@ class _HomePageState extends State<HomePage> {
   List<ContentModel> _koreanDramas = [];
   List<ContentModel> _westernSeries = [];
   List<Map<String, dynamic>> _watchHistory = [];
+  List<ContentModel> _trendingItems = [];
+  Map<int, TmdbResult> _trendingTmdb = {};
   bool _isLoading = true;
 
   final ScrollController _scrollController = ScrollController();
@@ -53,10 +56,30 @@ class _HomePageState extends State<HomePage> {
       _api.fetchWesternSeries(page: 1),
     ]);
 
+    // Fetch trending movies for hero section
+    final trendingTmdbResults = await TmdbService.fetchTrendingMovies(count: 8);
+
     // Load watch history for Continue Watching section
     List<Map<String, dynamic>> history = [];
     if (AuthService.isLoggedIn) {
       history = await UserService.getWatchHistory();
+    }
+
+    // Convert trending TMDB results to ContentModel for hero section
+    final trendingItems = <ContentModel>[];
+    final trendingTmdbMap = <int, TmdbResult>{};
+    for (int i = 0; i < trendingTmdbResults.length; i++) {
+      final tmdb = trendingTmdbResults[i];
+      trendingTmdbMap[i] = tmdb;
+      trendingItems.add(ContentModel(
+        title: tmdb.englishTitle,
+        description: tmdb.overview,
+        thumbnailUrl: tmdb.posterUrl,
+        bannerUrl: tmdb.backdropUrl.isNotEmpty ? tmdb.backdropUrl : tmdb.posterUrl,
+        m3u8Url: '',
+        year: tmdb.year,
+        rating: tmdb.voteAverage,
+      ));
     }
 
     if (!mounted) return;
@@ -68,6 +91,8 @@ class _HomePageState extends State<HomePage> {
       _koreanDramas = results[4];
       _westernSeries = results[5];
       _watchHistory = history;
+      _trendingItems = trendingItems;
+      _trendingTmdb = trendingTmdbMap;
       _isLoading = false;
     });
   }
@@ -90,7 +115,7 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    final heroItems = _latest.where((c) => c.m3u8Url.isNotEmpty).take(6).toList();
+    final heroItems = _trendingItems;
 
     // Continue watching — match watch history with loaded content
     final allContent = [..._latest, ..._movies, ..._tvSeries, ..._animation, ..._koreanDramas, ..._westernSeries];
@@ -107,7 +132,13 @@ class _HomePageState extends State<HomePage> {
       }
       match ??= allContent.where((c) => c.title == title).firstOrNull;
       if (match != null) {
-        watchingItems.add(match.copyWith(progress: progress));
+        final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
+        final positionSeconds = (history['positionSeconds'] as num?)?.toInt() ?? 0;
+        watchingItems.add(match.copyWith(
+          progress: progress,
+          resumeEpisodeIndex: episodeIndex,
+          resumePositionSeconds: positionSeconds,
+        ));
       } else if (title.isNotEmpty) {
         // Fallback: create a minimal ContentModel from history data
         watchingItems.add(ContentModel(
@@ -139,7 +170,7 @@ class _HomePageState extends State<HomePage> {
 
                 // ── Hero ──────────────────────────────────────────────
                 if (heroItems.isNotEmpty)
-                  HeroSection(featuredContent: heroItems),
+                  HeroSection(featuredContent: heroItems, preloadedTmdb: _trendingTmdb),
 
                 // ── Continue Watching ─────────────────────────────────
                 if (watchingItems.isNotEmpty)
