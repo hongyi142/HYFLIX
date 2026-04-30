@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
 import 'tmdb_service.dart';
@@ -14,6 +15,11 @@ class ApiService {
 
   static final Map<String, List<Map<String, dynamic>>> _rawSearchCache = {};
   static final Map<String, ContentModel?> _tmdbMatchCache = {};
+  static SharedPreferences? _prefs;
+
+  static Future<void> init() async {
+    _prefs ??= await SharedPreferences.getInstance();
+  }
 
   /// Parse ALL episodes from vod_play_url. Format: "EpName$url#EpName$url#..."
   static List<Episode> _parseEpisodes(String playUrl, {String imageUrl = ''}) {
@@ -70,6 +76,52 @@ class ApiService {
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff\uac00-\ud7af]'), '');
 
+  static int _extractSeason(String title, String subtitle) {
+    final match = RegExp(r'第([一二三四五六七八九十\d]+)季').firstMatch(title) 
+               ?? RegExp(r'第([一二三四五六七八九十\d]+)季').firstMatch(subtitle);
+    if (match != null) {
+      final s = match.group(1)!;
+      if (RegExp(r'^\d+$').hasMatch(s)) return int.tryParse(s) ?? 1;
+      const cnNums = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10};
+      return cnNums[s] ?? 1;
+    }
+    final sMatch = RegExp(r'[Ss]([0-9]{1,2})').firstMatch(title) 
+                ?? RegExp(r'[Ss]([0-9]{1,2})').firstMatch(subtitle);
+    if (sMatch != null) {
+      return int.tryParse(sMatch.group(1)!) ?? 1;
+    }
+    return 1;
+  }
+
+  static List<ContentModel> _groupSeasons(List<ContentModel> items) {
+    final map = <String, ContentModel>{};
+    for (final item in items) {
+      final baseTitle = TmdbService.cleanTitle(item.title);
+      final seasonNum = _extractSeason(item.title, item.subtitle);
+      final updatedEpisodes = item.episodes.map((ep) {
+        if (!ep.name.contains(RegExp(r'第\d+季'))) {
+          return Episode(name: '第$seasonNum季 ${ep.name}', url: ep.url, imageUrl: ep.imageUrl);
+        }
+        return ep;
+      }).toList();
+      if (map.containsKey(baseTitle)) {
+        final existing = map[baseTitle]!;
+        map[baseTitle] = existing.copyWith(
+          episodes: [...existing.episodes, ...updatedEpisodes],
+          thumbnailUrl: seasonNum > _extractSeason(existing.title, existing.subtitle) 
+              ? item.thumbnailUrl 
+              : existing.thumbnailUrl,
+        );
+      } else {
+        map[baseTitle] = item.copyWith(
+          title: baseTitle,
+          episodes: updatedEpisodes,
+        );
+      }
+    }
+    return map.values.toList();
+  }
+
   static bool _containsCjk(String value) =>
       RegExp(r'[\u4e00-\u9fff]').hasMatch(value);
 
@@ -115,10 +167,11 @@ class ApiService {
       if (res.statusCode != 200) return [];
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
-      return list
+      final items = list
           .map((e) => _fromJson(e as Map<String, dynamic>))
           .where((c) => c.m3u8Url.isNotEmpty && c.thumbnailUrl.isNotEmpty)
           .toList();
+      return _groupSeasons(items);
     } catch (_) {
       return [];
     }
@@ -258,11 +311,13 @@ class ApiService {
 
     Map<String, dynamic>? best;
     var bestScore = -1;
+    final scoredItems = <Map<String, dynamic>, int>{};
 
     for (final item in candidates) {
       final raw = item['raw'] as Map<String, dynamic>;
       final query = item['query'] as String;
       final score = _scoreRawMatch(raw, tmdb, query: query);
+      scoredItems[raw] = score;
       if (score > bestScore) {
         bestScore = score;
         best = raw;
@@ -277,6 +332,7 @@ class ApiService {
         final raw = item['raw'] as Map<String, dynamic>;
         final query = item['query'] as String;
         final score = _scoreRawMatch(raw, tmdb, query: query);
+        scoredItems[raw] = score;
         if (score > bestScore) {
           bestScore = score;
           best = raw;
@@ -289,31 +345,77 @@ class ApiService {
       return null;
     }
 
-    final content = _fromJson(best);
-    _tmdbMatchCache[cacheKey] = content;
-    return content;
+    final bestModel = _fromJson(best);
+    final bestBaseTitle = TmdbService.cleanTitle(bestModel.title);
+    
+    final modelsToMerge = <ContentModel>[];
+    for (final entry in scoredItems.entries) {
+      if (entry.value >= 30) {
+        final model = _fromJson(entry.key);
+        if (TmdbService.cleanTitle(model.title) == bestBaseTitle) {
+          modelsToMerge.add(model);
+        }
+      }
+    }
+
+    final grouped = _groupSeasons(modelsToMerge);
+    final finalContent = grouped.isNotEmpty ? grouped.first : bestModel;
+
+    _tmdbMatchCache[cacheKey] = finalContent;
+    return finalContent;
   }
 
   Future<List<ContentModel>> _matchTmdbShelf(
     Future<List<TmdbResult>> tmdbFuture, {
     required int count,
+    required String cacheKey,
   }) async {
+    final prefs = _prefs;
+    if (prefs != null) {
+      final cachedJson = prefs.getString(cacheKey);
+      final cacheTime = prefs.getInt('${cacheKey}_time') ?? 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      // Cache valid for 12 hours
+      if (cachedJson != null && (now - cacheTime) < 12 * 60 * 60 * 1000) {
+        try {
+          final list = json.decode(cachedJson) as List<dynamic>;
+          final cachedModels = list.map((e) => ContentModel.fromJson(e as Map<String, dynamic>)).toList();
+          if (cachedModels.isNotEmpty) return cachedModels;
+        } catch (_) {}
+      }
+    }
+
     final tmdbItems = await tmdbFuture;
     final matches = <ContentModel>[];
     final seenTitles = <String>{};
 
-    for (final tmdb in tmdbItems) {
-      final match = await matchTmdbToProvider(tmdb);
-      if (match == null) continue;
+    const batchSize = 5;
+    for (var i = 0; i < tmdbItems.length; i += batchSize) {
+      final chunk = tmdbItems.skip(i).take(batchSize);
+      final chunkResults = await Future.wait(
+        chunk.map((tmdb) => matchTmdbToProvider(tmdb)),
+      );
 
-      final titleKey = _normalizeText(match.title);
-      if (titleKey.isEmpty || !seenTitles.add(titleKey)) continue;
+      for (final match in chunkResults) {
+        if (match == null) continue;
 
-      matches.add(match);
+        final titleKey = _normalizeText(match.title);
+        if (titleKey.isEmpty || !seenTitles.add(titleKey)) continue;
+
+        matches.add(match);
+      }
+
       if (matches.length >= count) break;
     }
 
-    return matches;
+    final finalMatches = matches.take(count).toList();
+    
+    if (prefs != null && finalMatches.isNotEmpty) {
+      prefs.setString(cacheKey, json.encode(finalMatches.map((e) => e.toJson()).toList()));
+      prefs.setInt('${cacheKey}_time', DateTime.now().millisecondsSinceEpoch);
+    }
+
+    return finalMatches;
   }
 
   Future<List<ContentModel>> fetchMatchedRecentPopularMovies({
@@ -326,6 +428,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
+        cacheKey: 'cache_movies',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularTVSeries({
@@ -338,6 +441,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
+        cacheKey: 'cache_tv_series',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularChineseDramas({
@@ -350,6 +454,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
+        cacheKey: 'cache_cn_dramas',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularChineseAnimation({
@@ -362,6 +467,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
+        cacheKey: 'cache_cn_anim',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularKoreanDramas({
@@ -374,6 +480,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
+        cacheKey: 'cache_kr_dramas',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularWesternSeries({
@@ -386,6 +493,20 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
+        cacheKey: 'cache_western',
+      );
+
+  Future<List<ContentModel>> fetchMatchedRecentPopularHongKongSeries({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _matchTmdbShelf(
+        TmdbService.fetchRecentPopularHongKongSeries(
+          count: count * 3,
+          withinDays: withinDays,
+        ),
+        count: count,
+        cacheKey: 'cache_hk_series',
       );
 
   Future<List<ContentModel>> fetchLatest({int page = 1}) =>
@@ -396,6 +517,10 @@ class ApiService {
       _fetch(Uri.parse('$_baseUrl?ac=videolist&t=2&pg=$page'));
   Future<List<ContentModel>> fetchAnimation({int page = 1}) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&t=4&pg=$page'));
+  Future<List<ContentModel>> fetchChineseDramas({int page = 1}) =>
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=13&pg=$page'));
+  Future<List<ContentModel>> fetchHongKongSeries({int page = 1}) =>
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=14&pg=$page'));
   Future<List<ContentModel>> fetchKoreanDramas({int page = 1}) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&t=18&pg=$page'));
   Future<List<ContentModel>> fetchWesternSeries({int page = 1}) =>

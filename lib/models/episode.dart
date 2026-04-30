@@ -4,4 +4,16 @@ class Episode {
   final String imageUrl;
 
   const Episode({required this.name, required this.url, this.imageUrl = ''});
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'url': url,
+        'imageUrl': imageUrl,
+      };
+
+  factory Episode.fromJson(Map<String, dynamic> json) => Episode(
+        name: json['name'] as String? ?? '',
+        url: json['url'] as String? ?? '',
+        imageUrl: json['imageUrl'] as String? ?? '',
+      );
 }

@@ -89,13 +89,11 @@ class FirestoreService {
 
   static Future<void> saveIntroTimestamp({
     required String contentId,
-    required int startSeconds,
-    required int endSeconds,
+    required int skipDuration,
   }) async {
     final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
-    await _put('$_usersPath/skipIntros/$safeId.json', {
-      'startSeconds': startSeconds,
-      'endSeconds': endSeconds,
+    await _patch('$_usersPath/skipIntros/$safeId.json', {
+      'skipDuration': skipDuration,
     });
   }
 

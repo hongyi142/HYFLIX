@@ -70,13 +70,11 @@ class UserService {
 
   static Future<void> saveIntroTimestamp({
     required String contentId,
-    required int startSeconds,
-    required int endSeconds,
+    required int skipDuration,
   }) async {
     await FirestoreService.saveIntroTimestamp(
       contentId: contentId,
-      startSeconds: startSeconds,
-      endSeconds: endSeconds,
+      skipDuration: skipDuration,
     );
   }
 

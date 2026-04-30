@@ -113,13 +113,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       bool shouldShow = false;
 
       if (_introTimestamp != null) {
-        // Existing timestamp: show during the intro window
-        final start = (_introTimestamp!['startSeconds'] as num?)?.toInt() ?? 0;
-        final end = (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
-        shouldShow = sec >= start && sec < end;
+        final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ?? 
+                        (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
+        shouldShow = sec < skipDur;
       } else {
-        // No timestamp yet: show during first 3 minutes so user can set one
-        shouldShow = sec < 180;
+        shouldShow = sec < 600; // Allow recording within first 10 mins
       }
 
       if (shouldShow != _showSkipIntro) {
@@ -129,18 +127,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Future<void> _skipIntro() async {
+    if (_introTimestamp != null) {
+      final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ?? 
+                      (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
+      _player.seek(Duration(seconds: skipDur));
+    }
+  }
+
+  Future<void> _recordIntro() async {
     final pos = _player.state.position.inSeconds;
-    final end = pos + 90;
     await UserService.saveIntroTimestamp(
       contentId: _seriesContentId,
-      startSeconds: pos,
-      endSeconds: end,
+      skipDuration: pos,
     );
     if (mounted) {
       setState(() {
-        _introTimestamp = {'startSeconds': pos, 'endSeconds': end};
+        _introTimestamp = {'skipDuration': pos};
       });
-      _player.seek(Duration(seconds: end));
     }
   }
 
@@ -280,7 +283,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       onKeyEvent: (e) {
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) _exitPlayer();
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.space) _player.playOrPause();
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) _skipIntro();
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
+          if (_introTimestamp == null) _recordIntro();
+          else _skipIntro();
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -323,7 +329,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
               ),
 
-              // Skip Intro button (bottom-left, first 3 minutes)
+              // Skip Intro / Record Intro button
               Positioned(
                 bottom: 100,
                 left: 24,
@@ -332,37 +338,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   duration: const Duration(milliseconds: 300),
                   child: _showSkipIntro
                       ? GestureDetector(
-                          onTap: _skipIntro,
-                          child: StreamBuilder<Duration>(
-                            stream: _player.stream.position,
-                            builder: (context, snap) {
-                              final pos = snap.data ?? Duration.zero;
-                              final mins = pos.inMinutes;
-                              final secs = pos.inSeconds % 60;
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.7),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.white24),
+                          onTap: _introTimestamp == null ? _recordIntro : _skipIntro,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _introTimestamp == null ? LucideIcons.circleDot : LucideIcons.skipForward, 
+                                  color: Colors.white, 
+                                  size: 16
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(LucideIcons.skipForward, color: Colors.white, size: 16),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Skip Intro $mins:${secs.toString().padLeft(2, '0')}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
+                                const SizedBox(width: 8),
+                                Text(
+                                  _introTimestamp == null ? 'Record Intro Time' : 'Skip Intro',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              );
-                            },
+                              ],
+                            ),
                           ),
                         )
                       : const SizedBox(),

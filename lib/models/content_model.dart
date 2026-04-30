@@ -58,4 +58,37 @@ class ContentModel {
       resumePositionSeconds: resumePositionSeconds ?? this.resumePositionSeconds,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'description': description,
+        'subtitle': subtitle,
+        'thumbnailUrl': thumbnailUrl,
+        'bannerUrl': bannerUrl,
+        'm3u8Url': m3u8Url,
+        'episodes': episodes.map((e) => e.toJson()).toList(),
+        'rating': rating,
+        'progress': progress,
+        'year': year,
+        'resumeEpisodeIndex': resumeEpisodeIndex,
+        'resumePositionSeconds': resumePositionSeconds,
+      };
+
+  factory ContentModel.fromJson(Map<String, dynamic> json) => ContentModel(
+        title: json['title'] as String? ?? '',
+        description: json['description'] as String? ?? '',
+        subtitle: json['subtitle'] as String? ?? '',
+        thumbnailUrl: json['thumbnailUrl'] as String? ?? '',
+        bannerUrl: json['bannerUrl'] as String? ?? '',
+        m3u8Url: json['m3u8Url'] as String? ?? '',
+        episodes: (json['episodes'] as List<dynamic>?)
+                ?.map((e) => Episode.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
+        progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+        year: json['year'] as String? ?? '',
+        resumeEpisodeIndex: json['resumeEpisodeIndex'] as int?,
+        resumePositionSeconds: json['resumePositionSeconds'] as int?,
+      );
 }

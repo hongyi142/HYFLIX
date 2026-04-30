@@ -270,6 +270,21 @@ class TmdbService {
         },
       );
 
+  static Future<List<TmdbResult>> fetchRecentPopularHongKongSeries({
+    int count = 10,
+    int withinDays = 60,
+  }) =>
+      _discoverMedia(
+        mediaType: 'tv',
+        count: count,
+        params: {
+          ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
+          'with_original_language': 'zh',
+          'with_origin_country': 'HK',
+          'without_genres': '16',
+        },
+      );
+
   static Future<List<TmdbResult>> fetchRecentPopularChineseAnimation({
     int count = 10,
     int withinDays = 60,
@@ -305,7 +320,7 @@ class TmdbService {
 
   /// Cleans titles for better TMDB matching.
   /// Removes "Season X", "Complete", "Version", etc.
-  static String _cleanTitle(String title) {
+  static String cleanTitle(String title) {
     String cleaned = title;
     
     // 1. Remove Season information like "第一季", "第1季", "S01"
@@ -339,7 +354,7 @@ class TmdbService {
   static Future<TmdbResult?> search(String title, {String? year}) async {
     if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return null;
 
-    final cleanedTitle = _cleanTitle(title);
+    final cleanedTitle = cleanTitle(title);
     final cacheKey = '${cleanedTitle}_${year ?? ''}'.trim();
     
     if (_cache.containsKey(cacheKey)) return _cache[cacheKey];

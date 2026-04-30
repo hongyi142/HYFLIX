@@ -10,7 +10,15 @@ import '../services/tmdb_service.dart';
 
 class MovieCard extends StatefulWidget {
   final ContentModel content;
-  const MovieCard({super.key, required this.content});
+  final double? width;
+  final EdgeInsetsGeometry? margin;
+
+  const MovieCard({
+    super.key,
+    required this.content,
+    this.width = 150,
+    this.margin = const EdgeInsets.only(right: AppTheme.spacing16),
+  });
 
   @override
   State<MovieCard> createState() => _MovieCardState();
@@ -101,49 +109,51 @@ class _MovieCardState extends State<MovieCard> {
           duration: const Duration(milliseconds: 200),
           transform: Matrix4.identity()..scale(_isHovered ? 1.05 : 1.0),
           transformAlignment: Alignment.center,
-          margin: const EdgeInsets.only(right: AppTheme.spacing16),
-          width: 150,
+          margin: widget.margin,
+          width: widget.width,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                height: 225,
-                decoration: BoxDecoration(
-                  borderRadius: AppTheme.radius16,
-                  boxShadow: _isHovered ? AppTheme.softShadow : [],
-                ),
-                child: ClipRRect(
-                  borderRadius: AppTheme.radius16,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.network(displayPoster, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight,
-                              child: const Center(child: Icon(LucideIcons.image, color: AppTheme.textSecondary)))),
-                      // Video preview on hover
-                      if (_showPreview && _previewController != null)
-                        AnimatedOpacity(
-                          opacity: 1.0,
-                          duration: const Duration(milliseconds: 400),
-                          child: Video(
-                            controller: _previewController!,
-                            controls: NoVideoControls,
-                          ),
-                        ),
-                      // Hover overlay when NOT showing video
-                      if (!_showPreview)
-                        AnimatedOpacity(
-                          opacity: _isHovered ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 200),
-                          child: Container(
-                            color: Colors.black54,
-                            child: const Center(
-                              child: Icon(LucideIcons.play, color: Colors.white, size: 36),
+              AspectRatio(
+                aspectRatio: 2 / 3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: AppTheme.radius16,
+                    boxShadow: _isHovered ? AppTheme.softShadow : [],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: AppTheme.radius16,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(displayPoster, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight,
+                                child: const Center(child: Icon(LucideIcons.image, color: AppTheme.textSecondary)))),
+                        // Video preview on hover
+                        if (_showPreview && _previewController != null)
+                          AnimatedOpacity(
+                            opacity: 1.0,
+                            duration: const Duration(milliseconds: 400),
+                            child: Video(
+                              controller: _previewController!,
+                              controls: NoVideoControls,
                             ),
                           ),
-                        ),
-                    ],
+                        // Hover overlay when NOT showing video
+                        if (!_showPreview)
+                          AnimatedOpacity(
+                            opacity: _isHovered ? 1.0 : 0.0,
+                            duration: const Duration(milliseconds: 200),
+                            child: Container(
+                              color: Colors.black54,
+                              child: const Center(
+                                child: Icon(LucideIcons.play, color: Colors.white, size: 36),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
