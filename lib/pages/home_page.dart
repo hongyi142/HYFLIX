@@ -88,10 +88,11 @@ class _HomePageState extends State<HomePage> {
 
   void _loadCategoriesProgressively() {
     // Kick off first two concurrently
-    _api.fetchMatchedRecentPopularMovies(count: 10).then((res) {
+    _api.fetchMatchedTrendingMovies(count: 10).then((res) {
       if (mounted) setState(() => _trendingMovies = res);
     });
-    _api.fetchMatchedRecentPopularTVSeries(count: 10).then((res) {
+
+    _api.fetchMatchedTrendingTVSeries(count: 10).then((res) {
       if (mounted) setState(() => _trendingSeries = res);
     });
 

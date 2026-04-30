@@ -5,6 +5,8 @@ import '../core/theme.dart';
 import '../pages/search_page.dart';
 import '../pages/profile_page.dart';
 import '../services/auth_service.dart';
+import '../pages/browse_page.dart';
+import '../pages/my_list_page.dart';
 
 class Navbar extends StatelessWidget {
   final bool isScrolled;
@@ -46,9 +48,74 @@ class Navbar extends StatelessWidget {
               Row(
                 children: [
                   _NavLink(title: 'Home', isActive: true),
-                  _NavLink(title: 'Movies'),
-                  _NavLink(title: 'TV Shows'),
-                  _NavLink(title: 'My List'),
+                  _NavLink(
+                    title: 'Movies',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BrowsePage(
+                          title: 'Movies',
+                          baseTypeId: 1,
+                          subTypes: [
+                            FilterOption('All Movies', '1'),
+                            FilterOption('Action', '5'),
+                            FilterOption('Comedy', '6'),
+                            FilterOption('Romance', '7'),
+                            FilterOption('Sci-Fi', '8'),
+                            FilterOption('Horror', '9'),
+                            FilterOption('Drama', '10'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  _NavLink(
+                    title: 'TV Shows',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BrowsePage(
+                          title: 'TV Shows',
+                          baseTypeId: 2,
+                          subTypes: [
+                            FilterOption('All TV Shows', '2'),
+                            FilterOption('Chinese Drama', '12'),
+                            FilterOption('Hong Kong/Macau', '13'),
+                            FilterOption('Japanese', '14'),
+                            FilterOption('Western', '15'),
+                            FilterOption('Taiwanese', '16'),
+                            FilterOption('Thai', '17'),
+                            FilterOption('Korean', '18'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  _NavLink(
+                    title: 'Animation',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BrowsePage(
+                          title: 'Animation',
+                          baseTypeId: 4,
+                          subTypes: [
+                            FilterOption('All Animation', '4'),
+                            FilterOption('Anime Movies', '20'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  _NavLink(
+                    title: 'My List',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const MyListPage(),
+                      ),
+                    ),
+                  ),
                 ],
               ),
 
@@ -123,8 +190,9 @@ class Navbar extends StatelessWidget {
 class _NavLink extends StatefulWidget {
   final String title;
   final bool isActive;
+  final VoidCallback? onTap;
 
-  const _NavLink({required this.title, this.isActive = false});
+  const _NavLink({required this.title, this.isActive = false, this.onTap});
 
   @override
   State<_NavLink> createState() => _NavLinkState();
@@ -138,28 +206,32 @@ class _NavLinkState extends State<_NavLink> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacing16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 200),
-              style: TextStyle(
-                color: widget.isActive || _isHovered ? AppTheme.textPrimary : AppTheme.textSecondary,
-                fontSize: 16,
-                fontWeight: widget.isActive ? FontWeight.w600 : FontWeight.w400,
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacing16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: TextStyle(
+                  color: widget.isActive || _isHovered ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  fontSize: 16,
+                  fontWeight: widget.isActive ? FontWeight.w600 : FontWeight.w400,
+                ),
+                child: Text(widget.title),
               ),
-              child: Text(widget.title),
-            ),
-            const SizedBox(height: 4),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 2,
-              width: widget.isActive ? 24 : (_isHovered ? 24 : 0),
-              color: AppTheme.accent,
-            ),
-          ],
+              const SizedBox(height: 4),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: 2,
+                width: widget.isActive ? 24 : (_isHovered ? 24 : 0),
+                color: AppTheme.accent,
+              ),
+            ],
+          ),
         ),
       ),
     );

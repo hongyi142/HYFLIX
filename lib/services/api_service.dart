@@ -256,29 +256,53 @@ class ApiService {
       score += 15;
     }
 
+    final area = (raw['vod_area'] as String? ?? '').toLowerCase();
+    
     if (tmdb.mediaType == 'movie') {
       if (typeId1 == 1 || typeId == 1 || (typeId != null && typeId >= 5 && typeId <= 11)) {
-        score += 12;
+        score += 20;
+      } else {
+        score -= 100; // Strict penalty for Movie -> Series mismatch
       }
-    } else {
+    } else if (tmdb.mediaType == 'tv') {
       if (typeId1 == 2 || typeId == 2 || (typeId != null && typeId >= 12 && typeId <= 18)) {
-        score += 12;
+        score += 20;
+      } else {
+        score -= 100; // Strict penalty for Series -> Movie mismatch
       }
     }
 
-    if (tmdb.genreIds.contains(16) && (typeId == 4 || typeId == 20 || genreClass.contains('\u52a8\u753b'))) {
-      score += 12;
+    final isProviderAnimation = typeId == 4 || typeId == 20 || genreClass.contains('\u52a8\u753b') || genreClass.contains('\u52a8\u6f2b');
+
+    if (tmdb.genreIds.contains(16)) {
+      if (isProviderAnimation) {
+        score += 20;
+      } else {
+        score -= 100; // Strict penalty: TMDB wants Anime, Provider gave Drama/Movie
+      }
+    } else {
+      if (isProviderAnimation) {
+        score -= 100; // Strict penalty: TMDB wants Drama/Movie, Provider gave Anime
+      }
     }
 
     switch (tmdb.originalLanguage) {
       case 'zh':
-        if (_matchesChineseProviderMetadata(raw)) score += 12;
+        if (tmdb.originCountries.contains('HK')) {
+          if (area.contains('\u9999\u6e2f') || area.contains('\u6fb3\u95e8')) score += 20;
+          else score -= 100; // Strict penalty for HK mismatch
+        } else {
+          if (_matchesChineseProviderMetadata(raw)) score += 20;
+          else score -= 100; // Strict penalty for Chinese mismatch
+        }
         break;
       case 'ko':
-        if (_matchesKoreanProviderMetadata(raw)) score += 12;
+        if (_matchesKoreanProviderMetadata(raw)) score += 20;
+        else score -= 100; // Strict penalty for Korean mismatch
         break;
       case 'en':
-        if (_matchesWesternProviderMetadata(raw)) score += 8;
+        if (_matchesWesternProviderMetadata(raw)) score += 20;
+        else score -= 100; // Strict penalty for Western mismatch
         break;
     }
 
@@ -418,30 +442,26 @@ class ApiService {
     return finalMatches;
   }
 
-  Future<List<ContentModel>> fetchMatchedRecentPopularMovies({
+  Future<List<ContentModel>> fetchMatchedTrendingMovies({
     int count = 10,
-    int withinDays = 60,
   }) =>
       _matchTmdbShelf(
-        TmdbService.fetchRecentPopularMovies(
+        TmdbService.fetchTrendingMovies(
           count: count * 3,
-          withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_movies',
+        cacheKey: 'cache_movies_v5',
       );
 
-  Future<List<ContentModel>> fetchMatchedRecentPopularTVSeries({
+  Future<List<ContentModel>> fetchMatchedTrendingTVSeries({
     int count = 10,
-    int withinDays = 60,
   }) =>
       _matchTmdbShelf(
-        TmdbService.fetchRecentPopularTVSeries(
+        TmdbService.fetchTrendingTVSeries(
           count: count * 3,
-          withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_tv_series',
+        cacheKey: 'cache_tv_series_v5',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularChineseDramas({
@@ -454,7 +474,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_cn_dramas',
+        cacheKey: 'cache_cn_dramas_v5',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularChineseAnimation({
@@ -467,7 +487,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_cn_anim',
+        cacheKey: 'cache_cn_anim_v5',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularKoreanDramas({
@@ -480,7 +500,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_kr_dramas',
+        cacheKey: 'cache_kr_dramas_v5',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularWesternSeries({
@@ -493,7 +513,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_western',
+        cacheKey: 'cache_western_v5',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularHongKongSeries({
@@ -506,7 +526,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_hk_series',
+        cacheKey: 'cache_hk_series_v5',
       );
 
   Future<List<ContentModel>> fetchLatest({int page = 1}) =>
@@ -518,13 +538,30 @@ class ApiService {
   Future<List<ContentModel>> fetchAnimation({int page = 1}) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&t=4&pg=$page'));
   Future<List<ContentModel>> fetchChineseDramas({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=13&pg=$page'));
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=12&pg=$page')); // 12 is 国产剧
   Future<List<ContentModel>> fetchHongKongSeries({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=14&pg=$page'));
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=13&pg=$page')); // 13 is 港澳剧
   Future<List<ContentModel>> fetchKoreanDramas({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=18&pg=$page'));
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=18&pg=$page')); // 18 is 韩剧
   Future<List<ContentModel>> fetchWesternSeries({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=15&pg=$page'));
+      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=15&pg=$page')); // 15 is 欧美剧
+
+  Future<List<ContentModel>> fetchFiltered({
+    int page = 1,
+    int? typeId,
+    String? area,
+    String? year,
+    String? lang,
+    String? by,
+  }) {
+    var url = '$_baseUrl?ac=videolist&pg=$page';
+    if (typeId != null) url += '&t=$typeId';
+    if (area != null && area.isNotEmpty && area != 'All') url += '&area=${Uri.encodeQueryComponent(area)}';
+    if (year != null && year.isNotEmpty && year != 'All') url += '&year=$year';
+    if (lang != null && lang.isNotEmpty && lang != 'All') url += '&lang=${Uri.encodeQueryComponent(lang)}';
+    if (by != null && by.isNotEmpty) url += '&by=$by';
+    return _fetch(Uri.parse(url));
+  }
 
   Future<List<ContentModel>> searchByTitle(String query) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(query)}'));

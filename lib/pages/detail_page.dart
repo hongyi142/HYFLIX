@@ -7,6 +7,7 @@ import '../pages/video_player_screen.dart';
 import '../services/tmdb_service.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
+import '../services/watchlist_service.dart';
 
 class DetailPage extends StatefulWidget {
   final ContentModel content;
@@ -46,33 +47,96 @@ class DetailPage extends StatefulWidget {
 
 class _DetailPageState extends State<DetailPage> {
   TmdbResult? _tmdb;
-  bool _isFavourite = false;
   int _selectedSeason = 1;
+  final _watchlistService = WatchlistService();
+  bool _isListed = false;
 
   @override
   void initState() {
     super.initState();
     _tmdb = widget.initialTmdb;
     if (_tmdb == null) {
-      TmdbService.search(widget.content.title, year: widget.content.year).then((
-        r,
-      ) {
+      TmdbService.search(widget.content.title, year: widget.content.year).then((r) {
         if (mounted) setState(() => _tmdb = r);
       });
     }
-    _loadFavourite();
+    _checkListed();
+    _watchlistService.addListener(_checkListed);
   }
 
-  Future<void> _loadFavourite() async {
-    if (AuthService.uid == null) return;
-    final fav = await UserService.isFavourite(widget.content.title);
-    if (mounted) setState(() => _isFavourite = fav);
+  @override
+  void dispose() {
+    _watchlistService.removeListener(_checkListed);
+    super.dispose();
   }
 
-  Future<void> _toggleFavourite() async {
-    if (AuthService.uid == null) return;
-    await UserService.toggleFavourite(widget.content.title);
-    if (mounted) setState(() => _isFavourite = !_isFavourite);
+  void _checkListed() {
+    if (mounted) {
+      bool found = false;
+      for (final listName in _watchlistService.listNames) {
+        if (_watchlistService.isListed(listName, widget.content.title)) {
+          found = true;
+          break;
+        }
+      }
+      setState(() => _isListed = found);
+    }
+  }
+
+  void _showAddToListModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.cardDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final lists = _watchlistService.listNames;
+            return Container(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      'Save to...',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ...lists.map((listName) {
+                    final isListed = _watchlistService.isListed(listName, widget.content.title);
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                      title: Text(listName, style: const TextStyle(color: Colors.white)),
+                      trailing: isListed
+                          ? const Icon(LucideIcons.checkCircle2, color: AppTheme.accent)
+                          : const Icon(LucideIcons.circle, color: Colors.white54),
+                      onTap: () {
+                        if (isListed) {
+                          _watchlistService.removeFromList(listName, widget.content.title);
+                        } else {
+                          _watchlistService.addToList(listName, widget.content);
+                        }
+                        setModalState(() {});
+                      },
+                    );
+                  }),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   int? _extractSeasonNumber() {
@@ -421,21 +485,21 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // Favourite toggle
+                      // Add to List toggle
                       GestureDetector(
-                        onTap: _toggleFavourite,
+                        onTap: _showAddToListModal,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 10,
                           ),
                           decoration: BoxDecoration(
-                            color: _isFavourite
+                            color: _isListed
                                 ? AppTheme.accent.withOpacity(0.2)
                                 : const Color(0x662F3640),
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: _isFavourite
+                              color: _isListed
                                   ? AppTheme.accent
                                   : Colors.white24,
                             ),
@@ -444,20 +508,19 @@ class _DetailPageState extends State<DetailPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                _isFavourite
-                                    ? LucideIcons.heart
-                                    : LucideIcons.heart,
-                                color: _isFavourite
+                                _isListed
+                                    ? LucideIcons.check
+                                    : LucideIcons.plus,
+                                color: _isListed
                                     ? AppTheme.accent
                                     : Colors.white,
                                 size: 20,
-                                fill: _isFavourite ? 1.0 : 0.0,
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                _isFavourite ? 'Added' : 'My List',
+                                _isListed ? 'Added' : 'My List',
                                 style: TextStyle(
-                                  color: _isFavourite
+                                  color: _isListed
                                       ? AppTheme.accent
                                       : Colors.white,
                                   fontWeight: FontWeight.w500,

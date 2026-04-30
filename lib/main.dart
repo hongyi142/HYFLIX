@@ -6,11 +6,13 @@ import 'pages/auth_page.dart';
 import 'services/auth_service.dart';
 
 import 'services/api_service.dart';
+import 'services/watchlist_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   await ApiService.init();
+  await WatchlistService().init();
   await AuthService.init();
   runApp(const HyflixApp());
 }

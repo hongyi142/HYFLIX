@@ -95,23 +95,67 @@ class TmdbService {
     return mapped.take(count).toList();
   }
 
-  /// Fetches top trending movies from TMDB for the current period.
+  /// Fetches top trending movies from TMDB for the current year.
   static Future<List<TmdbResult>> fetchTrendingMovies({int count = 8}) async {
     if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
 
     try {
-      final uri = Uri.https('api.themoviedb.org', '/3/trending/movie/week', {
+      final currentYear = DateTime.now().year.toString();
+      final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
         'api_key': tmdbApiKey,
         'language': 'en-US',
+        'sort_by': 'popularity.desc',
+        'primary_release_year': currentYear,
+        'include_adult': 'false',
+        'include_video': 'false',
       });
 
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
 
       final body = json.decode(res.body) as Map<String, dynamic>;
-      final results = (body['results'] as List<dynamic>? ?? []);
+      final results = _mapResults(
+        (body['results'] as List<dynamic>? ?? []).map((item) {
+          final map = Map<String, dynamic>.from(item as Map);
+          map['media_type'] = 'movie';
+          return map;
+        }).toList(),
+      );
 
-      return _mapResults(results, count: count);
+      return results.take(count).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Fetches top trending TV shows from TMDB for the current year.
+  static Future<List<TmdbResult>> fetchTrendingTVSeries({int count = 8}) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+
+    try {
+      final currentYear = DateTime.now().year.toString();
+      final uri = Uri.https('api.themoviedb.org', '/3/discover/tv', {
+        'api_key': tmdbApiKey,
+        'language': 'en-US',
+        'sort_by': 'popularity.desc',
+        'first_air_date_year': currentYear,
+        'include_adult': 'false',
+        'include_null_first_air_dates': 'false',
+      });
+
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return [];
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final results = _mapResults(
+        (body['results'] as List<dynamic>? ?? []).map((item) {
+          final map = Map<String, dynamic>.from(item as Map);
+          map['media_type'] = 'tv';
+          return map;
+        }).toList(),
+      );
+
+      return results.take(count).toList();
     } catch (_) {
       return [];
     }
