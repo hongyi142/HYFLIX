@@ -47,6 +47,9 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
         
+      - name: Create macOS project if missing
+        run: flutter create --platforms=macos .
+        
       - name: Enable macOS build
         run: flutter config --enable-macos-desktop
         
