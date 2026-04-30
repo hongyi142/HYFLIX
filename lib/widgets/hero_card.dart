@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
@@ -10,7 +11,11 @@ import 'buttons.dart';
 class HeroSection extends StatefulWidget {
   final List<ContentModel> featuredContent;
   final Map<int, TmdbResult>? preloadedTmdb;
-  const HeroSection({super.key, required this.featuredContent, this.preloadedTmdb});
+  const HeroSection({
+    super.key,
+    required this.featuredContent,
+    this.preloadedTmdb,
+  });
 
   @override
   State<HeroSection> createState() => _HeroSectionState();
@@ -67,10 +72,14 @@ class _HeroSectionState extends State<HeroSection> {
   @override
   Widget build(BuildContext context) {
     if (widget.featuredContent.isEmpty) return const SizedBox();
+    final layout = ResponsiveLayout.of(context);
 
     return Container(
-      height: 480,
-      margin: const EdgeInsets.symmetric(horizontal: AppTheme.spacing32, vertical: AppTheme.spacing24),
+      height: layout.heroHeight,
+      margin: EdgeInsets.symmetric(
+        horizontal: layout.pagePadding,
+        vertical: layout.isPhone ? 16 : AppTheme.spacing24,
+      ),
       decoration: BoxDecoration(
         borderRadius: AppTheme.radius16,
         boxShadow: AppTheme.softShadow,
@@ -102,8 +111,12 @@ class _HeroSectionState extends State<HeroSection> {
                 return Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.network(banner, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight)),
+                    Image.network(
+                      banner,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          Container(color: AppTheme.cardLight),
+                    ),
                     // Gradient
                     // Main content gradient (bottom-left focus)
                     Container(
@@ -136,9 +149,10 @@ class _HeroSectionState extends State<HeroSection> {
                     ),
                     // Text Content
                     Positioned(
-                      left: AppTheme.spacing64,
-                      bottom: 40,
-                      width: 540,
+                      left: layout.isPhone ? 20 : AppTheme.spacing64,
+                      right: layout.isPhone ? 20 : null,
+                      bottom: layout.isPhone ? 28 : 40,
+                      width: layout.isPhone ? null : layout.heroContentWidth,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -150,40 +164,61 @@ class _HeroSectionState extends State<HeroSection> {
                                 const SizedBox(width: 8),
                                 _badge(year, Colors.white24),
                               ],
-                              ...genres.take(2).map((g) => Padding(
-                                padding: const EdgeInsets.only(left: 6),
-                                child: _badge(g, Colors.white12),
-                              )),
+                              ...genres
+                                  .take(2)
+                                  .map(
+                                    (g) => Padding(
+                                      padding: const EdgeInsets.only(left: 6),
+                                      child: _badge(g, Colors.white12),
+                                    ),
+                                  ),
                             ],
                           ),
                           const SizedBox(height: 14),
-                          Text(title,
-                              style: const TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 44,
-                                fontWeight: FontWeight.w800,
-                                height: 1.1,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis),
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: layout.heroTitleSize,
+                              fontWeight: FontWeight.w800,
+                              height: 1.1,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           const SizedBox(height: 12),
-                          Text(overview,
-                              style: const TextStyle(
-                                  color: AppTheme.textSecondary, fontSize: 14, height: 1.6),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis),
+                          Text(
+                            overview,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: layout.isPhone ? 13 : 14,
+                              height: 1.6,
+                            ),
+                            maxLines: layout.isPhone ? 2 : 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           const SizedBox(height: 24),
-                          Row(
+                          Wrap(
+                            spacing: 14,
+                            runSpacing: 12,
                             children: [
                               PrimaryButton(
                                 text: 'Play Now',
                                 icon: LucideIcons.play,
-                                onTap: () => DetailPage.show(context, item, initialTmdb: tmdb),
+                                onTap: () => DetailPage.show(
+                                  context,
+                                  item,
+                                  initialTmdb: tmdb,
+                                ),
                               ),
                               const SizedBox(width: 14),
                               SecondaryButton(
                                 text: 'More Info',
-                                onTap: () => DetailPage.show(context, item, initialTmdb: tmdb),
+                                onTap: () => DetailPage.show(
+                                  context,
+                                  item,
+                                  initialTmdb: tmdb,
+                                ),
                               ),
                             ],
                           ),
@@ -198,14 +233,18 @@ class _HeroSectionState extends State<HeroSection> {
                       right: 0,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(widget.featuredContent.length, (i) {
+                        children: List.generate(widget.featuredContent.length, (
+                          i,
+                        ) {
                           return AnimatedContainer(
                             duration: const Duration(milliseconds: 300),
                             margin: const EdgeInsets.only(right: 8),
                             height: 4,
                             width: _currentPage == i ? 24 : 6,
                             decoration: BoxDecoration(
-                              color: _currentPage == i ? AppTheme.accent : Colors.white30,
+                              color: _currentPage == i
+                                  ? AppTheme.accent
+                                  : Colors.white30,
                               borderRadius: BorderRadius.circular(2),
                             ),
                           );
@@ -218,25 +257,34 @@ class _HeroSectionState extends State<HeroSection> {
             ),
           ),
           // Right Arrow
-          Positioned(
-            right: 16, top: 0, bottom: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: () => _pageController.nextPage(
+          if (!layout.isPhone)
+            Positioned(
+              right: 16,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () => _pageController.nextPage(
                     duration: const Duration(milliseconds: 500),
-                    curve: Curves.easeInOut),
-                child: Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black38,
-                    border: Border.all(color: Colors.white24),
+                    curve: Curves.easeInOut,
                   ),
-                  child: const Icon(LucideIcons.chevronRight, color: Colors.white, size: 18),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black38,
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Icon(
+                      LucideIcons.chevronRight,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -244,9 +292,18 @@ class _HeroSectionState extends State<HeroSection> {
 
   Widget _badge(String text, Color bg) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
-    child: Text(text,
-        style: const TextStyle(
-            color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.8,
+      ),
+    ),
   );
 }

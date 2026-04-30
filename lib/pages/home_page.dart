@@ -1,18 +1,41 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
+import '../pages/browse_page.dart';
+import '../pages/category_page.dart';
+import '../pages/my_list_page.dart';
+import '../pages/profile_page.dart';
 import '../services/api_service.dart';
-import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/tmdb_service.dart';
-import '../widgets/navbar.dart';
+import '../services/user_service.dart';
 import '../widgets/hero_card.dart';
-import '../widgets/video_card.dart';
 import '../widgets/movie_card.dart';
-import '../pages/category_page.dart';
+import '../widgets/navbar.dart';
+import '../widgets/video_card.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final List<ContentModel> trendingMovies;
+  final List<ContentModel> trendingSeries;
+  final List<ContentModel> chineseAnim;
+  final List<ContentModel> chineseDramas;
+  final List<ContentModel> koreanDramas;
+  final List<ContentModel> westernSeries;
+  final List<ContentModel> hkSeries;
+
+  const HomePage({
+    super.key,
+    this.trendingMovies = const [],
+    this.trendingSeries = const [],
+    this.chineseAnim = const [],
+    this.chineseDramas = const [],
+    this.koreanDramas = const [],
+    this.westernSeries = const [],
+    this.hkSeries = const [],
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -20,7 +43,6 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final ApiService _api = ApiService();
-
   List<ContentModel> _trendingMovies = [];
   List<ContentModel> _trendingSeries = [];
   List<ContentModel> _chineseDramas = [];
@@ -39,6 +61,14 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _trendingMovies = widget.trendingMovies;
+    _trendingSeries = widget.trendingSeries;
+    _chineseAnimation = widget.chineseAnim;
+    _chineseDramas = widget.chineseDramas;
+    _koreanDramas = widget.koreanDramas;
+    _westernSeries = widget.westernSeries;
+    _hongKongSeries = widget.hkSeries;
+
     _loadContent();
     _scrollController.addListener(() {
       final isScrolled = _scrollController.offset > 50;
@@ -49,30 +79,33 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadContent() async {
-    // Fetch recent popular movies for hero section
-    final trendingTmdbResults = await TmdbService.fetchRecentPopularMovies(count: 8);
+    final trendingTmdbResults = await TmdbService.fetchRecentPopularMovies(
+      count: 8,
+    );
 
-    // Load watch history for Continue Watching section
     List<Map<String, dynamic>> history = [];
     if (AuthService.isLoggedIn) {
       history = await UserService.getWatchHistory();
     }
 
-    // Convert trending TMDB results to ContentModel for hero section
     final trendingItems = <ContentModel>[];
     final trendingTmdbMap = <int, TmdbResult>{};
     for (int i = 0; i < trendingTmdbResults.length; i++) {
       final tmdb = trendingTmdbResults[i];
       trendingTmdbMap[i] = tmdb;
-      trendingItems.add(ContentModel(
-        title: tmdb.englishTitle,
-        description: tmdb.overview,
-        thumbnailUrl: tmdb.posterUrl,
-        bannerUrl: tmdb.backdropUrl.isNotEmpty ? tmdb.backdropUrl : tmdb.posterUrl,
-        m3u8Url: '',
-        year: tmdb.year,
-        rating: tmdb.voteAverage,
-      ));
+      trendingItems.add(
+        ContentModel(
+          title: tmdb.englishTitle,
+          description: tmdb.overview,
+          thumbnailUrl: tmdb.posterUrl,
+          bannerUrl: tmdb.backdropUrl.isNotEmpty
+              ? tmdb.backdropUrl
+              : tmdb.posterUrl,
+          m3u8Url: '',
+          year: tmdb.year,
+          rating: tmdb.voteAverage,
+        ),
+      );
     }
 
     if (!mounted) return;
@@ -81,37 +114,6 @@ class _HomePageState extends State<HomePage> {
       _trendingItems = trendingItems;
       _trendingTmdb = trendingTmdbMap;
       _isLoading = false;
-    });
-
-    _loadCategoriesProgressively();
-  }
-
-  void _loadCategoriesProgressively() {
-    // Kick off first two concurrently
-    _api.fetchMatchedTrendingMovies(count: 10).then((res) {
-      if (mounted) setState(() => _trendingMovies = res);
-    });
-
-    _api.fetchMatchedTrendingTVSeries(count: 10).then((res) {
-      if (mounted) setState(() => _trendingSeries = res);
-    });
-
-    // Kick off the rest sequentially so we don't spam the network
-    Future.microtask(() async {
-      final chineseDramas = await _api.fetchMatchedRecentPopularChineseDramas(count: 10);
-      if (mounted) setState(() => _chineseDramas = chineseDramas);
-      
-      final chineseAnimation = await _api.fetchMatchedRecentPopularChineseAnimation(count: 10);
-      if (mounted) setState(() => _chineseAnimation = chineseAnimation);
-
-      final koreanDramas = await _api.fetchMatchedRecentPopularKoreanDramas(count: 10);
-      if (mounted) setState(() => _koreanDramas = koreanDramas);
-
-      final westernSeries = await _api.fetchMatchedRecentPopularWesternSeries(count: 10);
-      if (mounted) setState(() => _westernSeries = westernSeries);
-
-      final hkSeries = await _api.fetchMatchedRecentPopularHongKongSeries(count: 10);
-      if (mounted) setState(() => _hongKongSeries = hkSeries);
     });
   }
 
@@ -125,7 +127,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final layout = ResponsiveLayout.of(context);
+
     if (_isLoading) {
       return Scaffold(
         backgroundColor: AppTheme.background,
@@ -133,9 +143,18 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2),
+              const CircularProgressIndicator(
+                color: AppTheme.accent,
+                strokeWidth: 2,
+              ),
               const SizedBox(height: 24),
-              Text('Loading HYFLIX...', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
+              Text(
+                'Loading HYFLIX...',
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 16,
+                ),
+              ),
             ],
           ),
         ),
@@ -143,8 +162,6 @@ class _HomePageState extends State<HomePage> {
     }
 
     final heroItems = _trendingItems;
-
-    // Continue watching — match watch history with loaded content
     final allContent = [
       ..._trendingMovies,
       ..._trendingSeries,
@@ -163,169 +180,233 @@ class _HomePageState extends State<HomePage> {
       final originalTitle = history['originalTitle'] as String? ?? '';
       final posterUrl = history['posterUrl'] as String? ?? '';
       final progress = (history['progress'] as num?)?.toDouble() ?? 0.0;
-      // Try matching by original title first (Chinese), then by English title
+
       ContentModel? match;
       if (originalTitle.isNotEmpty) {
         match = allContent.where((c) => c.title == originalTitle).firstOrNull;
       }
       match ??= allContent.where((c) => c.title == title).firstOrNull;
 
-      final finalTitle = match?.title ?? (originalTitle.isNotEmpty ? originalTitle : title);
+      final finalTitle =
+          match?.title ?? (originalTitle.isNotEmpty ? originalTitle : title);
       if (seenTitles.contains(finalTitle)) continue;
       seenTitles.add(finalTitle);
 
       if (match != null) {
         final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
-        final positionSeconds = (history['positionSeconds'] as num?)?.toInt() ?? 0;
-        watchingItems.add(match.copyWith(
-          progress: progress,
-          resumeEpisodeIndex: episodeIndex,
-          resumePositionSeconds: positionSeconds,
-        ));
+        final positionSeconds =
+            (history['positionSeconds'] as num?)?.toInt() ?? 0;
+        watchingItems.add(
+          match.copyWith(
+            progress: progress,
+            resumeEpisodeIndex: episodeIndex,
+            resumePositionSeconds: positionSeconds,
+          ),
+        );
       } else if (title.isNotEmpty) {
-        // Fallback: create a minimal ContentModel from history data
-        watchingItems.add(ContentModel(
-          title: finalTitle,
-          subtitle: '',
-          description: '',
-          thumbnailUrl: posterUrl,
-          bannerUrl: posterUrl,
-          m3u8Url: '',
-          year: '',
-          rating: 0,
-          episodes: const [],
-          progress: progress,
-        ));
+        watchingItems.add(
+          ContentModel(
+            title: finalTitle,
+            subtitle: '',
+            description: '',
+            thumbnailUrl: posterUrl,
+            bannerUrl: posterUrl,
+            m3u8Url: '',
+            year: '',
+            rating: 0,
+            episodes: const [],
+            progress: progress,
+          ),
+        );
       }
     }
 
     return Scaffold(
+      bottomNavigationBar: layout.usesBottomNav
+          ? _buildBottomNavigation(context)
+          : null,
       body: Stack(
         children: [
           Container(color: AppTheme.background),
-
           SingleChildScrollView(
             controller: _scrollController,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 60),
-
-                // ── Hero ──────────────────────────────────────────────
+                SizedBox(height: layout.topSafeSpacing),
                 if (heroItems.isNotEmpty)
-                  HeroSection(featuredContent: heroItems, preloadedTmdb: _trendingTmdb),
-
-                // ── Continue Watching ─────────────────────────────────
+                  HeroSection(
+                    featuredContent: heroItems,
+                    preloadedTmdb: _trendingTmdb,
+                  ),
                 if (watchingItems.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Continue Watching',
-                    height: 220,
-                    itemWidth: 280,
+                    height: layout.landscapeCardWidth * 0.565 + 72,
                     count: watchingItems.length,
                     builder: (i) => VideoCard(
                       content: watchingItems[i],
+                      width: layout.landscapeCardWidth,
+                      margin: EdgeInsets.only(
+                        right: layout.isPhone ? 16 : AppTheme.spacing24,
+                      ),
                       onWatchHistoryChanged: _refreshWatchHistory,
                     ),
                   ),
-
-                // ── Movies ────────────────────────────────────────────
                 if (_trendingMovies.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Movies',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _trendingMovies.take(10).length,
-                    builder: (i) => MovieCard(content: _trendingMovies[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Movies', fetchFunction: (p) => _api.fetchMovies(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _trendingMovies[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Movies',
+                          fetchFunction: (p) => _api.fetchMovies(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
-                // ── TV Series ─────────────────────────────────────────
                 if (_trendingSeries.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Series',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _trendingSeries.take(10).length,
-                    builder: (i) => MovieCard(content: _trendingSeries[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Series', fetchFunction: (p) => _api.fetchTVSeries(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _trendingSeries[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Series',
+                          fetchFunction: (p) => _api.fetchTVSeries(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
-                // ── Animation ─────────────────────────────────────────
                 if (_chineseDramas.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Chinese Series',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _chineseDramas.take(10).length,
-                    builder: (i) => MovieCard(content: _chineseDramas[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Chinese Series', fetchFunction: (p) => _api.fetchChineseDramas(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _chineseDramas[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Chinese Series',
+                          fetchFunction: (p) =>
+                              _api.fetchChineseDramas(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
                 if (_chineseAnimation.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Chinese Animation',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _chineseAnimation.take(10).length,
-                    builder: (i) => MovieCard(content: _chineseAnimation[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Chinese Animation', fetchFunction: (p) => _api.fetchAnimation(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _chineseAnimation[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Chinese Animation',
+                          fetchFunction: (p) => _api.fetchAnimation(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
-                // ── Korean Dramas ─────────────────────────────────────
                 if (_koreanDramas.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Korean Series',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _koreanDramas.take(10).length,
-                    builder: (i) => MovieCard(content: _koreanDramas[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Korean Series', fetchFunction: (p) => _api.fetchKoreanDramas(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _koreanDramas[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Korean Series',
+                          fetchFunction: (p) => _api.fetchKoreanDramas(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
-                // ── Western Series ────────────────────────────────────
                 if (_westernSeries.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Western Series',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _westernSeries.take(10).length,
-                    builder: (i) => MovieCard(content: _westernSeries[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Western Series', fetchFunction: (p) => _api.fetchWesternSeries(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _westernSeries[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Western Series',
+                          fetchFunction: (p) =>
+                              _api.fetchWesternSeries(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
-                // ── Hong Kong Series ──────────────────────────────────
                 if (_hongKongSeries.isNotEmpty)
                   _buildHorizontalSection(
+                    context: context,
                     title: 'Top Trending Hong Kong Series',
-                    height: 310,
-                    itemWidth: 150,
+                    height: layout.posterCardWidth * 1.85,
                     count: _hongKongSeries.take(10).length,
-                    builder: (i) => MovieCard(content: _hongKongSeries[i]),
-                    onViewAll: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CategoryPage(title: 'Hong Kong Series', fetchFunction: (p) => _api.fetchHongKongSeries(page: p))
-                    )),
+                    builder: (i) => MovieCard(
+                      content: _hongKongSeries[i],
+                      width: layout.posterCardWidth,
+                    ),
+                    onViewAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CategoryPage(
+                          title: 'Hong Kong Series',
+                          fetchFunction: (p) =>
+                              _api.fetchHongKongSeries(page: p),
+                        ),
+                      ),
+                    ),
                   ),
-
-                const SizedBox(height: AppTheme.spacing64),
+                SizedBox(
+                  height: layout.usesBottomNav ? 104 : AppTheme.spacing64,
+                ),
               ],
             ),
           ),
-
-          // Fixed Navbar
           Positioned(
-            top: 0, left: 0, right: 0,
+            top: 0,
+            left: 0,
+            right: 0,
             child: Navbar(isScrolled: _isScrolled),
           ),
         ],
@@ -334,39 +415,43 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildHorizontalSection({
+    required BuildContext context,
     required String title,
     required double height,
-    required double itemWidth,
     required int count,
     required Widget Function(int index) builder,
     VoidCallback? onViewAll,
   }) {
+    final layout = ResponsiveLayout.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(
-            left: AppTheme.spacing32,
-            right: AppTheme.spacing32,
-            top: AppTheme.spacing48,
-            bottom: AppTheme.spacing24,
+          padding: EdgeInsets.only(
+            left: layout.pagePadding,
+            right: layout.pagePadding,
+            top: layout.sectionGap,
+            bottom: layout.isPhone ? 16 : AppTheme.spacing24,
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: layout.sectionTitleSize,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               if (onViewAll != null)
                 GestureDetector(
                   onTap: onViewAll,
                   child: const Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         'View All',
@@ -377,7 +462,11 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
                       SizedBox(width: 4),
-                      Icon(Icons.arrow_forward_ios, color: AppTheme.textSecondary, size: 12),
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        color: AppTheme.textSecondary,
+                        size: 12,
+                      ),
                     ],
                   ),
                 ),
@@ -388,11 +477,68 @@ class _HomePageState extends State<HomePage> {
           height: height,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacing32),
+            padding: EdgeInsets.symmetric(horizontal: layout.pagePadding),
             itemCount: count,
             itemBuilder: (context, i) => builder(i),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildBottomNavigation(BuildContext context) {
+    return NavigationBar(
+      height: 74,
+      backgroundColor: AppTheme.surface,
+      indicatorColor: AppTheme.accent.withOpacity(0.18),
+      selectedIndex: 0,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      onDestinationSelected: (index) {
+        switch (index) {
+          case 0:
+            break;
+          case 1:
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const BrowsePage(
+                  title: 'Movies',
+                  baseTypeId: 1,
+                  subTypes: [
+                    FilterOption('All Movies', '1'),
+                    FilterOption('Action', '5'),
+                    FilterOption('Comedy', '6'),
+                    FilterOption('Romance', '7'),
+                    FilterOption('Sci-Fi', '8'),
+                    FilterOption('Horror', '9'),
+                    FilterOption('Drama', '10'),
+                  ],
+                ),
+              ),
+            );
+            break;
+          case 2:
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MyListPage()),
+            );
+            break;
+          case 3:
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ProfilePage()),
+            );
+            break;
+        }
+      },
+      destinations: const [
+        NavigationDestination(icon: Icon(LucideIcons.home), label: 'Home'),
+        NavigationDestination(icon: Icon(LucideIcons.compass), label: 'Browse'),
+        NavigationDestination(
+          icon: Icon(LucideIcons.listVideo),
+          label: 'My List',
+        ),
+        NavigationDestination(icon: Icon(LucideIcons.user), label: 'Profile'),
       ],
     );
   }

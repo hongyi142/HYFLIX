@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../services/api_service.dart';
@@ -22,7 +23,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _performSearch(String query) async {
     if (query.trim().isEmpty) return;
-    
+
     setState(() {
       _isSearching = true;
       _results = [];
@@ -31,7 +32,7 @@ class _SearchPageState extends State<SearchPage> {
 
     try {
       final List<String> searchQueries = [query];
-      
+
       // 1. If query is English, get ALL potential Chinese names from top TMDB hits
       if (!RegExp(r'[\u4e00-\u9fa5]').hasMatch(query)) {
         final candidates = await TmdbService.findChineseTitles(query);
@@ -46,7 +47,7 @@ class _SearchPageState extends State<SearchPage> {
       final Set<String> seenTitles = {};
 
       final resultsList = await Future.wait(
-        searchQueries.map((q) => _api.searchByTitle(q))
+        searchQueries.map((q) => _api.searchByTitle(q)),
       );
 
       for (var list in resultsList) {
@@ -57,7 +58,7 @@ class _SearchPageState extends State<SearchPage> {
           }
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _results = allResults;
@@ -71,6 +72,7 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ResponsiveLayout.of(context);
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
@@ -101,40 +103,57 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.all(16.0),
               child: Text(
                 'Searching for: "$_translatedQuery" (translated from "${_controller.text}")',
-                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 14,
+                ),
               ),
             ),
-          
+
           Expanded(
             child: _isSearching
-                ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppTheme.accent),
+                  )
                 : _results.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(LucideIcons.search, size: 64, color: Colors.white12),
-                            const SizedBox(height: 16),
-                            Text(
-                              _controller.text.isEmpty
-                                  ? 'Type to search'
-                                  : 'No results found for "${_controller.text}"',
-                              style: const TextStyle(color: AppTheme.textSecondary),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          LucideIcons.search,
+                          size: 64,
+                          color: Colors.white12,
                         ),
-                      )
-                    : GridView.builder(
-                        padding: const EdgeInsets.all(AppTheme.spacing32),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 6,
-                          childAspectRatio: 150 / 260,
-                          crossAxisSpacing: 24,
-                          mainAxisSpacing: 32,
+                        const SizedBox(height: 16),
+                        Text(
+                          _controller.text.isEmpty
+                              ? 'Type to search'
+                              : 'No results found for "${_controller.text}"',
+                          style: const TextStyle(color: AppTheme.textSecondary),
                         ),
-                        itemCount: _results.length,
-                        itemBuilder: (context, i) => MovieCard(content: _results[i]),
+                      ],
+                    ),
+                  )
+                : GridView.builder(
+                    padding: EdgeInsets.all(layout.pagePadding),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: layout.gridCount(
+                        compact: 3,
+                        tablet: 4,
+                        desktop: 6,
                       ),
+                      childAspectRatio: 150 / 260,
+                      crossAxisSpacing: layout.isPhone ? 12 : 24,
+                      mainAxisSpacing: layout.isPhone ? 16 : 32,
+                    ),
+                    itemCount: _results.length,
+                    itemBuilder: (context, i) => MovieCard(
+                      content: _results[i],
+                      width: null,
+                      margin: EdgeInsets.zero,
+                    ),
+                  ),
           ),
         ],
       ),

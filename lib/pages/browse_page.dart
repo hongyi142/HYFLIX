@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../services/api_service.dart';
@@ -69,7 +70,8 @@ class _BrowsePageState extends State<BrowsePage> {
     _selectedType = widget.baseTypeId.toString();
     _loadMore();
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 500 &&
+      if (_scrollController.position.pixels >=
+              _scrollController.position.maxScrollExtent - 500 &&
           !_isLoading &&
           _hasMore) {
         _loadMore();
@@ -137,14 +139,19 @@ class _BrowsePageState extends State<BrowsePage> {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value,
-          icon: const Icon(LucideIcons.chevronDown, color: Colors.white70, size: 16),
+          icon: const Icon(
+            LucideIcons.chevronDown,
+            color: Colors.white70,
+            size: 16,
+          ),
           dropdownColor: AppTheme.cardDark,
-          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
           items: options.map((opt) {
-            return DropdownMenuItem(
-              value: opt.value,
-              child: Text(opt.label),
-            );
+            return DropdownMenuItem(value: opt.value, child: Text(opt.label));
           }).toList(),
           onChanged: onChanged,
         ),
@@ -154,6 +161,7 @@ class _BrowsePageState extends State<BrowsePage> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ResponsiveLayout.of(context);
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: CustomScrollView(
@@ -167,7 +175,10 @@ class _BrowsePageState extends State<BrowsePage> {
               icon: const Icon(LucideIcons.arrowLeft, color: Colors.white),
               onPressed: () => Navigator.pop(context),
             ),
-            title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            title: Text(
+              widget.title,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(60),
               child: Container(
@@ -233,37 +244,48 @@ class _BrowsePageState extends State<BrowsePage> {
           ),
           if (_items.isEmpty && _isLoading)
             const SliverFillRemaining(
-              child: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
+              child: Center(
+                child: CircularProgressIndicator(color: AppTheme.accent),
+              ),
             )
           else if (_items.isEmpty && !_isLoading)
             const SliverFillRemaining(
               child: Center(
-                child: Text('No results found.', style: TextStyle(color: AppTheme.textSecondary)),
+                child: Text(
+                  'No results found.',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ),
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              padding: EdgeInsets.symmetric(
+                horizontal: layout.pagePadding,
+                vertical: 16,
+              ),
               sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 160,
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: layout.gridMaxExtent(
+                    compact: 144,
+                    tablet: 160,
+                    desktop: 170,
+                  ),
                   childAspectRatio: 0.52,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 24,
+                  crossAxisSpacing: layout.isPhone ? 12 : 16,
+                  mainAxisSpacing: layout.isPhone ? 16 : 24,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    if (index == _items.length) {
-                      return const Center(child: CircularProgressIndicator(color: AppTheme.accent));
-                    }
-                    return MovieCard(
-                      content: _items[index],
-                      width: null,
-                      margin: EdgeInsets.zero,
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index == _items.length) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: AppTheme.accent),
                     );
-                  },
-                  childCount: _items.length + (_hasMore ? 1 : 0),
-                ),
+                  }
+                  return MovieCard(
+                    content: _items[index],
+                    width: null,
+                    margin: EdgeInsets.zero,
+                  );
+                }, childCount: _items.length + (_hasMore ? 1 : 0)),
               ),
             ),
         ],

@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
 import '../pages/video_player_screen.dart';
-import '../services/tmdb_service.dart';
-import '../services/auth_service.dart';
-import '../services/user_service.dart';
 import '../services/watchlist_service.dart';
+import '../services/tmdb_service.dart';
 
 class DetailPage extends StatefulWidget {
   final ContentModel content;
@@ -56,7 +55,9 @@ class _DetailPageState extends State<DetailPage> {
     super.initState();
     _tmdb = widget.initialTmdb;
     if (_tmdb == null) {
-      TmdbService.search(widget.content.title, year: widget.content.year).then((r) {
+      TmdbService.search(widget.content.title, year: widget.content.year).then((
+        r,
+      ) {
         if (mounted) setState(() => _tmdb = r);
       });
     }
@@ -113,16 +114,33 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                   const SizedBox(height: 16),
                   ...lists.map((listName) {
-                    final isListed = _watchlistService.isListed(listName, widget.content.title);
+                    final isListed = _watchlistService.isListed(
+                      listName,
+                      widget.content.title,
+                    );
                     return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                      title: Text(listName, style: const TextStyle(color: Colors.white)),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                      ),
+                      title: Text(
+                        listName,
+                        style: const TextStyle(color: Colors.white),
+                      ),
                       trailing: isListed
-                          ? const Icon(LucideIcons.checkCircle2, color: AppTheme.accent)
-                          : const Icon(LucideIcons.circle, color: Colors.white54),
+                          ? const Icon(
+                              LucideIcons.checkCircle2,
+                              color: AppTheme.accent,
+                            )
+                          : const Icon(
+                              LucideIcons.circle,
+                              color: Colors.white54,
+                            ),
                       onTap: () {
                         if (isListed) {
-                          _watchlistService.removeFromList(listName, widget.content.title);
+                          _watchlistService.removeFromList(
+                            listName,
+                            widget.content.title,
+                          );
                         } else {
                           _watchlistService.addToList(listName, widget.content);
                         }
@@ -189,6 +207,7 @@ class _DetailPageState extends State<DetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ResponsiveLayout.of(context);
     final title = _tmdb?.englishTitle.isNotEmpty == true
         ? _tmdb!.englishTitle
         : widget.content.title;
@@ -198,9 +217,6 @@ class _DetailPageState extends State<DetailPage> {
     final backdrop = _tmdb?.backdropUrl.isNotEmpty == true
         ? _tmdb!.backdropUrl
         : widget.content.bannerUrl;
-    final poster = _tmdb?.posterUrl.isNotEmpty == true
-        ? _tmdb!.posterUrl
-        : widget.content.thumbnailUrl;
     final genres = _tmdb?.genres ?? [];
     final year = _tmdb?.year ?? widget.content.year;
     final rating = _tmdb?.voteAverage ?? widget.content.rating;
@@ -208,11 +224,17 @@ class _DetailPageState extends State<DetailPage> {
     final isMultiEpisode = episodes.length > 1;
 
     final screenHeight = MediaQuery.of(context).size.height;
-    final modalHeight = screenHeight * 0.85;
+    final modalHeight = layout.isPhone
+        ? screenHeight - 24
+        : screenHeight * 0.85;
+    final contentPadding = layout.isPhone ? 20.0 : 32.0;
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 100, vertical: 40),
+        padding: EdgeInsets.symmetric(
+          horizontal: layout.modalHorizontalPadding,
+          vertical: layout.modalVerticalPadding,
+        ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: Container(
@@ -233,24 +255,42 @@ class _DetailPageState extends State<DetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeroSection(
-                    backdrop,
-                    title,
-                    poster,
-                    year,
-                    rating,
-                    genres,
-                    isMultiEpisode,
-                    episodes,
-                  ),
+                  _buildHeroSection(context, backdrop, title),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(32, 0, 32, 0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Column(
+                    padding: EdgeInsets.fromLTRB(
+                      contentPadding,
+                      0,
+                      contentPadding,
+                      0,
+                    ),
+                    child: layout.useWideDetailLayout
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildMetadataRow(
+                                      year,
+                                      rating,
+                                      isMultiEpisode,
+                                      episodes,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _buildOverviewText(overview, layout),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 32),
+                              Expanded(
+                                flex: 2,
+                                child: _buildSidebarInfo(genres),
+                              ),
+                            ],
+                          )
+                        : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildMetadataRow(
@@ -260,34 +300,17 @@ class _DetailPageState extends State<DetailPage> {
                                 episodes,
                               ),
                               const SizedBox(height: 16),
-                              Text(
-                                overview.isNotEmpty
-                                    ? overview
-                                    : 'No description available.',
-                                style: const TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 14,
-                                  height: 1.6,
-                                  fontWeight: FontWeight.normal,
-                                  decoration: TextDecoration.none,
-                                ),
-                              ),
+                              _buildOverviewText(overview, layout),
+                              const SizedBox(height: 24),
+                              _buildSidebarInfo(genres),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 32),
-                        Expanded(
-                          flex: 2,
-                          child: _buildSidebarInfo(title, genres),
-                        ),
-                      ],
-                    ),
                   ),
                   if (isMultiEpisode) ...[
-                    const SizedBox(height: 36),
-                    _buildEpisodesSection(episodes),
+                    SizedBox(height: layout.isPhone ? 28 : 36),
+                    _buildEpisodesSection(episodes, layout),
                   ],
-                  const SizedBox(height: 60),
+                  SizedBox(height: layout.isPhone ? 28 : 60),
                 ],
               ),
             ),
@@ -297,21 +320,34 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  Widget _buildOverviewText(String overview, ResponsiveLayout layout) {
+    return Text(
+      overview.isNotEmpty ? overview : 'No description available.',
+      style: TextStyle(
+        color: AppTheme.textSecondary,
+        fontSize: layout.isPhone ? 13 : 14,
+        height: 1.6,
+        fontWeight: FontWeight.normal,
+        decoration: TextDecoration.none,
+      ),
+    );
+  }
+
   Widget _buildHeroSection(
+    BuildContext context,
     String backdrop,
     String title,
-    String poster,
-    String year,
-    double rating,
-    List<String> genres,
-    bool isMultiEpisode,
-    List<Episode> episodes,
   ) {
+    final layout = ResponsiveLayout.of(context);
+    final heroHeight = layout.isPhone ? 420.0 : 580.0;
+    final titleSize = layout.isPhone ? 28.0 : 42.0;
+    final horizontalPadding = layout.isPhone ? 20.0 : 32.0;
+    final buttonWrapSpacing = layout.isPhone ? 10.0 : 12.0;
+
     return Stack(
       children: [
-        // Backdrop image
         SizedBox(
-          height: 580,
+          height: heroHeight,
           width: double.infinity,
           child: Image.network(
             backdrop,
@@ -319,9 +355,8 @@ class _DetailPageState extends State<DetailPage> {
             errorBuilder: (_, __, ___) => Container(color: AppTheme.cardDark),
           ),
         ),
-        // Gradient overlays
         Container(
-          height: 580,
+          height: heroHeight,
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -336,9 +371,8 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
         ),
-        // Left gradient for readability
         Container(
-          height: 580,
+          height: heroHeight,
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
@@ -348,10 +382,9 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
         ),
-        // Back button
         Positioned(
-          top: 40,
-          left: 20,
+          top: layout.isPhone ? 16 : 40,
+          left: layout.isPhone ? 12 : 20,
           child: GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
@@ -369,10 +402,9 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
         ),
-        // Close button (X) - Netflix style
         Positioned(
-          top: 40,
-          right: 20,
+          top: layout.isPhone ? 16 : 40,
+          right: layout.isPhone ? 12 : 20,
           child: GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
@@ -386,7 +418,6 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
         ),
-        // Bottom content: Title + Buttons
         Positioned(
           bottom: 0,
           left: 0,
@@ -394,11 +425,15 @@ class _DetailPageState extends State<DetailPage> {
           child: Material(
             type: MaterialType.transparency,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                0,
+                horizontalPadding,
+                horizontalPadding,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // "N SERIES" badge + Title
                   Row(
                     children: [
                       Container(
@@ -434,23 +469,22 @@ class _DetailPageState extends State<DetailPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // Title
                   Text(
                     title.toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: Colors.white,
-                      fontSize: 42,
+                      fontSize: titleSize,
                       fontWeight: FontWeight.w900,
-                      letterSpacing: 2,
+                      letterSpacing: layout.isPhone ? 1 : 2,
                       height: 1.1,
                       decoration: TextDecoration.none,
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // Action buttons
-                  Row(
+                  Wrap(
+                    spacing: buttonWrapSpacing,
+                    runSpacing: 12,
                     children: [
-                      // Play button
                       GestureDetector(
                         onTap: () => _play(0),
                         child: Container(
@@ -484,8 +518,6 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      // Add to List toggle
                       GestureDetector(
                         onTap: _showAddToListModal,
                         child: Container(
@@ -532,8 +564,6 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      // Rate button
                       _actionButton(LucideIcons.thumbsUp, ''),
                     ],
                   ),
@@ -584,7 +614,9 @@ class _DetailPageState extends State<DetailPage> {
     bool isMultiEpisode,
     List<Episode> episodes,
   ) {
-    return Row(
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
         // Match percentage (simulated)
         if (rating > 0) ...[
@@ -597,20 +629,13 @@ class _DetailPageState extends State<DetailPage> {
               decoration: TextDecoration.none,
             ),
           ),
-          const SizedBox(width: 12),
         ],
         // Year
-        if (year.isNotEmpty) ...[_metadataChip(year), const SizedBox(width: 8)],
+        if (year.isNotEmpty) _metadataChip(year),
         // Rating badge
-        if (widget.content.subtitle.isNotEmpty) ...[
-          _metadataChip('TV-MA'),
-          const SizedBox(width: 8),
-        ],
+        if (widget.content.subtitle.isNotEmpty) _metadataChip('TV-MA'),
         // Episode count
-        if (isMultiEpisode) ...[
-          _metadataChip('${episodes.length} Episodes'),
-          const SizedBox(width: 8),
-        ],
+        if (isMultiEpisode) _metadataChip('${episodes.length} Episodes'),
         // HD badge
         _metadataChip('HD'),
       ],
@@ -640,7 +665,7 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  Widget _buildSidebarInfo(String title, List<String> genres) {
+  Widget _buildSidebarInfo(List<String> genres) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -685,7 +710,10 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  Widget _buildEpisodesSection(List<Episode> episodes) {
+  Widget _buildEpisodesSection(
+    List<Episode> episodes,
+    ResponsiveLayout layout,
+  ) {
     // Extract season numbers from episode names
     final seasonMap = <int, List<Episode>>{};
     for (final ep in episodes) {
@@ -706,8 +734,16 @@ class _DetailPageState extends State<DetailPage> {
       children: [
         // Header with season dropdown
         Padding(
-          padding: const EdgeInsets.fromLTRB(32, 0, 32, 16),
-          child: Row(
+          padding: EdgeInsets.fromLTRB(
+            layout.isPhone ? 20 : 32,
+            0,
+            layout.isPhone ? 20 : 32,
+            16,
+          ),
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 12,
             children: [
               const Text(
                 'Episodes',
@@ -778,61 +814,76 @@ class _DetailPageState extends State<DetailPage> {
         // Episode list
         ...List.generate(filteredEpisodes.length, (i) {
           final globalIndex = episodes.indexOf(filteredEpisodes[i]);
-          return _buildEpisodeTile(filteredEpisodes[i], globalIndex);
+          return _buildEpisodeTile(filteredEpisodes[i], globalIndex, layout);
         }),
       ],
     );
   }
 
-  Widget _buildEpisodeTile(Episode episode, int index) {
+  Widget _buildEpisodeTile(
+    Episode episode,
+    int index,
+    ResponsiveLayout layout,
+  ) {
     final epName = episode.name.isNotEmpty
         ? episode.name
         : 'Episode ${index + 1}';
     return GestureDetector(
       onTap: () => _play(index),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 32, vertical: 6),
+        margin: EdgeInsets.symmetric(
+          horizontal: layout.isPhone ? 20 : 32,
+          vertical: 6,
+        ),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppTheme.cardDark,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white12),
         ),
-        child: Row(
-          children: [
-            // Episode number
-            SizedBox(
-              width: 32,
-              child: Text(
-                '${index + 1}',
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  decoration: TextDecoration.none,
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            // Episode thumbnail
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: episode.imageUrl.isNotEmpty
-                  ? Image.network(
-                      episode.imageUrl,
-                      width: 120,
-                      height: 68,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _episodePlaceholder(),
-                    )
-                  : _episodePlaceholder(),
-            ),
-            const SizedBox(width: 14),
-            // Episode info
-            Expanded(
-              child: Column(
+        child: layout.isPhone
+            ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(
+                    children: [
+                      Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          decoration: TextDecoration.none,
+                        ),
+                      ),
+                      const Spacer(),
+                      const Icon(
+                        LucideIcons.playCircle,
+                        color: AppTheme.textSecondary,
+                        size: 22,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: episode.imageUrl.isNotEmpty
+                        ? Image.network(
+                            episode.imageUrl,
+                            width: double.infinity,
+                            height: 160,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _episodePlaceholder(
+                              width: double.infinity,
+                              height: 160,
+                            ),
+                          )
+                        : _episodePlaceholder(
+                            width: double.infinity,
+                            height: 160,
+                          ),
+                  ),
+                  const SizedBox(height: 12),
                   Text(
                     epName,
                     style: const TextStyle(
@@ -854,24 +905,78 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ),
                 ],
+              )
+            : Row(
+                children: [
+                  SizedBox(
+                    width: 32,
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: episode.imageUrl.isNotEmpty
+                        ? Image.network(
+                            episode.imageUrl,
+                            width: 120,
+                            height: 68,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _episodePlaceholder(),
+                          )
+                        : _episodePlaceholder(),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          epName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.none,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Episode ${index + 1}',
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(
+                    LucideIcons.playCircle,
+                    color: AppTheme.textSecondary,
+                    size: 22,
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              LucideIcons.playCircle,
-              color: AppTheme.textSecondary,
-              size: 22,
-            ),
-          ],
-        ),
       ),
     );
   }
 
-  Widget _episodePlaceholder() {
+  Widget _episodePlaceholder({double width = 120, double height = 68}) {
     return Container(
-      width: 120,
-      height: 68,
+      width: width,
+      height: height,
       decoration: BoxDecoration(
         color: AppTheme.cardLight,
         borderRadius: BorderRadius.circular(8),

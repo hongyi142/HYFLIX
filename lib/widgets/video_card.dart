@@ -12,7 +12,16 @@ import '../services/tmdb_service.dart';
 class VideoCard extends StatefulWidget {
   final ContentModel content;
   final VoidCallback? onWatchHistoryChanged;
-  const VideoCard({super.key, required this.content, this.onWatchHistoryChanged});
+  final double width;
+  final EdgeInsetsGeometry margin;
+
+  const VideoCard({
+    super.key,
+    required this.content,
+    this.onWatchHistoryChanged,
+    this.width = 280,
+    this.margin = const EdgeInsets.only(right: AppTheme.spacing24),
+  });
 
   @override
   State<VideoCard> createState() => _VideoCardState();
@@ -35,7 +44,10 @@ class _VideoCardState extends State<VideoCard> {
   }
 
   Future<void> _loadTmdb() async {
-    final r = await TmdbService.search(widget.content.title, year: widget.content.year);
+    final r = await TmdbService.search(
+      widget.content.title,
+      year: widget.content.year,
+    );
     if (r != null && mounted) {
       setState(() {
         _tmdbResult = r;
@@ -101,27 +113,36 @@ class _VideoCardState extends State<VideoCard> {
     return GestureDetector(
       onTap: () {
         // If this is a continue watching item with resume data, go directly to the player
-        if (widget.content.resumeEpisodeIndex != null && widget.content.m3u8Url.isNotEmpty) {
+        if (widget.content.resumeEpisodeIndex != null &&
+            widget.content.m3u8Url.isNotEmpty) {
           final epIndex = widget.content.resumeEpisodeIndex!;
-          final videoUrl = widget.content.episodes.isNotEmpty && epIndex < widget.content.episodes.length
+          final videoUrl =
+              widget.content.episodes.isNotEmpty &&
+                  epIndex < widget.content.episodes.length
               ? widget.content.episodes[epIndex].url
               : widget.content.m3u8Url;
-          Navigator.push(context, MaterialPageRoute(
-            builder: (_) => VideoPlayerScreen(
-              videoUrl: videoUrl,
-              title: displayTitle,
-              originalTitle: widget.content.title,
-              episodes: widget.content.episodes,
-              initialEpisodeIndex: epIndex,
-              tmdbId: _tmdbResult?.id?.toString(),
-              isTvShow: widget.content.episodes.length > 1,
-              posterUrl: widget.content.thumbnailUrl,
-              seekToSeconds: widget.content.resumePositionSeconds ?? 0,
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => VideoPlayerScreen(
+                videoUrl: videoUrl,
+                title: displayTitle,
+                originalTitle: widget.content.title,
+                episodes: widget.content.episodes,
+                initialEpisodeIndex: epIndex,
+                tmdbId: _tmdbResult?.id?.toString(),
+                isTvShow: widget.content.episodes.length > 1,
+                posterUrl: widget.content.thumbnailUrl,
+                seekToSeconds: widget.content.resumePositionSeconds ?? 0,
+              ),
             ),
-          )).then((_) => widget.onWatchHistoryChanged?.call());
+          ).then((_) => widget.onWatchHistoryChanged?.call());
         } else {
-          DetailPage.show(context, widget.content, initialTmdb: _tmdbResult)
-              .then((_) => widget.onWatchHistoryChanged?.call());
+          DetailPage.show(
+            context,
+            widget.content,
+            initialTmdb: _tmdbResult,
+          ).then((_) => widget.onWatchHistoryChanged?.call());
         }
       },
       child: MouseRegion(
@@ -131,14 +152,14 @@ class _VideoCardState extends State<VideoCard> {
           duration: const Duration(milliseconds: 200),
           transform: Matrix4.identity()..scale(_isHovered ? 1.04 : 1.0),
           transformAlignment: Alignment.center,
-          margin: const EdgeInsets.only(right: AppTheme.spacing24),
-          width: 280,
+          margin: widget.margin,
+          width: widget.width,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                height: 158,
+                height: widget.width * 0.565,
                 decoration: BoxDecoration(
                   borderRadius: AppTheme.radius16,
                   boxShadow: _isHovered ? AppTheme.softShadow : [],
@@ -149,10 +170,19 @@ class _VideoCardState extends State<VideoCard> {
                     fit: StackFit.expand,
                     children: [
                       // Thumbnail (landscape)
-                      Image.network(displayBanner, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                              color: AppTheme.cardLight,
-                              child: const Center(child: Icon(LucideIcons.image, color: AppTheme.textSecondary)))),
+                      Image.network(
+                        displayBanner,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: AppTheme.cardLight,
+                          child: const Center(
+                            child: Icon(
+                              LucideIcons.image,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
                       // Hover video preview
                       if (_showPreview && _previewController != null)
                         AnimatedOpacity(
@@ -166,7 +196,8 @@ class _VideoCardState extends State<VideoCard> {
                       // Play icon
                       if (!_showPreview)
                         Positioned(
-                          bottom: 10, right: 10,
+                          bottom: 10,
+                          right: 10,
                           child: Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
@@ -174,18 +205,27 @@ class _VideoCardState extends State<VideoCard> {
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.white24),
                             ),
-                            child: const Icon(LucideIcons.play, color: Colors.white, size: 14),
+                            child: const Icon(
+                              LucideIcons.play,
+                              color: Colors.white,
+                              size: 14,
+                            ),
                           ),
                         ),
                       // Progress bar
                       Positioned(
-                        bottom: 0, left: 0, right: 0,
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
                         child: Container(
                           height: 3,
                           color: Colors.white24,
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
-                            widthFactor: widget.content.progress.clamp(0.0, 1.0),
+                            widthFactor: widget.content.progress.clamp(
+                              0.0,
+                              1.0,
+                            ),
                             child: Container(color: AppTheme.accent),
                           ),
                         ),
@@ -195,13 +235,26 @@ class _VideoCardState extends State<VideoCard> {
                 ),
               ),
               const SizedBox(height: 10),
-              Text(displayTitle,
-                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                displayTitle,
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               const SizedBox(height: 3),
-              Text(displaySubtitle,
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                displaySubtitle,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),

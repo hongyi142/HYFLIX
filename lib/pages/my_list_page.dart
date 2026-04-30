@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../services/watchlist_service.dart';
 import '../widgets/movie_card.dart';
@@ -42,22 +43,32 @@ class _MyListPageState extends State<MyListPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.cardDark,
-        title: const Text('Create New List', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Create New List',
+          style: TextStyle(color: Colors.white),
+        ),
         content: TextField(
           controller: controller,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             hintText: 'e.g. Weekend Binge',
             hintStyle: TextStyle(color: Colors.white38),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppTheme.accent)),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white24),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: AppTheme.accent),
+            ),
           ),
           autofocus: true,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
@@ -76,6 +87,7 @@ class _MyListPageState extends State<MyListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ResponsiveLayout.of(context);
     final lists = _watchlistService.listNames;
     final items = _watchlistService.getListItems(_selectedList);
 
@@ -91,7 +103,10 @@ class _MyListPageState extends State<MyListPage> {
               icon: const Icon(LucideIcons.arrowLeft, color: Colors.white),
               onPressed: () => Navigator.pop(context),
             ),
-            title: const Text('My Lists', style: TextStyle(fontWeight: FontWeight.bold)),
+            title: const Text(
+              'My Lists',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(60),
               child: Container(
@@ -107,15 +122,22 @@ class _MyListPageState extends State<MyListPage> {
                         return Padding(
                           padding: const EdgeInsets.only(right: 12),
                           child: GestureDetector(
-                            onTap: () => setState(() => _selectedList = listName),
+                            onTap: () =>
+                                setState(() => _selectedList = listName),
                             child: Container(
                               height: 36,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
                               decoration: BoxDecoration(
-                                color: isSelected ? AppTheme.accent : AppTheme.cardLight.withOpacity(0.5),
+                                color: isSelected
+                                    ? AppTheme.accent
+                                    : AppTheme.cardLight.withOpacity(0.5),
                                 borderRadius: BorderRadius.circular(18),
                                 border: Border.all(
-                                  color: isSelected ? AppTheme.accent : Colors.white24,
+                                  color: isSelected
+                                      ? AppTheme.accent
+                                      : Colors.white24,
                                   width: 1,
                                 ),
                               ),
@@ -125,18 +147,28 @@ class _MyListPageState extends State<MyListPage> {
                                   Text(
                                     listName,
                                     style: TextStyle(
-                                      color: isSelected ? Colors.white : Colors.white70,
+                                      color: isSelected
+                                          ? Colors.white
+                                          : Colors.white70,
                                       fontSize: 13,
-                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.w500,
                                     ),
                                   ),
                                   if (isSelected && listName != 'My List') ...[
                                     const SizedBox(width: 8),
                                     GestureDetector(
-                                      onTap: () => _watchlistService.deleteList(listName),
-                                      child: const Icon(LucideIcons.x, size: 14, color: Colors.white),
-                                    )
-                                  ]
+                                      onTap: () => _watchlistService.deleteList(
+                                        listName,
+                                      ),
+                                      child: const Icon(
+                                        LucideIcons.x,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -156,7 +188,11 @@ class _MyListPageState extends State<MyListPage> {
                           alignment: Alignment.center,
                           child: const Row(
                             children: [
-                              Icon(LucideIcons.plus, color: Colors.white, size: 16),
+                              Icon(
+                                LucideIcons.plus,
+                                color: Colors.white,
+                                size: 16,
+                              ),
                               SizedBox(width: 6),
                               Text(
                                 'Create List',
@@ -182,7 +218,11 @@ class _MyListPageState extends State<MyListPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(LucideIcons.listPlus, size: 64, color: Colors.white.withOpacity(0.2)),
+                    Icon(
+                      LucideIcons.listPlus,
+                      size: 64,
+                      color: Colors.white.withOpacity(0.2),
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       'Your list is empty',
@@ -196,7 +236,10 @@ class _MyListPageState extends State<MyListPage> {
                     Text(
                       'Add shows and movies to keep track\nof what you want to watch.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.3),
+                        fontSize: 14,
+                      ),
                     ),
                   ],
                 ),
@@ -204,44 +247,55 @@ class _MyListPageState extends State<MyListPage> {
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              padding: EdgeInsets.symmetric(
+                horizontal: layout.pagePadding,
+                vertical: 16,
+              ),
               sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 160,
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: layout.gridMaxExtent(
+                    compact: 144,
+                    tablet: 160,
+                    desktop: 170,
+                  ),
                   childAspectRatio: 0.52,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 24,
+                  crossAxisSpacing: layout.isPhone ? 12 : 16,
+                  mainAxisSpacing: layout.isPhone ? 16 : 24,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final item = items[index];
-                    return Stack(
-                      children: [
-                        MovieCard(
-                          content: item,
-                          width: null,
-                          margin: EdgeInsets.zero,
-                        ),
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: GestureDetector(
-                            onTap: () => _watchlistService.removeFromList(_selectedList, item.title),
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.6),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(LucideIcons.x, color: Colors.white, size: 14),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final item = items[index];
+                  return Stack(
+                    children: [
+                      MovieCard(
+                        content: item,
+                        width: null,
+                        margin: EdgeInsets.zero,
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: GestureDetector(
+                          onTap: () => _watchlistService.removeFromList(
+                            _selectedList,
+                            item.title,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              LucideIcons.x,
+                              color: Colors.white,
+                              size: 14,
                             ),
                           ),
-                        )
-                      ],
-                    );
-                  },
-                  childCount: items.length,
-                ),
+                        ),
+                      ),
+                    ],
+                  );
+                }, childCount: items.length),
               ),
             ),
         ],

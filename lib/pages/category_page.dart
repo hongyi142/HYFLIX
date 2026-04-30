@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../widgets/movie_card.dart';
@@ -30,7 +31,8 @@ class _CategoryPageState extends State<CategoryPage> {
     super.initState();
     _loadMore();
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 500 &&
+      if (_scrollController.position.pixels >=
+              _scrollController.position.maxScrollExtent - 500 &&
           !_isLoading &&
           _hasMore) {
         _loadMore();
@@ -68,34 +70,46 @@ class _CategoryPageState extends State<CategoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ResponsiveLayout.of(context);
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          widget.title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         leading: IconButton(
           icon: const Icon(LucideIcons.arrowLeft, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: _items.isEmpty && _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: AppTheme.accent),
+            )
           : Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+              padding: EdgeInsets.symmetric(horizontal: layout.pagePadding),
               child: GridView.builder(
                 controller: _scrollController,
                 padding: const EdgeInsets.only(top: 24, bottom: 64),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 160,
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: layout.gridMaxExtent(
+                    compact: 144,
+                    tablet: 160,
+                    desktop: 170,
+                  ),
                   childAspectRatio: 0.52,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 24,
+                  crossAxisSpacing: layout.isPhone ? 12 : 16,
+                  mainAxisSpacing: layout.isPhone ? 16 : 24,
                 ),
                 itemCount: _items.length + (_hasMore ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index == _items.length) {
-                    return const Center(child: CircularProgressIndicator(color: AppTheme.accent));
+                    return const Center(
+                      child: CircularProgressIndicator(color: AppTheme.accent),
+                    );
                   }
                   return MovieCard(
                     content: _items[index],
