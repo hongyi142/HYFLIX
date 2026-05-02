@@ -104,9 +104,56 @@ class _DetailPageState extends State<DetailPage> {
     });
   }
 
-  void _refreshSourceEpisodes() {
-    // Re-fetch episodes for the current source (used on initial load)
-    _switchSource(_selectedSource, force: true);
+  Future<void> _refreshSourceEpisodes() async {
+    // Query all sources in parallel, pick the one with the most seasons
+    final api = ApiService();
+    final tmdb = _tmdb;
+    final gen = ++_sourceGeneration;
+
+    setState(() => _isLoadingEpisodes = true);
+
+    Future<List<Episode>> fetchSource(VideoSource source) async {
+      if (tmdb != null) {
+        final result = await api.matchTmdbToProviderFromSource(tmdb, source);
+        if (result != null && result.episodes.isNotEmpty) return result.episodes;
+      }
+      final results = await api.searchByTitleFromSource(widget.content.title, source);
+      final eps = <Episode>[];
+      for (final r in results) eps.addAll(r.episodes);
+      return eps;
+    }
+
+    final allResults = await Future.wait(
+      ApiService.sources.map((s) => fetchSource(s)),
+    );
+
+    if (!mounted || _sourceGeneration != gen) return;
+
+    // Count unique seasons per source
+    int seasonCount(List<Episode> eps) {
+      final seasons = <int>{};
+      for (final ep in eps) {
+        final m = RegExp(r'第(\d+)季').firstMatch(ep.name);
+        seasons.add(m != null ? (int.tryParse(m.group(1)!) ?? 1) : 1);
+      }
+      return seasons.length;
+    }
+
+    var bestIdx = 0;
+    var bestSeasons = 0;
+    for (var i = 0; i < allResults.length; i++) {
+      final sc = seasonCount(allResults[i]);
+      if (sc > bestSeasons) {
+        bestSeasons = sc;
+        bestIdx = i;
+      }
+    }
+
+    setState(() {
+      _selectedSource = ApiService.sources[bestIdx];
+      _sourceEpisodes = allResults[bestIdx].isNotEmpty ? allResults[bestIdx] : null;
+      _isLoadingEpisodes = false;
+    });
   }
 
   void _switchSource(VideoSource source, {bool force = false}) {
