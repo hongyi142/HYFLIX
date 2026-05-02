@@ -21,6 +21,19 @@ class ApiService {
     _prefs ??= await SharedPreferences.getInstance();
   }
 
+  /// Clear all cached content (call when language changes).
+  static void clearAllCache() {
+    _rawSearchCache.clear();
+    _tmdbMatchCache.clear();
+    final prefs = _prefs;
+    if (prefs != null) {
+      final keys = prefs.getKeys().where((k) => k.startsWith('cache_'));
+      for (final key in keys) {
+        prefs.remove(key);
+      }
+    }
+  }
+
   /// Parse ALL episodes from vod_play_url. Format: "EpName$url#EpName$url#..."
   static List<Episode> _parseEpisodes(String playUrl, {String imageUrl = ''}) {
     final episodes = <Episode>[];
@@ -519,15 +532,76 @@ class ApiService {
   Future<List<ContentModel>> fetchMatchedRecentPopularHongKongSeries({
     int count = 10,
     int withinDays = 60,
-  }) =>
-      _matchTmdbShelf(
-        TmdbService.fetchRecentPopularHongKongSeries(
-          count: count * 3,
-          withinDays: withinDays,
-        ),
-        count: count,
-        cacheKey: 'cache_hk_series_v5',
-      );
+  }) async {
+    final prefs = _prefs;
+
+    // Try TMDB-matched results first
+    final tmdbMatches = await _matchTmdbShelf(
+      TmdbService.fetchRecentPopularHongKongSeries(
+        count: count * 3,
+        withinDays: withinDays,
+      ),
+      count: count,
+      cacheKey: 'cache_hk_series_tmdb_v7',
+    );
+
+    if (tmdbMatches.length >= count) return tmdbMatches;
+
+    // Fallback: fetch HK/Macau dramas directly from provider
+    final providerFallback = await _fetchHongKongSeriesFromProvider(count: count * 2);
+
+    // Merge: prefer TMDB-matched, fill with provider results
+    final merged = <ContentModel>[];
+    final seenTitles = <String>{};
+    for (final item in [...tmdbMatches, ...providerFallback]) {
+      final key = _normalizeText(item.title);
+      if (key.isNotEmpty && seenTitles.add(key)) {
+        merged.add(item);
+      }
+      if (merged.length >= count) break;
+    }
+
+    // Cache merged result
+    if (prefs != null && merged.isNotEmpty) {
+      prefs.setString('cache_hk_series_v7', json.encode(merged.map((e) => e.toJson()).toList()));
+      prefs.setInt('cache_hk_series_v7_time', DateTime.now().millisecondsSinceEpoch);
+    }
+
+    return merged;
+  }
+
+  Future<List<ContentModel>> _fetchHongKongSeriesFromProvider({int count = 20}) async {
+    final prefs = _prefs;
+    const cacheKey = 'cache_hk_provider_v7';
+
+    // Check cache (6 hours)
+    if (prefs != null) {
+      final cachedJson = prefs.getString(cacheKey);
+      final cacheTime = prefs.getInt('${cacheKey}_time') ?? 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (cachedJson != null && (now - cacheTime) < 6 * 60 * 60 * 1000) {
+        try {
+          final list = json.decode(cachedJson) as List<dynamic>;
+          return list.map((e) => ContentModel.fromJson(e as Map<String, dynamic>)).toList();
+        } catch (_) {}
+      }
+    }
+
+    try {
+      // type 13 = 港澳剧 (Hong Kong/Macau Drama)
+      final items = await _fetch(Uri.parse('$_baseUrl?ac=videolist&t=13&pg=1'));
+      final results = items.take(count).toList();
+
+      if (prefs != null && results.isNotEmpty) {
+        prefs.setString(cacheKey, json.encode(results.map((e) => e.toJson()).toList()));
+        prefs.setInt('${cacheKey}_time', DateTime.now().millisecondsSinceEpoch);
+      }
+
+      return results;
+    } catch (_) {
+      return [];
+    }
+  }
 
   Future<List<ContentModel>> fetchLatest({int page = 1}) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&pg=$page'));

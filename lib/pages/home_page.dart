@@ -38,11 +38,16 @@ class HomePage extends StatefulWidget {
     this.hkSeries = const [],
   });
 
+  static void refreshFromLanguageChange() {
+    _HomePageState._instance?._refreshContent();
+  }
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
+  static _HomePageState? _instance;
   final ApiService _api = ApiService();
   List<ContentModel> _trendingMovies = [];
   List<ContentModel> _trendingSeries = [];
@@ -55,13 +60,20 @@ class _HomePageState extends State<HomePage> {
   List<ContentModel> _trendingItems = [];
   Map<int, TmdbResult> _trendingTmdb = {};
   bool _isLoading = true;
+  List<ContentModel> _providerContent = [];
 
   final ScrollController _scrollController = ScrollController();
   bool _isScrolled = false;
 
+  void _refreshContent() {
+    setState(() => _isLoading = true);
+    _loadContent();
+  }
+
   @override
   void initState() {
     super.initState();
+    _instance = this;
     _trendingMovies = widget.trendingMovies;
     _trendingSeries = widget.trendingSeries;
     _chineseAnimation = widget.chineseAnim;
@@ -89,6 +101,9 @@ class _HomePageState extends State<HomePage> {
       history = await UserService.getWatchHistory();
     }
 
+    // Fetch provider content for continue watching fallback
+    final providerContent = await _api.fetchLatest();
+
     final trendingItems = <ContentModel>[];
     final trendingTmdbMap = <int, TmdbResult>{};
     for (int i = 0; i < trendingTmdbResults.length; i++) {
@@ -112,6 +127,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() {
       _watchHistory = history;
+      _providerContent = providerContent;
       _trendingItems = trendingItems;
       _trendingTmdb = trendingTmdbMap;
       _isLoading = false;
@@ -129,6 +145,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _instance = null;
     _scrollController.dispose();
     super.dispose();
   }
@@ -171,6 +188,7 @@ class _HomePageState extends State<HomePage> {
       ..._koreanDramas,
       ..._westernSeries,
       ..._hongKongSeries,
+      ..._providerContent,
     ];
     final watchingItems = <ContentModel>[];
     final seenTitles = <String>{};
@@ -244,7 +262,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Continue Watching',
-                    height: layout.landscapeCardWidth * 0.565 + 72,
+                    height: layout.landscapeCardWidth * 0.565 + 84,
                     count: watchingItems.length,
                     builder: (i) => VideoCard(
                       content: watchingItems[i],
@@ -259,7 +277,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Movies',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _trendingMovies.take(10).length,
                     builder: (i) => MovieCard(
                       content: _trendingMovies[i],
@@ -279,7 +297,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Series',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _trendingSeries.take(10).length,
                     builder: (i) => MovieCard(
                       content: _trendingSeries[i],
@@ -299,7 +317,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Chinese Series',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _chineseDramas.take(10).length,
                     builder: (i) => MovieCard(
                       content: _chineseDramas[i],
@@ -320,7 +338,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Chinese Animation',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _chineseAnimation.take(10).length,
                     builder: (i) => MovieCard(
                       content: _chineseAnimation[i],
@@ -340,7 +358,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Korean Series',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _koreanDramas.take(10).length,
                     builder: (i) => MovieCard(
                       content: _koreanDramas[i],
@@ -360,7 +378,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Western Series',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _westernSeries.take(10).length,
                     builder: (i) => MovieCard(
                       content: _westernSeries[i],
@@ -381,7 +399,7 @@ class _HomePageState extends State<HomePage> {
                   _buildHorizontalSection(
                     context: context,
                     title: 'Top Trending Hong Kong Series',
-                    height: layout.posterCardWidth * 1.85,
+                    height: layout.posterCardWidth * 1.85 + 16,
                     count: _hongKongSeries.take(10).length,
                     builder: (i) => MovieCard(
                       content: _hongKongSeries[i],
@@ -482,7 +500,11 @@ class _HomePageState extends State<HomePage> {
           height: height,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.symmetric(horizontal: layout.pagePadding),
+            padding: EdgeInsets.symmetric(
+              horizontal: layout.pagePadding,
+              vertical: 8,
+            ),
+            clipBehavior: Clip.none,
             itemCount: count,
             itemBuilder: (context, i) => builder(i),
           ),

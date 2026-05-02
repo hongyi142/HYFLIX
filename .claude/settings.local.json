@@ -4,7 +4,11 @@
       "Bash(flutter analyze *)",
       "WebSearch",
       "WebFetch(domain:pub.dev)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.subhero.net)",
+      "WebFetch(domain:www.subhero.net)",
+      "WebFetch(domain:opensubtitles.stoplight.io)",
+      "WebFetch(domain:www.opensubtitles.com)"
     ]
   }
 }

@@ -53,6 +53,15 @@ class TmdbService {
 
   static final Map<String, TmdbResult?> _cache = {};
 
+  /// Current language for TMDB API responses. 'en-US' or 'zh-CN'.
+  static String currentLanguage = 'en-US';
+
+  /// Set the app language and clear caches so content refetches in the new language.
+  static void setLanguage(String lang) {
+    currentLanguage = lang == 'zh' ? 'zh-CN' : 'en-US';
+    _cache.clear();
+  }
+
   static List<TmdbResult> _mapResults(List<dynamic> results, {int? count}) {
     final mapped = results.map((hit) {
       final genreIdsRaw = (hit['genre_ids'] as List<dynamic>? ?? []);
@@ -103,7 +112,7 @@ class TmdbService {
       final currentYear = DateTime.now().year.toString();
       final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
         'api_key': tmdbApiKey,
-        'language': 'en-US',
+        'language': currentLanguage,
         'sort_by': 'popularity.desc',
         'primary_release_year': currentYear,
         'include_adult': 'false',
@@ -136,7 +145,7 @@ class TmdbService {
       final currentYear = DateTime.now().year.toString();
       final uri = Uri.https('api.themoviedb.org', '/3/discover/tv', {
         'api_key': tmdbApiKey,
-        'language': 'en-US',
+        'language': currentLanguage,
         'sort_by': 'popularity.desc',
         'first_air_date_year': currentYear,
         'include_adult': 'false',
@@ -173,7 +182,7 @@ class TmdbService {
       final cutoff = today.subtract(Duration(days: withinDays));
       final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
         'api_key': tmdbApiKey,
-        'language': 'en-US',
+        'language': currentLanguage,
         'include_adult': 'false',
         'include_video': 'false',
         'sort_by': 'popularity.desc',
@@ -209,7 +218,7 @@ class TmdbService {
       for (int page = 1; page <= maxPages && items.length < count; page++) {
         final query = <String, String>{
           'api_key': tmdbApiKey,
-          'language': 'en-US',
+          'language': currentLanguage,
           'include_adult': 'false',
           'sort_by': 'popularity.desc',
           'page': '$page',
@@ -323,7 +332,6 @@ class TmdbService {
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
-          'with_original_language': 'zh',
           'with_origin_country': 'HK',
           'without_genres': '16',
         },
@@ -407,7 +415,7 @@ class TmdbService {
       final params = {
         'api_key': tmdbApiKey,
         'query': cleanedTitle,
-        'language': 'en-US',
+        'language': currentLanguage,
         'include_adult': 'false',
       };
       
@@ -480,7 +488,7 @@ class TmdbService {
       final searchUri = Uri.https('api.themoviedb.org', '/3/search/multi', {
         'api_key': tmdbApiKey,
         'query': englishQuery,
-        'language': 'en-US',
+        'language': currentLanguage,
       });
 
       final searchRes = await http.get(searchUri).timeout(const Duration(seconds: 5));

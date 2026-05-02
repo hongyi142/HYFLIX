@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'core/theme.dart';
-import 'pages/home_page.dart';
 import 'pages/splash_page.dart';
 import 'pages/auth_page.dart';
 import 'services/auth_service.dart';

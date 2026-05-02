@@ -262,6 +262,14 @@ class _VideoCardState extends State<VideoCard> {
     );
   }
 
+  static int? _extractSeasonFromEpisodeName(String name) {
+    final cnMatch = RegExp(r'第(\d+)季').firstMatch(name);
+    if (cnMatch != null) return int.tryParse(cnMatch.group(1)!);
+    final sMatch = RegExp(r'[Ss](\d{1,2})').firstMatch(name);
+    if (sMatch != null) return int.tryParse(sMatch.group(1)!);
+    return null;
+  }
+
   void _handleTap() {
     if (widget.content.resumeEpisodeIndex != null &&
         widget.content.m3u8Url.isNotEmpty) {
@@ -271,6 +279,12 @@ class _VideoCardState extends State<VideoCard> {
               epIndex < widget.content.episodes.length
           ? widget.content.episodes[epIndex].url
           : widget.content.m3u8Url;
+      // Extract season number from the episode name
+      final epName = widget.content.episodes.isNotEmpty &&
+              epIndex < widget.content.episodes.length
+          ? widget.content.episodes[epIndex].name
+          : '';
+      final seasonNum = _extractSeasonFromEpisodeName(epName);
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -282,6 +296,7 @@ class _VideoCardState extends State<VideoCard> {
             initialEpisodeIndex: epIndex,
             tmdbId: _tmdbResult?.id?.toString(),
             isTvShow: widget.content.episodes.length > 1,
+            seasonNumber: seasonNum,
             posterUrl: widget.content.thumbnailUrl,
             seekToSeconds: widget.content.resumePositionSeconds ?? 0,
           ),

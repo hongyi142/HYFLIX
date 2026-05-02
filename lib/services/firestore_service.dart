@@ -150,6 +150,17 @@ class FirestoreService {
     return favsMap.keys.toList();
   }
 
+  // ── Language Preference ──────────────────────────────────────────────
+
+  static Future<void> saveLanguage(String lang) async {
+    await _patch('$_usersPath.json', {'language': lang});
+  }
+
+  static Future<String> getLanguage() async {
+    final profile = await getProfile();
+    return (profile?['language'] as String?) ?? 'en';
+  }
+
   // ── Low-level REST helpers ───────────────────────────────────────────
 
   static Future<Map<String, dynamic>?> _get(String url) async {

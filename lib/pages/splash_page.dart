@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
-import '../models/content_model.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
+import '../services/tmdb_service.dart';
+import '../services/user_service.dart';
 import 'home_page.dart';
 
 class SplashPage extends StatefulWidget {
@@ -32,6 +34,11 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   Future<void> _loadData() async {
     final api = ApiService();
     try {
+      // Load language preference before fetching content
+      if (AuthService.isLoggedIn) {
+        final lang = await UserService.getLanguage();
+        TmdbService.setLanguage(lang);
+      }
       final results = await Future.wait([
         api.fetchMatchedTrendingMovies(count: 10),
         api.fetchMatchedTrendingTVSeries(count: 10),
@@ -39,7 +46,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
         api.fetchMatchedRecentPopularChineseDramas(count: 10),
         api.fetchMatchedRecentPopularKoreanDramas(count: 10),
         api.fetchMatchedRecentPopularWesternSeries(count: 10),
-        api.fetchMatchedRecentPopularHongKongSeries(count: 10),
+        api.fetchMatchedRecentPopularHongKongSeries(count: 10, withinDays: 365),
       ]);
 
       if (mounted) {

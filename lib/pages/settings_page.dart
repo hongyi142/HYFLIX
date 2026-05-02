@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
+import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/tmdb_service.dart';
 import '../services/user_service.dart';
+import 'home_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -23,12 +26,47 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _savingEmail = false;
   bool _savingPassword = false;
   bool _clearingHistory = false;
+  String _language = 'en';
 
   @override
   void initState() {
     super.initState();
     _nameController.text = AuthService.displayName ?? '';
     _emailController.text = AuthService.email ?? '';
+    _loadLanguage();
+  }
+
+  Future<void> _loadLanguage() async {
+    try {
+      final lang = await UserService.getLanguage();
+      if (mounted) setState(() => _language = lang);
+    } catch (_) {}
+  }
+
+  Future<void> _saveLanguage(String lang) async {
+    setState(() => _language = lang);
+    TmdbService.setLanguage(lang);
+    ApiService.clearAllCache();
+    try {
+      await UserService.saveLanguage(lang);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(lang == 'zh' ? '语言已切换为中文，正在刷新内容...' : 'Language set to English, refreshing...'),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+        // Trigger home page refresh and pop back
+        HomePage.refreshFromLanguageChange();
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.accent),
+        );
+      }
+    }
   }
 
   @override
@@ -185,6 +223,7 @@ class _SettingsPageState extends State<SettingsPage> {
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(child: _buildHeader()),
+          SliverToBoxAdapter(child: _buildLanguageSection()),
           SliverToBoxAdapter(child: _buildDisplayNameSection()),
           SliverToBoxAdapter(child: _buildEmailSection()),
           SliverToBoxAdapter(child: _buildPasswordSection()),
@@ -295,6 +334,83 @@ class _SettingsPageState extends State<SettingsPage> {
         child: loading
             ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
             : Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+
+  Widget _buildLanguageSection() {
+    return _buildSection(
+      title: 'System Language',
+      children: [
+        const Text(
+          'Choose your preferred language. Content titles, descriptions, and metadata will be displayed in the selected language.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        _buildLanguageOption(
+          value: 'en',
+          label: 'English',
+          subtitle: 'Content displayed in English',
+          icon: LucideIcons.globe,
+        ),
+        const SizedBox(height: 8),
+        _buildLanguageOption(
+          value: 'zh',
+          label: '中文 (Chinese)',
+          subtitle: '内容以中文显示',
+          icon: LucideIcons.globe,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLanguageOption({
+    required String value,
+    required String label,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final isActive = _language == value;
+    return GestureDetector(
+      onTap: () => _saveLanguage(value),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isActive ? AppTheme.accent.withOpacity(0.15) : AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isActive ? AppTheme.accent : Colors.white12,
+            width: isActive ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: isActive ? AppTheme.accent : AppTheme.textSecondary, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: isActive ? Colors.white : AppTheme.textPrimary,
+                      fontSize: 14,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            if (isActive)
+              const Icon(LucideIcons.checkCircle, color: AppTheme.accent, size: 20),
+          ],
+        ),
       ),
     );
   }

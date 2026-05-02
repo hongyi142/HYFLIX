@@ -81,4 +81,12 @@ class UserService {
   static Future<Map<String, dynamic>?> getIntroTimestamp(String contentId) async {
     return await FirestoreService.getIntroTimestamp(contentId);
   }
+
+  static Future<void> saveLanguage(String lang) async {
+    await FirestoreService.saveLanguage(lang);
+  }
+
+  static Future<String> getLanguage() async {
+    return await FirestoreService.getLanguage();
+  }
 }
