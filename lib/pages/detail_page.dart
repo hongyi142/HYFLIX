@@ -72,12 +72,10 @@ class _DetailPageState extends State<DetailPage> {
         if (mounted) {
           setState(() => _tmdb = r);
           _fetchCast();
-          _refreshSourceEpisodes();
         }
       });
     } else {
       _fetchCast();
-      _refreshSourceEpisodes();
     }
     _checkListed();
     _watchlistService.addListener(_checkListed);
