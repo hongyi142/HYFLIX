@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/content_model.dart';
@@ -692,16 +693,16 @@ class ApiService {
     }
 
     final queries = _buildSearchQueries(tmdb);
+    // Track each candidate with the query that found it
     final candidates = <Map<String, dynamic>>[];
     final seen = <String>{};
-    String bestQuery = queries.isNotEmpty ? queries.first : '';
 
     for (final q in queries) {
       final results = await _searchRawByTitleFromSource(q, source);
       for (final r in results) {
         final key =
             '${r['vod_id']}_${TmdbService.cleanTitle(r['vod_name'] as String? ?? '')}';
-        if (seen.add(key)) candidates.add(r);
+        if (seen.add(key)) candidates.add({'query': q, 'raw': r});
       }
     }
 
@@ -710,15 +711,22 @@ class ApiService {
       return null;
     }
 
+    // Score each candidate using its own query
+    final scoredItems = <Map<String, dynamic>, int>{};
     Map<String, dynamic>? best;
     var bestScore = -999;
     for (final c in candidates) {
-      final s = _scoreRawMatch(c, tmdb, query: bestQuery);
+      final raw = c['raw'] as Map<String, dynamic>;
+      final q = c['query'] as String;
+      final s = _scoreRawMatch(raw, tmdb, query: q);
+      scoredItems[raw] = s;
+      debugPrint('[SourceMatch] "${raw['vod_name']}" query="$q" score=$s');
       if (s > bestScore) {
         bestScore = s;
-        best = c;
+        best = raw;
       }
     }
+    debugPrint('[SourceMatch] bestScore=$bestScore candidates=${candidates.length}');
 
     if (bestScore < 35 && tmdb.englishTitle.isNotEmpty) {
       final chineseTitles =
@@ -729,12 +737,12 @@ class ApiService {
         for (final r in results) {
           final key =
               '${r['vod_id']}_${TmdbService.cleanTitle(r['vod_name'] as String? ?? '')}';
-          if (seen.add(key)) candidates.add(r);
+          if (seen.add(key)) candidates.add({'query': ct, 'raw': r});
           final s = _scoreRawMatch(r, tmdb, query: ct);
+          scoredItems[r] = s;
           if (s > bestScore) {
             bestScore = s;
             best = r;
-            bestQuery = ct;
           }
         }
       }
@@ -745,26 +753,33 @@ class ApiService {
       return null;
     }
 
+    // Group all items with the same cleaned title (skip score threshold —
+    // items already passed the bestScore >= 35 check above)
     final bestTitle =
         TmdbService.cleanTitle(best['vod_name'] as String? ?? '');
-    final group = candidates
-        .where((c) =>
-            _scoreRawMatch(c, tmdb, query: bestQuery) >= 30 &&
-            TmdbService.cleanTitle(c['vod_name'] as String? ?? '') ==
-                bestTitle)
-        .toList();
-    if (group.length <= 1) {
+    debugPrint('[SourceMatch] bestTitle="$bestTitle"');
+    final modelsToMerge = <ContentModel>[];
+    for (final entry in scoredItems.entries) {
+      final model = _fromJson(entry.key);
+      final cleaned = TmdbService.cleanTitle(model.title);
+      debugPrint('[SourceMatch]   candidate "${model.title}" cleaned="$cleaned" score=${entry.value} match=${cleaned == bestTitle}');
+      if (cleaned == bestTitle) {
+        modelsToMerge.add(model);
+      }
+    }
+
+    debugPrint('[SourceMatch] modelsToMerge=${modelsToMerge.length}');
+
+    if (modelsToMerge.length <= 1) {
       final result = _fromJson(best);
+      debugPrint('[SourceMatch] single result, episodes=${result.episodes.length}');
       _tmdbMatchCache[cacheKey] = result;
       return result;
     }
 
-    final items = group
-        .map((e) => _fromJson(e))
-        .where((c) => c.m3u8Url.isNotEmpty && c.thumbnailUrl.isNotEmpty)
-        .toList();
-    final merged = _groupSeasons(items);
+    final merged = _groupSeasons(modelsToMerge);
     final result = merged.isNotEmpty ? merged.first : null;
+    debugPrint('[SourceMatch] merged seasons, episodes=${result?.episodes.length ?? 0}');
     _tmdbMatchCache[cacheKey] = result;
     return result;
   }

@@ -57,6 +57,9 @@ class _DetailPageState extends State<DetailPage> {
   VideoSource _selectedSource = ApiService.sources.first;
   List<Episode>? _sourceEpisodes;
   bool _isLoadingEpisodes = false;
+  List<String> _cast = [];
+  bool _reverseEpisodes = false;
+  int _sourceGeneration = 0;
 
   @override
   void initState() {
@@ -66,8 +69,15 @@ class _DetailPageState extends State<DetailPage> {
       TmdbService.search(widget.content.title, year: widget.content.year).then((
         r,
       ) {
-        if (mounted) setState(() => _tmdb = r);
+        if (mounted) {
+          setState(() => _tmdb = r);
+          _fetchCast();
+          _refreshSourceEpisodes();
+        }
       });
+    } else {
+      _fetchCast();
+      _refreshSourceEpisodes();
     }
     _checkListed();
     _watchlistService.addListener(_checkListed);
@@ -85,32 +95,64 @@ class _DetailPageState extends State<DetailPage> {
     if (mounted) setState(() {});
   }
 
-  void _switchSource(VideoSource source) {
-    if (source == _selectedSource) return;
+  void _fetchCast() {
+    final id = _tmdb?.id;
+    final mediaType = _tmdb?.mediaType;
+    if (id == null) return;
+    TmdbService.fetchCast(id, mediaType ?? 'movie').then((cast) {
+      if (mounted && cast.isNotEmpty) setState(() => _cast = cast);
+    });
+  }
+
+  void _refreshSourceEpisodes() {
+    // Re-fetch episodes for the current source (used on initial load)
+    _switchSource(_selectedSource, force: true);
+  }
+
+  void _switchSource(VideoSource source, {bool force = false}) {
+    if (!force && source == _selectedSource) return;
+    final gen = ++_sourceGeneration;
     setState(() {
       _selectedSource = source;
       _isLoadingEpisodes = true;
     });
     final api = ApiService();
     final tmdb = _tmdb;
+
+    Future<void> applyEpisodes(List<Episode>? eps) async {
+      if (!mounted || _sourceGeneration != gen) return;
+      setState(() {
+        _sourceEpisodes = eps;
+        _isLoadingEpisodes = false;
+      });
+    }
+
     if (tmdb != null) {
-      api.matchTmdbToProviderFromSource(tmdb, source).then((result) {
-        if (!mounted) return;
-        setState(() {
-          _sourceEpisodes = result?.episodes;
-          _isLoadingEpisodes = false;
-        });
+      api.matchTmdbToProviderFromSource(tmdb, source).then((result) async {
+        final matchedEps = result?.episodes ?? [];
+        // If TMDB match returned results, use them
+        if (matchedEps.isNotEmpty) {
+          await applyEpisodes(matchedEps);
+          return;
+        }
+        // Fallback: direct search by original title + cleaned title
+        final fallbackResults = await api.searchByTitleFromSource(
+          widget.content.title, source);
+        final allEps = <Episode>[];
+        for (final r in fallbackResults) {
+          allEps.addAll(r.episodes);
+        }
+        await applyEpisodes(allEps.isNotEmpty ? allEps : null);
       });
     } else {
       api
           .searchByTitleFromSource(widget.content.title, source)
-          .then((results) {
-        if (!mounted) return;
-        setState(() {
-          _sourceEpisodes =
-              results.isNotEmpty ? results.first.episodes : null;
-          _isLoadingEpisodes = false;
-        });
+          .then((results) async {
+        final allEps = <Episode>[];
+        for (final r in results) {
+          allEps.addAll(r.episodes);
+        }
+        await applyEpisodes(allEps.isNotEmpty ? allEps : null);
       });
     }
   }
@@ -587,8 +629,8 @@ class _DetailPageState extends State<DetailPage> {
                             : const Color(0x662F3640),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
+                            horizontal: 28,
+                            vertical: 12,
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -602,15 +644,15 @@ class _DetailPageState extends State<DetailPage> {
                                     : Colors.white,
                                 size: 20,
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 8),
                               Text(
                                 _isListed ? 'Added' : 'My List',
                                 style: TextStyle(
                                   color: _isListed
                                       ? AppTheme.accent
                                       : Colors.white,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
                                   decoration: TextDecoration.none,
                                 ),
                               ),
@@ -728,6 +770,11 @@ class _DetailPageState extends State<DetailPage> {
           _sidebarRow('Genres:', genres.join(', ')),
           const SizedBox(height: 12),
         ],
+        // Cast
+        if (_cast.isNotEmpty) ...[
+          _sidebarRow('Cast:', _cast.join(', ')),
+          const SizedBox(height: 12),
+        ],
         // Rating
         if (widget.content.rating > 0) ...[
           _sidebarRow('Rating:', widget.content.rating.toStringAsFixed(1)),
@@ -779,9 +826,10 @@ class _DetailPageState extends State<DetailPage> {
     }
     final seasons = seasonMap.keys.toList()..sort();
     final hasSeasons = seasons.length > 1;
-    final filteredEpisodes = hasSeasons
+    var filteredEpisodes = hasSeasons
         ? (seasonMap[_selectedSeason] ?? [])
         : episodes;
+    if (_reverseEpisodes) filteredEpisodes = filteredEpisodes.reversed.toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -794,10 +842,7 @@ class _DetailPageState extends State<DetailPage> {
             layout.isPhone ? 20 : 32,
             16,
           ),
-          child: Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 12,
-            runSpacing: 12,
+          child: Row(
             children: [
               const Text(
                 'Episodes',
@@ -808,7 +853,7 @@ class _DetailPageState extends State<DetailPage> {
                   decoration: TextDecoration.none,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               if (hasSeasons)
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -862,6 +907,7 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ),
                 ),
+              const SizedBox(width: 8),
               // Source picker
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -898,7 +944,8 @@ class _DetailPageState extends State<DetailPage> {
                   },
                 ),
               ),
-              if (_isLoadingEpisodes)
+              if (_isLoadingEpisodes) ...[
+                const SizedBox(width: 8),
                 const SizedBox(
                   width: 16,
                   height: 16,
@@ -907,6 +954,24 @@ class _DetailPageState extends State<DetailPage> {
                     color: AppTheme.accent,
                   ),
                 ),
+              ],
+              const Spacer(),
+              // Reverse order button
+              GestureDetector(
+                onTap: () => setState(() => _reverseEpisodes = !_reverseEpisodes),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: _reverseEpisodes ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    LucideIcons.arrowDownUp,
+                    color: _reverseEpisodes ? AppTheme.accent : AppTheme.textSecondary,
+                    size: 20,
+                  ),
+                ),
+              ),
             ],
           ),
         ),

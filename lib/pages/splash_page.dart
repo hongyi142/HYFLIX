@@ -16,6 +16,8 @@ class SplashPage extends StatefulWidget {
 class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
+  double _progress = 0.0;
+  static const int _totalSteps = 8; // 7 content fetches + 1 language load
 
   @override
   void initState() {
@@ -31,6 +33,10 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
     _loadData();
   }
 
+  void _tickProgress() {
+    if (mounted) setState(() => _progress += 1.0 / _totalSteps);
+  }
+
   Future<void> _loadData() async {
     final api = ApiService();
     try {
@@ -39,14 +45,17 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
         final lang = await UserService.getLanguage();
         TmdbService.setLanguage(lang);
       }
+      _tickProgress();
+
+      // Fetch all content in parallel, tracking progress as each completes
       final results = await Future.wait([
-        api.fetchMatchedTrendingMovies(count: 10),
-        api.fetchMatchedTrendingTVSeries(count: 10),
-        api.fetchMatchedRecentPopularChineseAnimation(count: 10),
-        api.fetchMatchedRecentPopularChineseDramas(count: 10),
-        api.fetchMatchedRecentPopularKoreanDramas(count: 10),
-        api.fetchMatchedRecentPopularWesternSeries(count: 10),
-        api.fetchMatchedRecentPopularHongKongSeries(count: 10, withinDays: 365),
+        api.fetchMatchedTrendingMovies(count: 10).then((r) { _tickProgress(); return r; }),
+        api.fetchMatchedTrendingTVSeries(count: 10).then((r) { _tickProgress(); return r; }),
+        api.fetchMatchedRecentPopularChineseAnimation(count: 10).then((r) { _tickProgress(); return r; }),
+        api.fetchMatchedRecentPopularChineseDramas(count: 10).then((r) { _tickProgress(); return r; }),
+        api.fetchMatchedRecentPopularKoreanDramas(count: 10).then((r) { _tickProgress(); return r; }),
+        api.fetchMatchedRecentPopularWesternSeries(count: 10).then((r) { _tickProgress(); return r; }),
+        api.fetchMatchedRecentPopularHongKongSeries(count: 10, withinDays: 365).then((r) { _tickProgress(); return r; }),
       ]);
 
       if (mounted) {
@@ -89,26 +98,44 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Center(
-        child: ScaleTransition(
-          scale: _animation,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.accent.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.accent.withOpacity(0.5)),
-            ),
-            child: const Text(
-              'HYFLIX',
-              style: TextStyle(
-                color: AppTheme.accent,
-                fontSize: 48,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 4,
-                decoration: TextDecoration.none,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ScaleTransition(
+              scale: _animation,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.accent.withOpacity(0.5)),
+                ),
+                child: const Text(
+                  'HYFLIX',
+                  style: TextStyle(
+                    color: AppTheme.accent,
+                    fontSize: 48,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 4,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
               ),
             ),
-          ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: 200,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _progress,
+                  backgroundColor: Colors.white12,
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                  minHeight: 3,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

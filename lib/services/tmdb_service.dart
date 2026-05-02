@@ -480,6 +480,32 @@ class TmdbService {
     }
   }
 
+  /// Fetches the top-billed cast names for a movie or TV show.
+  static Future<List<String>> fetchCast(int id, String mediaType, {int limit = 10}) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+
+    try {
+      final type = mediaType == 'tv' ? 'tv' : 'movie';
+      final uri = Uri.https('api.themoviedb.org', '/3/$type/$id/credits', {
+        'api_key': tmdbApiKey,
+        'language': currentLanguage,
+      });
+
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return [];
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final cast = body['cast'] as List<dynamic>? ?? [];
+      return cast
+          .take(limit)
+          .map((c) => (c['name'] ?? '') as String)
+          .where((n) => n.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Searches TMDB for an English title and returns potential Chinese titles
   static Future<List<String>> findChineseTitles(String englishQuery) async {
     final candidates = <String>{};
