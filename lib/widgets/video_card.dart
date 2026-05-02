@@ -110,44 +110,32 @@ class _VideoCardState extends State<VideoCard> {
         ? widget.content.subtitle
         : widget.content.description;
 
-    return GestureDetector(
-      onTap: () {
-        // If this is a continue watching item with resume data, go directly to the player
-        if (widget.content.resumeEpisodeIndex != null &&
-            widget.content.m3u8Url.isNotEmpty) {
-          final epIndex = widget.content.resumeEpisodeIndex!;
-          final videoUrl =
-              widget.content.episodes.isNotEmpty &&
-                  epIndex < widget.content.episodes.length
-              ? widget.content.episodes[epIndex].url
-              : widget.content.m3u8Url;
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => VideoPlayerScreen(
-                videoUrl: videoUrl,
-                title: displayTitle,
-                originalTitle: widget.content.title,
-                episodes: widget.content.episodes,
-                initialEpisodeIndex: epIndex,
-                tmdbId: _tmdbResult?.id?.toString(),
-                isTvShow: widget.content.episodes.length > 1,
-                posterUrl: widget.content.thumbnailUrl,
-                seekToSeconds: widget.content.resumePositionSeconds ?? 0,
-              ),
-            ),
-          ).then((_) => widget.onWatchHistoryChanged?.call());
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) {
+        if (hasFocus) {
+          _onEnter();
         } else {
-          DetailPage.show(
-            context,
-            widget.content,
-            initialTmdb: _tmdbResult,
-          ).then((_) => widget.onWatchHistoryChanged?.call());
+          _onExit();
         }
       },
-      child: MouseRegion(
-        onEnter: (_) => _onEnter(),
-        onExit: (_) => _onExit(),
+      onShowHoverHighlight: (hasHover) {
+        if (hasHover) {
+          _onEnter();
+        } else {
+          _onExit();
+        }
+      },
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            // Handle DPAD selection similar to tap
+            _handleTap();
+            return null;
+          },
+        ),
+      },
+      child: GestureDetector(
+        onTap: _handleTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           transform: Matrix4.identity()..scale(_isHovered ? 1.04 : 1.0),
@@ -162,7 +150,19 @@ class _VideoCardState extends State<VideoCard> {
                 height: widget.width * 0.565,
                 decoration: BoxDecoration(
                   borderRadius: AppTheme.radius16,
-                  boxShadow: _isHovered ? AppTheme.softShadow : [],
+                  boxShadow: _isHovered
+                      ? [
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.3),
+                            blurRadius: 15,
+                            spreadRadius: 3,
+                          ),
+                          ...AppTheme.softShadow
+                        ]
+                      : [],
+                  border: _isHovered
+                      ? Border.all(color: Colors.white, width: 2)
+                      : null,
                 ),
                 child: ClipRRect(
                   borderRadius: AppTheme.radius16,
@@ -237,8 +237,8 @@ class _VideoCardState extends State<VideoCard> {
               const SizedBox(height: 10),
               Text(
                 displayTitle,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
+                style: TextStyle(
+                  color: _isHovered ? Colors.white : AppTheme.textPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
@@ -260,5 +260,39 @@ class _VideoCardState extends State<VideoCard> {
         ),
       ),
     );
+  }
+
+  void _handleTap() {
+    if (widget.content.resumeEpisodeIndex != null &&
+        widget.content.m3u8Url.isNotEmpty) {
+      final epIndex = widget.content.resumeEpisodeIndex!;
+      final videoUrl =
+          widget.content.episodes.isNotEmpty &&
+              epIndex < widget.content.episodes.length
+          ? widget.content.episodes[epIndex].url
+          : widget.content.m3u8Url;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(
+            videoUrl: videoUrl,
+            title: _tmdbTitle ?? widget.content.title,
+            originalTitle: widget.content.title,
+            episodes: widget.content.episodes,
+            initialEpisodeIndex: epIndex,
+            tmdbId: _tmdbResult?.id?.toString(),
+            isTvShow: widget.content.episodes.length > 1,
+            posterUrl: widget.content.thumbnailUrl,
+            seekToSeconds: widget.content.resumePositionSeconds ?? 0,
+          ),
+        ),
+      ).then((_) => widget.onWatchHistoryChanged?.call());
+    } else {
+      DetailPage.show(
+        context,
+        widget.content,
+        initialTmdb: _tmdbResult,
+      ).then((_) => widget.onWatchHistoryChanged?.call());
+    }
   }
 }

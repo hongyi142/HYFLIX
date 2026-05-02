@@ -7,6 +7,7 @@ import '../models/episode.dart';
 import '../pages/video_player_screen.dart';
 import '../services/watchlist_service.dart';
 import '../services/tmdb_service.dart';
+import '../widgets/buttons.dart';
 
 class DetailPage extends StatefulWidget {
   final ContentModel content;
@@ -385,15 +386,11 @@ class _DetailPageState extends State<DetailPage> {
         Positioned(
           top: layout.isPhone ? 16 : 40,
           left: layout.isPhone ? 12 : 20,
-          child: GestureDetector(
+          child: HoverButton(
             onTap: () => Navigator.of(context).pop(),
-            child: Container(
+            backgroundColor: Colors.black54,
+            child: Padding(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
-              ),
               child: const Icon(
                 LucideIcons.arrowLeft,
                 color: Colors.white,
@@ -405,15 +402,11 @@ class _DetailPageState extends State<DetailPage> {
         Positioned(
           top: layout.isPhone ? 16 : 40,
           right: layout.isPhone ? 12 : 20,
-          child: GestureDetector(
+          child: HoverButton(
             onTap: () => Navigator.of(context).pop(),
-            child: Container(
+            backgroundColor: Colors.black54,
+            child: Padding(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
-              ),
               child: const Icon(LucideIcons.x, color: Colors.white, size: 22),
             ),
           ),
@@ -485,16 +478,13 @@ class _DetailPageState extends State<DetailPage> {
                     spacing: buttonWrapSpacing,
                     runSpacing: 12,
                     children: [
-                      GestureDetector(
+                      HoverButton(
                         onTap: () => _play(0),
-                        child: Container(
+                        backgroundColor: Colors.white,
+                        child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 28,
                             vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
@@ -518,23 +508,15 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                         ),
                       ),
-                      GestureDetector(
+                      HoverButton(
                         onTap: _showAddToListModal,
-                        child: Container(
+                        backgroundColor: _isListed
+                            ? AppTheme.accent.withOpacity(0.2)
+                            : const Color(0x662F3640),
+                        child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _isListed
-                                ? AppTheme.accent.withOpacity(0.2)
-                                : const Color(0x662F3640),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: _isListed
-                                  ? AppTheme.accent
-                                  : Colors.white24,
-                            ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -828,19 +810,20 @@ class _DetailPageState extends State<DetailPage> {
     final epName = episode.name.isNotEmpty
         ? episode.name
         : 'Episode ${index + 1}';
-    return GestureDetector(
-      onTap: () => _play(index),
-      child: Container(
-        margin: EdgeInsets.symmetric(
-          horizontal: layout.isPhone ? 20 : 32,
-          vertical: 6,
-        ),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppTheme.cardDark,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white12),
-        ),
+    return Container(
+      margin: EdgeInsets.symmetric(
+        horizontal: layout.isPhone ? 20 : 32,
+        vertical: 6,
+      ),
+      child: Material(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _play(index),
+          focusColor: Colors.white24,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
         child: layout.isPhone
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -969,7 +952,9 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                 ],
               ),
-      ),
+            ),
+          ),
+        ),
     );
   }
 

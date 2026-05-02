@@ -16,6 +16,7 @@ import '../widgets/hero_card.dart';
 import '../widgets/movie_card.dart';
 import '../widgets/navbar.dart';
 import '../widgets/video_card.dart';
+import '../widgets/buttons.dart';
 
 class HomePage extends StatefulWidget {
   final List<ContentModel> trendingMovies;
@@ -448,26 +449,30 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               if (onViewAll != null)
-                GestureDetector(
+                HoverButton(
                   onTap: onViewAll,
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'View All',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                  backgroundColor: Colors.transparent,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'View All',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      SizedBox(width: 4),
-                      Icon(
-                        Icons.arrow_forward_ios,
-                        color: AppTheme.textSecondary,
-                        size: 12,
-                      ),
-                    ],
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          color: AppTheme.textSecondary,
+                          size: 12,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
             ],
