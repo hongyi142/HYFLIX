@@ -24,20 +24,29 @@ class _HoverButtonState extends State<HoverButton> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) => setState(() => _isHovered = hasFocus),
+      onShowHoverHighlight: (hasHover) => setState(() => _isHovered = hasHover),
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            widget.onTap();
+            return null;
+          },
+        ),
+      },
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
-          transform: Matrix4.identity()..scale(_isHovered ? 1.02 : 1.0),
+          transform: Matrix4.identity()..scale(_isHovered ? 1.05 : 1.0),
           transformAlignment: Alignment.center,
           decoration: BoxDecoration(
             color: widget.backgroundColor,
             borderRadius: AppTheme.radiusButton,
             boxShadow: widget.hasShadow && _isHovered ? AppTheme.softShadow : [],
+            border: _isHovered ? Border.all(color: Colors.white, width: 2) : null,
           ),
           child: widget.child,
         ),

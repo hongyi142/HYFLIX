@@ -100,11 +100,31 @@ class _MovieCardState extends State<MovieCard> {
     final displayPoster = _tmdbPosterUrl ?? widget.content.thumbnailUrl;
     final displayTitle = _tmdbTitle ?? widget.content.title;
 
-    return GestureDetector(
-      onTap: () => DetailPage.show(context, widget.content, initialTmdb: _tmdbResult),
-      child: MouseRegion(
-        onEnter: (_) => _onEnter(),
-        onExit: (_) => _onExit(),
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) {
+        if (hasFocus) {
+          _onEnter();
+        } else {
+          _onExit();
+        }
+      },
+      onShowHoverHighlight: (hasHover) {
+        if (hasHover) {
+          _onEnter();
+        } else {
+          _onExit();
+        }
+      },
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            DetailPage.show(context, widget.content, initialTmdb: _tmdbResult);
+            return null;
+          },
+        ),
+      },
+      child: GestureDetector(
+        onTap: () => DetailPage.show(context, widget.content, initialTmdb: _tmdbResult),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           transform: Matrix4.identity()..scale(_isHovered ? 1.05 : 1.0),
@@ -120,7 +140,19 @@ class _MovieCardState extends State<MovieCard> {
                 child: Container(
                   decoration: BoxDecoration(
                     borderRadius: AppTheme.radius16,
-                    boxShadow: _isHovered ? AppTheme.softShadow : [],
+                    boxShadow: _isHovered
+                        ? [
+                            BoxShadow(
+                              color: Colors.white.withOpacity(0.3),
+                              blurRadius: 15,
+                              spreadRadius: 3,
+                            ),
+                            ...AppTheme.softShadow
+                          ]
+                        : [],
+                    border: _isHovered
+                        ? Border.all(color: Colors.white, width: 2)
+                        : null,
                   ),
                   child: ClipRRect(
                     borderRadius: AppTheme.radius16,
@@ -159,7 +191,10 @@ class _MovieCardState extends State<MovieCard> {
               ),
               const SizedBox(height: 8),
               Text(displayTitle,
-                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      color: _isHovered ? Colors.white : AppTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 3),
               Row(children: [

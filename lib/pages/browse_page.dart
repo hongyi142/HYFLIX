@@ -5,6 +5,7 @@ import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../services/api_service.dart';
 import '../widgets/movie_card.dart';
+import '../widgets/buttons.dart';
 
 class FilterOption {
   final String label;
@@ -144,6 +145,7 @@ class _BrowsePageState extends State<BrowsePage> {
             color: Colors.white70,
             size: 16,
           ),
+          focusColor: Colors.white24,
           dropdownColor: AppTheme.cardDark,
           style: const TextStyle(
             color: Colors.white,
@@ -171,9 +173,10 @@ class _BrowsePageState extends State<BrowsePage> {
             backgroundColor: AppTheme.background.withOpacity(0.9),
             pinned: true,
             elevation: 0,
-            leading: IconButton(
-              icon: const Icon(LucideIcons.arrowLeft, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
+            leading: HoverButton(
+              onTap: () => Navigator.pop(context),
+              backgroundColor: Colors.transparent,
+              child: const Icon(LucideIcons.arrowLeft, color: Colors.white),
             ),
             title: Text(
               widget.title,

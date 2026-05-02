@@ -283,26 +283,37 @@ class _ProfileAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppTheme.accent,
-          border: Border.all(color: Colors.white.withOpacity(0.2)),
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) { /* Optional: add focus ring */ },
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            onTap();
+            return null;
+          },
         ),
-        child: Center(
-          child: Text(
-            (AuthService.displayName?.isNotEmpty == true
-                    ? AuthService.displayName![0]
-                    : 'U')
-                .toUpperCase(),
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: size * 0.4,
-              fontWeight: FontWeight.w700,
+      },
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppTheme.accent,
+            border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
+          ),
+          child: Center(
+            child: Text(
+              (AuthService.displayName?.isNotEmpty == true
+                      ? AuthService.displayName![0]
+                      : 'U')
+                  .toUpperCase(),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: size * 0.4,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),
@@ -356,10 +367,17 @@ class _NavLinkState extends State<_NavLink> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) => setState(() => _isHovered = hasFocus),
+      onShowHoverHighlight: (hasHover) => setState(() => _isHovered = hasHover),
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            if (widget.onTap != null) widget.onTap!();
+            return null;
+          },
+        ),
+      },
       child: GestureDetector(
         onTap: widget.onTap,
         child: Padding(
@@ -410,9 +428,9 @@ class _NavIconState extends State<_NavIcon> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) => setState(() => _isHovered = hasFocus),
+      onShowHoverHighlight: (hasHover) => setState(() => _isHovered = hasHover),
       child: IconButton(
         icon: Icon(
           widget.icon,
@@ -421,6 +439,7 @@ class _NavIconState extends State<_NavIcon> {
         ),
         onPressed: widget.onTap ?? () {},
         splashRadius: 24,
+        focusColor: Colors.white24,
       ),
     );
   }

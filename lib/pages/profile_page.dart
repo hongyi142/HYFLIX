@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/tmdb_service.dart';
 import 'settings_page.dart';
+import '../widgets/buttons.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -100,15 +101,11 @@ class _ProfilePageState extends State<ProfilePage> {
       child: Row(
         children: [
           // Back button
-          GestureDetector(
+          HoverButton(
             onTap: () => Navigator.of(context).pop(),
-            child: Container(
+            backgroundColor: AppTheme.cardDark,
+            child: Padding(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.cardDark,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
               child: const Icon(
                 LucideIcons.arrowLeft,
                 color: Colors.white,
@@ -127,18 +124,14 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const Spacer(),
           // Settings
-          GestureDetector(
+          HoverButton(
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SettingsPage()),
             ).then((_) => _loadData()),
-            child: Container(
+            backgroundColor: AppTheme.cardDark,
+            child: Padding(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.cardDark,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
               child: const Icon(
                 LucideIcons.settings,
                 color: AppTheme.textSecondary,
@@ -148,15 +141,11 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const SizedBox(width: 10),
           // Sign out
-          GestureDetector(
+          HoverButton(
             onTap: _signOut,
-            child: Container(
+            backgroundColor: AppTheme.cardDark,
+            child: Padding(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.cardDark,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
               child: const Icon(
                 LucideIcons.logOut,
                 color: AppTheme.textSecondary,
@@ -370,17 +359,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _tabButton(String label, int index) {
     final isActive = _selectedTab == index;
-    return GestureDetector(
+    return HoverButton(
       onTap: () => setState(() => _selectedTab = index),
-      child: Container(
+      backgroundColor: isActive ? AppTheme.accent : AppTheme.cardDark,
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        decoration: BoxDecoration(
-          color: isActive ? AppTheme.accent : AppTheme.cardDark,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: isActive ? AppTheme.accent : Colors.white12,
-          ),
-        ),
         child: Text(
           label,
           style: TextStyle(
