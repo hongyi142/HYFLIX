@@ -74,11 +74,11 @@ class _AuthPageState extends State<AuthPage> {
   String _humanizeError(Object e) {
     final msg = e.toString();
     if (msg.contains('user-not-found')) return 'No account found with this email.';
-    if (msg.contains('wrong-password')) return 'Incorrect password.';
+    if (msg.contains('wrong-password') || msg.contains('INVALID_LOGIN_CREDENTIALS')) return 'Incorrect email or password.';
     if (msg.contains('email-already-in-use')) return 'An account already exists with this email.';
     if (msg.contains('weak-password')) return 'Password must be at least 6 characters.';
     if (msg.contains('invalid-email')) return 'Please enter a valid email address.';
-    return 'Something went wrong. Please try again.';
+    return 'Something went wrong. Please check your internet connection and try again.';
   }
 
   @override
