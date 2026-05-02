@@ -202,16 +202,40 @@ class ApiService {
     }
   }
 
+  /// Fetch raw results with pagination info: [items, pagecount, total].
+  Future<(List<Map<String, dynamic>>, int, int)> _fetchRawPaged(Uri uri) async {
+    try {
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return (<Map<String, dynamic>>[], 0, 0);
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final list = body['list'] as List<dynamic>? ?? [];
+      final pagecount = (body['pagecount'] as num?)?.toInt() ?? 1;
+      final total = (body['total'] as num?)?.toInt() ?? 0;
+      return (list.whereType<Map<String, dynamic>>().toList(), pagecount, total);
+    } catch (_) {
+      return (<Map<String, dynamic>>[], 0, 0);
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _searchRawByTitle(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
     if (_rawSearchCache.containsKey(trimmed)) return _rawSearchCache[trimmed]!;
 
-    final items = await _fetchRaw(
-      Uri.parse('$_baseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(trimmed)}'),
-    );
-    _rawSearchCache[trimmed] = items;
-    return items;
+    // Fetch all pages to get complete season coverage
+    final base = '$_baseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(trimmed)}';
+    final (firstPage, pagecount, _) = await _fetchRawPaged(Uri.parse(base));
+    final allItems = <Map<String, dynamic>>[...firstPage];
+
+    // Fetch remaining pages (up to 5 to avoid excessive requests)
+    final maxPages = pagecount.clamp(1, 5);
+    for (var pg = 2; pg <= maxPages; pg++) {
+      final pageItems = await _fetchRaw(Uri.parse('$base&pg=$pg'));
+      allItems.addAll(pageItems);
+    }
+
+    _rawSearchCache[trimmed] = allItems;
+    return allItems;
   }
 
   List<String> _buildSearchQueries(TmdbResult tmdb) {
@@ -639,4 +663,135 @@ class ApiService {
 
   Future<List<ContentModel>> searchByTitle(String query) =>
       _fetch(Uri.parse('$_baseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(query)}'));
+
+  // --- Multi-source support ---
+
+  static const List<VideoSource> sources = [
+    VideoSource(
+      name: 'Hong Niu',
+      baseUrl: 'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/',
+    ),
+    VideoSource(
+      name: 'FFZY',
+      baseUrl: 'https://cj.ffzyapi.com/api.php/provide/vod/',
+    ),
+  ];
+
+  Future<List<ContentModel>> searchByTitleFromSource(
+      String query, VideoSource source) {
+    return _fetch(Uri.parse(
+        '${source.baseUrl}?ac=videolist&wd=${Uri.encodeQueryComponent(query)}'));
+  }
+
+  Future<ContentModel?> matchTmdbToProviderFromSource(
+      TmdbResult tmdb, VideoSource source) async {
+    final cacheKey =
+        '${source.name}_${tmdb.mediaType}_${tmdb.id ?? tmdb.englishTitle}_${tmdb.year}';
+    if (_tmdbMatchCache.containsKey(cacheKey)) {
+      return _tmdbMatchCache[cacheKey];
+    }
+
+    final queries = _buildSearchQueries(tmdb);
+    final candidates = <Map<String, dynamic>>[];
+    final seen = <String>{};
+    String bestQuery = queries.isNotEmpty ? queries.first : '';
+
+    for (final q in queries) {
+      final results = await _searchRawByTitleFromSource(q, source);
+      for (final r in results) {
+        final key =
+            '${r['vod_id']}_${TmdbService.cleanTitle(r['vod_name'] as String? ?? '')}';
+        if (seen.add(key)) candidates.add(r);
+      }
+    }
+
+    if (candidates.isEmpty) {
+      _tmdbMatchCache[cacheKey] = null;
+      return null;
+    }
+
+    Map<String, dynamic>? best;
+    var bestScore = -999;
+    for (final c in candidates) {
+      final s = _scoreRawMatch(c, tmdb, query: bestQuery);
+      if (s > bestScore) {
+        bestScore = s;
+        best = c;
+      }
+    }
+
+    if (bestScore < 35 && tmdb.englishTitle.isNotEmpty) {
+      final chineseTitles =
+          await TmdbService.findChineseTitles(tmdb.englishTitle);
+      for (final ct in chineseTitles) {
+        if (ct.trim().isEmpty) continue;
+        final results = await _searchRawByTitleFromSource(ct, source);
+        for (final r in results) {
+          final key =
+              '${r['vod_id']}_${TmdbService.cleanTitle(r['vod_name'] as String? ?? '')}';
+          if (seen.add(key)) candidates.add(r);
+          final s = _scoreRawMatch(r, tmdb, query: ct);
+          if (s > bestScore) {
+            bestScore = s;
+            best = r;
+            bestQuery = ct;
+          }
+        }
+      }
+    }
+
+    if (best == null || bestScore < 35) {
+      _tmdbMatchCache[cacheKey] = null;
+      return null;
+    }
+
+    final bestTitle =
+        TmdbService.cleanTitle(best['vod_name'] as String? ?? '');
+    final group = candidates
+        .where((c) =>
+            _scoreRawMatch(c, tmdb, query: bestQuery) >= 30 &&
+            TmdbService.cleanTitle(c['vod_name'] as String? ?? '') ==
+                bestTitle)
+        .toList();
+    if (group.length <= 1) {
+      final result = _fromJson(best);
+      _tmdbMatchCache[cacheKey] = result;
+      return result;
+    }
+
+    final items = group
+        .map((e) => _fromJson(e))
+        .where((c) => c.m3u8Url.isNotEmpty && c.thumbnailUrl.isNotEmpty)
+        .toList();
+    final merged = _groupSeasons(items);
+    final result = merged.isNotEmpty ? merged.first : null;
+    _tmdbMatchCache[cacheKey] = result;
+    return result;
+  }
+
+  Future<List<Map<String, dynamic>>> _searchRawByTitleFromSource(
+      String title, VideoSource source) async {
+    final encoded = Uri.encodeQueryComponent(title);
+    final base = '${source.baseUrl}?ac=videolist&wd=$encoded';
+    try {
+      final (firstPage, pagecount, _) =
+          await _fetchRawPaged(Uri.parse(base));
+      final allItems = <Map<String, dynamic>>[...firstPage];
+      final maxPages = pagecount.clamp(1, 5);
+      for (var pg = 2; pg <= maxPages; pg++) {
+        final pageItems = await _fetchRaw(Uri.parse('$base&pg=$pg'));
+        allItems.addAll(pageItems);
+      }
+      return allItems;
+    } catch (_) {
+      return [];
+    }
+  }
+}
+
+class VideoSource {
+  final String name;
+  final String baseUrl;
+
+  const VideoSource({required this.name, required this.baseUrl});
 }

@@ -4,6 +4,7 @@ import 'core/theme.dart';
 import 'pages/splash_page.dart';
 import 'pages/auth_page.dart';
 import 'services/auth_service.dart';
+import 'services/download_service.dart';
 
 import 'services/api_service.dart';
 import 'services/watchlist_service.dart';
@@ -13,6 +14,7 @@ void main() async {
   MediaKit.ensureInitialized();
   await ApiService.init();
   await WatchlistService().init();
+  await DownloadService().init();
   await AuthService.init();
   runApp(const HyflixApp());
 }

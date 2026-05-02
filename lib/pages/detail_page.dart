@@ -5,6 +5,8 @@ import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
 import '../pages/video_player_screen.dart';
+import '../services/api_service.dart';
+import '../services/download_service.dart';
 import '../services/watchlist_service.dart';
 import '../services/tmdb_service.dart';
 import '../widgets/buttons.dart';
@@ -49,7 +51,12 @@ class _DetailPageState extends State<DetailPage> {
   TmdbResult? _tmdb;
   int _selectedSeason = 1;
   final _watchlistService = WatchlistService();
+  final _downloadService = DownloadService();
   bool _isListed = false;
+
+  VideoSource _selectedSource = ApiService.sources.first;
+  List<Episode>? _sourceEpisodes;
+  bool _isLoadingEpisodes = false;
 
   @override
   void initState() {
@@ -64,12 +71,73 @@ class _DetailPageState extends State<DetailPage> {
     }
     _checkListed();
     _watchlistService.addListener(_checkListed);
+    _downloadService.addListener(_onDownloadChanged);
   }
 
   @override
   void dispose() {
     _watchlistService.removeListener(_checkListed);
+    _downloadService.removeListener(_onDownloadChanged);
     super.dispose();
+  }
+
+  void _onDownloadChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _switchSource(VideoSource source) {
+    if (source == _selectedSource) return;
+    setState(() {
+      _selectedSource = source;
+      _isLoadingEpisodes = true;
+    });
+    final api = ApiService();
+    final tmdb = _tmdb;
+    if (tmdb != null) {
+      api.matchTmdbToProviderFromSource(tmdb, source).then((result) {
+        if (!mounted) return;
+        setState(() {
+          _sourceEpisodes = result?.episodes;
+          _isLoadingEpisodes = false;
+        });
+      });
+    } else {
+      api
+          .searchByTitleFromSource(widget.content.title, source)
+          .then((results) {
+        if (!mounted) return;
+        setState(() {
+          _sourceEpisodes =
+              results.isNotEmpty ? results.first.episodes : null;
+          _isLoadingEpisodes = false;
+        });
+      });
+    }
+  }
+
+  void _handleDownload(int episodeIndex) {
+    final ep = widget.content.episodes[episodeIndex];
+    final contentId = _tmdb?.id?.toString() ?? widget.content.title;
+    final existing = _downloadService.getDownload(contentId, episodeIndex);
+
+    if (existing?.status == DownloadStatus.downloading) {
+      _downloadService.cancelDownload(contentId, episodeIndex);
+      return;
+    }
+
+    if (existing?.status == DownloadStatus.completed) {
+      _downloadService.deleteDownload(contentId, episodeIndex);
+      return;
+    }
+
+    _downloadService.startDownload(
+      contentId: contentId,
+      contentTitle: _tmdb?.englishTitle ?? widget.content.title,
+      episodeIndex: episodeIndex,
+      episodeName: ep.name.isNotEmpty ? ep.name : 'Episode ${episodeIndex + 1}',
+      m3u8Url: ep.url,
+      thumbnailUrl: _tmdb?.posterUrl ?? widget.content.thumbnailUrl,
+    );
   }
 
   void _checkListed() {
@@ -221,7 +289,8 @@ class _DetailPageState extends State<DetailPage> {
     final genres = _tmdb?.genres ?? [];
     final year = _tmdb?.year ?? widget.content.year;
     final rating = _tmdb?.voteAverage ?? widget.content.rating;
-    final episodes = widget.content.episodes;
+    final episodes =
+        _sourceEpisodes ?? widget.content.episodes;
     final isMultiEpisode = episodes.length > 1;
 
     final screenHeight = MediaQuery.of(context).size.height;
@@ -238,7 +307,9 @@ class _DetailPageState extends State<DetailPage> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
-          child: Container(
+          child: Material(
+            color: AppTheme.background,
+            child: Container(
             height: modalHeight,
             width: double.infinity,
             decoration: BoxDecoration(
@@ -317,6 +388,7 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -790,15 +862,104 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ),
                 ),
+              // Source picker
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.cardDark,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: DropdownButton<VideoSource>(
+                  value: _selectedSource,
+                  dropdownColor: AppTheme.cardDark,
+                  underline: const SizedBox(),
+                  isDense: true,
+                  items: ApiService.sources
+                      .map(
+                        (s) => DropdownMenuItem(
+                          value: s,
+                          child: Text(
+                            s.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              decoration: TextDecoration.none,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) _switchSource(v);
+                  },
+                ),
+              ),
+              if (_isLoadingEpisodes)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.accent,
+                  ),
+                ),
             ],
           ),
         ),
         // Episode list
-        ...List.generate(filteredEpisodes.length, (i) {
-          final globalIndex = episodes.indexOf(filteredEpisodes[i]);
-          return _buildEpisodeTile(filteredEpisodes[i], globalIndex, layout);
-        }),
+        if (_isLoadingEpisodes)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: CircularProgressIndicator(color: AppTheme.accent),
+            ),
+          )
+        else
+          ...List.generate(filteredEpisodes.length, (i) {
+            final globalIndex = episodes.indexOf(filteredEpisodes[i]);
+            return _buildEpisodeTile(filteredEpisodes[i], globalIndex, layout);
+          }),
       ],
+    );
+  }
+
+  Widget _buildDownloadButton(int index) {
+    final contentId = _tmdb?.id?.toString() ?? widget.content.title;
+    final download = _downloadService.getDownload(contentId, index);
+    final isDownloaded = _downloadService.isDownloaded(contentId, index);
+
+    IconData icon;
+    Color color;
+    VoidCallback? onTap;
+
+    if (isDownloaded) {
+      icon = LucideIcons.checkCircle;
+      color = AppTheme.accent;
+      onTap = () => _handleDownload(index);
+    } else if (download?.status == DownloadStatus.downloading) {
+      icon = LucideIcons.loader;
+      color = AppTheme.accent;
+      onTap = () => _handleDownload(index);
+    } else if (download?.status == DownloadStatus.failed) {
+      icon = LucideIcons.refreshCw;
+      color = Colors.orange;
+      onTap = () => _handleDownload(index);
+    } else {
+      icon = LucideIcons.download;
+      color = AppTheme.textSecondary;
+      onTap = () => _handleDownload(index);
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        child: Icon(icon, color: color, size: 20),
+      ),
     );
   }
 
@@ -840,6 +1001,8 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                       ),
                       const Spacer(),
+                      _buildDownloadButton(index),
+                      const SizedBox(width: 4),
                       const Icon(
                         LucideIcons.playCircle,
                         color: AppTheme.textSecondary,
@@ -945,6 +1108,8 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  _buildDownloadButton(index),
+                  const SizedBox(width: 4),
                   const Icon(
                     LucideIcons.playCircle,
                     color: AppTheme.textSecondary,

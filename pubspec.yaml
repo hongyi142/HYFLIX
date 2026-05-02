@@ -40,6 +40,10 @@ dependencies:
   archive: ^4.0.2
   shared_preferences: ^2.3.4
   google_sign_in: ^6.2.2
+  dio: ^5.7.0
+  path_provider: ^2.1.5
+  permission_handler: ^11.3.1
+  encrypt: ^5.0.3
 
 dev_dependencies:
   flutter_test:

@@ -143,7 +143,7 @@ class _SearchPageState extends State<SearchPage> {
                         tablet: 4,
                         desktop: 6,
                       ),
-                      childAspectRatio: 150 / 260,
+                      childAspectRatio: 0.52,
                       crossAxisSpacing: layout.isPhone ? 12 : 24,
                       mainAxisSpacing: layout.isPhone ? 16 : 32,
                     ),
