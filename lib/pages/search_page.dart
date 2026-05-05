@@ -42,13 +42,19 @@ class _SearchPageState extends State<SearchPage> {
         }
       }
 
-      // 2. Search Source API for ALL candidates in parallel
+      // 2. Search ALL sources for ALL candidates in parallel
       final List<ContentModel> allResults = [];
       final Set<String> seenTitles = {};
 
-      final resultsList = await Future.wait(
-        searchQueries.map((q) => _api.searchByTitle(q)),
-      );
+      // Search both Hong Niu and FFZY sources for every query
+      final List<Future<List<ContentModel>>> searchFutures = [];
+      for (final q in searchQueries) {
+        for (final source in ApiService.sources) {
+          searchFutures.add(_api.searchByTitleFromSource(q, source));
+        }
+      }
+
+      final resultsList = await Future.wait(searchFutures);
 
       for (var list in resultsList) {
         for (var item in list) {

@@ -524,8 +524,8 @@ class TmdbService {
       final results = searchBody['results'] as List;
       if (results.isEmpty) return [];
 
-      // Look at top 3 results
-      for (final hit in results.take(3)) {
+      // Look at top 10 results to catch more titles
+      for (final hit in results.take(10)) {
         final id = hit['id'];
         final mediaType = hit['media_type'];
         if (mediaType != 'movie' && mediaType != 'tv') continue;
