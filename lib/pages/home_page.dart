@@ -16,6 +16,7 @@ import '../widgets/hero_card.dart';
 import '../widgets/movie_card.dart';
 import '../widgets/navbar.dart';
 import '../widgets/video_card.dart';
+import '../widgets/horizontal_scroll_wrapper.dart';
 import '../widgets/buttons.dart';
 
 class HomePage extends StatefulWidget {
@@ -510,15 +511,17 @@ class _HomePageState extends State<HomePage> {
         ),
         SizedBox(
           height: height,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.symmetric(
-              horizontal: layout.pagePadding,
-              vertical: 8,
+          child: HorizontalScrollWrapper(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(
+                horizontal: layout.pagePadding,
+                vertical: 8,
+              ),
+              clipBehavior: Clip.none,
+              itemCount: count,
+              itemBuilder: (context, i) => builder(i),
             ),
-            clipBehavior: Clip.none,
-            itemCount: count,
-            itemBuilder: (context, i) => builder(i),
           ),
         ),
       ],

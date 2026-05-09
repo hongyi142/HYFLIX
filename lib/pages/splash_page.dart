@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
+import '../models/content_model.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/tmdb_service.dart';
@@ -51,16 +52,30 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
       }
       _tickProgress();
 
-      // Fetch all content in parallel, tracking progress as each completes
-      final results = await Future.wait([
-        api.fetchMatchedTrendingMovies(count: 10).then((r) { _tickProgress(); return r; }),
-        api.fetchMatchedTrendingTVSeries(count: 10).then((r) { _tickProgress(); return r; }),
-        api.fetchMatchedRecentPopularChineseAnimation(count: 10).then((r) { _tickProgress(); return r; }),
-        api.fetchMatchedRecentPopularChineseDramas(count: 10).then((r) { _tickProgress(); return r; }),
-        api.fetchMatchedRecentPopularKoreanDramas(count: 10).then((r) { _tickProgress(); return r; }),
-        api.fetchMatchedRecentPopularWesternSeries(count: 10).then((r) { _tickProgress(); return r; }),
-        api.fetchMatchedRecentPopularHongKongSeries(count: 10, withinDays: 365).then((r) { _tickProgress(); return r; }),
-      ]);
+      // Fetch all content in parallel — each fetch has its own error handling
+      // so a single failure doesn't discard all other results.
+      final futures = [
+        api.fetchMatchedTrendingMovies(count: 10),
+        api.fetchMatchedTrendingTVSeries(count: 10),
+        api.fetchMatchedRecentPopularChineseAnimation(count: 10),
+        api.fetchMatchedRecentPopularChineseDramas(count: 10),
+        api.fetchMatchedRecentPopularKoreanDramas(count: 10),
+        api.fetchMatchedRecentPopularWesternSeries(count: 10),
+        api.fetchMatchedRecentPopularHongKongSeries(count: 10, withinDays: 365),
+      ];
+
+      // Wait for all, catching individually so partial results survive
+      final results = <List<ContentModel>>[];
+      for (final f in futures) {
+        try {
+          final r = await f;
+          results.add(r);
+        } catch (e) {
+          debugPrint('[splash] Shelf fetch failed: $e');
+          results.add([]);
+        }
+        _tickProgress();
+      }
 
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -82,7 +97,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
         );
       }
     } catch (e) {
-      // In case of complete failure, navigate to empty HomePage and let it handle errors/retry
+      debugPrint('[splash] Complete failure: $e');
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const HomePage()),

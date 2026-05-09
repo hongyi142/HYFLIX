@@ -237,7 +237,7 @@ class ApiService {
     final allItems = <Map<String, dynamic>>[...firstPage];
 
     // Fetch remaining pages (up to 5 to avoid excessive requests)
-    final maxPages = pagecount.clamp(1, 5);
+    final maxPages = pagecount.clamp(1, 2);
     for (var pg = 2; pg <= maxPages; pg++) {
       final pageItems = await _fetchRaw(Uri.parse('$base&pg=$pg'));
       allItems.addAll(pageItems);
@@ -359,44 +359,32 @@ class ApiService {
     final cacheKey = '${tmdb.mediaType}:${tmdb.id ?? tmdb.englishTitle}:${tmdb.year}';
     if (_tmdbMatchCache.containsKey(cacheKey)) return _tmdbMatchCache[cacheKey];
 
-    final candidates = <Map<String, dynamic>>[];
-    final seen = <String>{};
+    try {
+      final candidates = <Map<String, dynamic>>[];
+      final seen = <String>{};
 
-    Future<void> collectForQueries(List<String> queries) async {
-      for (final query in queries) {
-        final results = await _searchRawByTitle(query);
-        for (final raw in results) {
-          final key =
-              '${raw['vod_id'] ?? ''}:${_normalizeText((raw['vod_name'] as String? ?? ''))}';
-          if (!seen.add(key)) continue;
-          candidates.add({
-            'query': query,
-            'raw': raw,
-          });
+      Future<void> collectForQueries(List<String> queries) async {
+        final allResults = await Future.wait(
+          queries.map((q) => _searchRawByTitle(q).then((r) => (q, r))),
+        );
+        for (final (query, results) in allResults) {
+          for (final raw in results) {
+            final key =
+                '${raw['vod_id'] ?? ''}:${_normalizeText((raw['vod_name'] as String? ?? ''))}';
+            if (!seen.add(key)) continue;
+            candidates.add({
+              'query': query,
+              'raw': raw,
+            });
+          }
         }
       }
-    }
 
-    await collectForQueries(_buildSearchQueries(tmdb));
+      await collectForQueries(_buildSearchQueries(tmdb));
 
-    Map<String, dynamic>? best;
-    var bestScore = -1;
-    final scoredItems = <Map<String, dynamic>, int>{};
-
-    for (final item in candidates) {
-      final raw = item['raw'] as Map<String, dynamic>;
-      final query = item['query'] as String;
-      final score = _scoreRawMatch(raw, tmdb, query: query);
-      scoredItems[raw] = score;
-      if (score > bestScore) {
-        bestScore = score;
-        best = raw;
-      }
-    }
-
-    if (bestScore < 35 && tmdb.englishTitle.isNotEmpty) {
-      final chineseTitles = await TmdbService.findChineseTitles(tmdb.englishTitle);
-      await collectForQueries(chineseTitles);
+      Map<String, dynamic>? best;
+      var bestScore = -1;
+      final scoredItems = <Map<String, dynamic>, int>{};
 
       for (final item in candidates) {
         final raw = item['raw'] as Map<String, dynamic>;
@@ -408,31 +396,51 @@ class ApiService {
           best = raw;
         }
       }
-    }
 
-    if (best == null || bestScore < 35) {
+      if (bestScore < 35 && tmdb.englishTitle.isNotEmpty) {
+        final chineseTitles = await TmdbService.findChineseTitles(tmdb.englishTitle);
+        await collectForQueries(chineseTitles);
+
+        for (final item in candidates) {
+          final raw = item['raw'] as Map<String, dynamic>;
+          final query = item['query'] as String;
+          final score = _scoreRawMatch(raw, tmdb, query: query);
+          scoredItems[raw] = score;
+          if (score > bestScore) {
+            bestScore = score;
+            best = raw;
+          }
+        }
+      }
+
+      if (best == null || bestScore < 35) {
+        _tmdbMatchCache[cacheKey] = null;
+        return null;
+      }
+
+      final bestModel = _fromJson(best);
+      final bestBaseTitle = TmdbService.cleanTitle(bestModel.title);
+
+      final modelsToMerge = <ContentModel>[];
+      for (final entry in scoredItems.entries) {
+        if (entry.value >= 30) {
+          final model = _fromJson(entry.key);
+          if (TmdbService.cleanTitle(model.title) == bestBaseTitle) {
+            modelsToMerge.add(model);
+          }
+        }
+      }
+
+      final grouped = _groupSeasons(modelsToMerge);
+      final finalContent = grouped.isNotEmpty ? grouped.first : bestModel;
+
+      _tmdbMatchCache[cacheKey] = finalContent;
+      return finalContent;
+    } catch (e) {
+      debugPrint('[matchTmdbToProvider] Error matching "${tmdb.englishTitle}": $e');
       _tmdbMatchCache[cacheKey] = null;
       return null;
     }
-
-    final bestModel = _fromJson(best);
-    final bestBaseTitle = TmdbService.cleanTitle(bestModel.title);
-    
-    final modelsToMerge = <ContentModel>[];
-    for (final entry in scoredItems.entries) {
-      if (entry.value >= 30) {
-        final model = _fromJson(entry.key);
-        if (TmdbService.cleanTitle(model.title) == bestBaseTitle) {
-          modelsToMerge.add(model);
-        }
-      }
-    }
-
-    final grouped = _groupSeasons(modelsToMerge);
-    final finalContent = grouped.isNotEmpty ? grouped.first : bestModel;
-
-    _tmdbMatchCache[cacheKey] = finalContent;
-    return finalContent;
   }
 
   Future<List<ContentModel>> _matchTmdbShelf(
@@ -451,41 +459,50 @@ class ApiService {
           final list = json.decode(cachedJson) as List<dynamic>;
           final cachedModels = list.map((e) => ContentModel.fromJson(e as Map<String, dynamic>)).toList();
           if (cachedModels.isNotEmpty) return cachedModels;
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[cache] Corrupted cache "$cacheKey", clearing: $e');
+          prefs.remove(cacheKey);
+          prefs.remove('${cacheKey}_time');
+        }
       }
     }
 
-    final tmdbItems = await tmdbFuture;
-    final matches = <ContentModel>[];
-    final seenTitles = <String>{};
+    try {
+      final tmdbItems = await tmdbFuture;
+      final matches = <ContentModel>[];
+      final seenTitles = <String>{};
 
-    const batchSize = 5;
-    for (var i = 0; i < tmdbItems.length; i += batchSize) {
-      final chunk = tmdbItems.skip(i).take(batchSize);
-      final chunkResults = await Future.wait(
-        chunk.map((tmdb) => matchTmdbToProvider(tmdb)),
-      );
+      const batchSize = 5;
+      for (var i = 0; i < tmdbItems.length; i += batchSize) {
+        final chunk = tmdbItems.skip(i).take(batchSize);
+        final chunkResults = await Future.wait(
+          chunk.map((tmdb) => matchTmdbToProvider(tmdb)),
+        );
 
-      for (final match in chunkResults) {
-        if (match == null) continue;
+        for (final match in chunkResults) {
+          if (match == null) continue;
 
-        final titleKey = _normalizeText(match.title);
-        if (titleKey.isEmpty || !seenTitles.add(titleKey)) continue;
+          final titleKey = _normalizeText(match.title);
+          if (titleKey.isEmpty || !seenTitles.add(titleKey)) continue;
 
-        matches.add(match);
+          matches.add(match);
+        }
+
+        if (matches.length >= count) break;
       }
 
-      if (matches.length >= count) break;
-    }
+      final finalMatches = matches.take(count).toList();
 
-    final finalMatches = matches.take(count).toList();
-    
-    if (prefs != null && finalMatches.isNotEmpty) {
-      prefs.setString(cacheKey, json.encode(finalMatches.map((e) => e.toJson()).toList()));
-      prefs.setInt('${cacheKey}_time', DateTime.now().millisecondsSinceEpoch);
-    }
+      if (prefs != null && finalMatches.isNotEmpty) {
+        prefs.setString(cacheKey, json.encode(finalMatches.map((e) => e.toJson()).toList()));
+        prefs.setInt('${cacheKey}_time', DateTime.now().millisecondsSinceEpoch);
+      }
 
-    return finalMatches;
+      return finalMatches;
+    } catch (e) {
+      debugPrint('[_matchTmdbShelf] Error for "$cacheKey": $e');
+      return [];
+    }
   }
 
   Future<List<ContentModel>> fetchMatchedTrendingMovies({
@@ -717,8 +734,11 @@ class ApiService {
     final candidates = <Map<String, dynamic>>[];
     final seen = <String>{};
 
-    for (final q in queries) {
-      final results = await _searchRawByTitleFromSource(q, source);
+    // Run all queries in parallel instead of sequentially
+    final allResults = await Future.wait(
+      queries.map((q) => _searchRawByTitleFromSource(q, source).then((r) => (q, r))),
+    );
+    for (final (q, results) in allResults) {
       for (final r in results) {
         final key =
             '${r['vod_id']}_${TmdbService.cleanTitle(r['vod_name'] as String? ?? '')}';
@@ -812,7 +832,7 @@ class ApiService {
       final (firstPage, pagecount, _) =
           await _fetchRawPaged(Uri.parse(base));
       final allItems = <Map<String, dynamic>>[...firstPage];
-      final maxPages = pagecount.clamp(1, 5);
+      final maxPages = pagecount.clamp(1, 2);
       for (var pg = 2; pg <= maxPages; pg++) {
         final pageItems = await _fetchRaw(Uri.parse('$base&pg=$pg'));
         allItems.addAll(pageItems);

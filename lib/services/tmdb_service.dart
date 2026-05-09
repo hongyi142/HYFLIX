@@ -506,11 +506,11 @@ class TmdbService {
     }
   }
 
-  /// Searches TMDB for an English title and returns potential Chinese titles
+  /// Searches TMDB for an English title and returns potential Chinese titles.
+  /// Translation calls run in parallel for speed.
   static Future<List<String>> findChineseTitles(String englishQuery) async {
     final candidates = <String>{};
     try {
-      // 1. Search for the movie/show using English query
       final searchUri = Uri.https('api.themoviedb.org', '/3/search/multi', {
         'api_key': tmdbApiKey,
         'query': englishQuery,
@@ -524,37 +524,47 @@ class TmdbService {
       final results = searchBody['results'] as List;
       if (results.isEmpty) return [];
 
-      // Look at top 10 results to catch more titles
-      for (final hit in results.take(10)) {
-        final id = hit['id'];
-        final mediaType = hit['media_type'];
-        if (mediaType != 'movie' && mediaType != 'tv') continue;
-
-        // Try to get Chinese name from translation list
-        final transUri = Uri.https('api.themoviedb.org', '/3/$mediaType/$id/translations', {
-          'api_key': tmdbApiKey,
-        });
-
-        final transRes = await http.get(transUri).timeout(const Duration(seconds: 3));
-        if (transRes.statusCode == 200) {
-          final transBody = json.decode(transRes.body);
-          final translations = transBody['translations'] as List;
-          
-          for (final trans in translations) {
-            final iso = trans['iso_639_1'] as String;
-            if (iso == 'zh') {
-              final data = trans['data'] as Map<String, dynamic>;
-              final name = (data['title'] ?? data['name']) as String?;
-              if (name != null && name.isNotEmpty) candidates.add(name);
-            }
-          }
-        }
-        
-        // Also add the primary name if it looks Chinese
+      // Collect translatable items (movies/TV only, limit to 5)
+      final translatable = <(int id, String mediaType, String primaryName)>[];
+      for (final hit in results.take(5)) {
+        final id = hit['id'] as int?;
+        final mediaType = hit['media_type'] as String?;
         final primaryName = (hit['title'] ?? hit['name'] ?? '') as String;
+        if (id == null || mediaType == null || (mediaType != 'movie' && mediaType != 'tv')) continue;
+        // Check if primary name is already Chinese
         if (RegExp(r'[\u4e00-\u9fa5]').hasMatch(primaryName)) {
           candidates.add(primaryName);
         }
+        translatable.add((id, mediaType, primaryName));
+      }
+
+      // Fetch all translations in parallel (was sequential \u2014 huge speedup)
+      final translationFutures = translatable.map((item) async {
+        final transUri = Uri.https('api.themoviedb.org', '/3/${item.$2}/${item.$1}/translations', {
+          'api_key': tmdbApiKey,
+        });
+        try {
+          final transRes = await http.get(transUri).timeout(const Duration(seconds: 3));
+          if (transRes.statusCode != 200) return <String>[];
+          final transBody = json.decode(transRes.body);
+          final translations = transBody['translations'] as List;
+          final names = <String>[];
+          for (final trans in translations) {
+            if (trans['iso_639_1'] == 'zh') {
+              final data = trans['data'] as Map<String, dynamic>;
+              final name = (data['title'] ?? data['name']) as String?;
+              if (name != null && name.isNotEmpty) names.add(name);
+            }
+          }
+          return names;
+        } catch (_) {
+          return <String>[];
+        }
+      });
+
+      final allNames = await Future.wait(translationFutures);
+      for (final names in allNames) {
+        candidates.addAll(names);
       }
     } catch (_) {}
     return candidates.toList();

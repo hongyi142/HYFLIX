@@ -14,14 +14,18 @@ class UserProfile {
   });
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> data) {
+    DateTime? parsedCreatedAt;
+    final raw = data['createdAt'];
+    if (raw is String && raw.isNotEmpty) {
+      try { parsedCreatedAt = DateTime.parse(raw); } catch (_) {}
+    }
+
     return UserProfile(
       uid: uid,
       email: (data['email'] as String?) ?? '',
       displayName: (data['displayName'] as String?) ?? '',
       watchTimeSeconds: (data['watchTimeSeconds'] as int?) ?? 0,
-      createdAt: data['createdAt'] != null
-          ? (data['createdAt'] as dynamic).toDate()
-          : null,
+      createdAt: parsedCreatedAt,
     );
   }
 
