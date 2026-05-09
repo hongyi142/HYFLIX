@@ -40,10 +40,14 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   Future<void> _loadData() async {
     final api = ApiService();
     try {
-      // Load language preference before fetching content
+      // Load language and source preference before fetching content
       if (AuthService.isLoggedIn) {
-        final lang = await UserService.getLanguage();
-        TmdbService.setLanguage(lang);
+        final results = await Future.wait([
+          UserService.getLanguage(),
+          UserService.getDefaultSource(),
+        ]);
+        TmdbService.setLanguage(results[0]);
+        ApiService.setDefaultSourceByName(results[1]);
       }
       _tickProgress();
 

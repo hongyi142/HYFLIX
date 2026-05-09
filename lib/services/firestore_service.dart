@@ -161,6 +161,17 @@ class FirestoreService {
     return (profile?['language'] as String?) ?? 'en';
   }
 
+  // ── Default Source Preference ──────────────────────────────────────────
+
+  static Future<void> saveDefaultSource(String sourceName) async {
+    await _patch('$_usersPath.json', {'defaultSource': sourceName});
+  }
+
+  static Future<String> getDefaultSource() async {
+    final profile = await getProfile();
+    return (profile?['defaultSource'] as String?) ?? 'Hong Niu';
+  }
+
   // ── Low-level REST helpers ───────────────────────────────────────────
 
   static Future<Map<String, dynamic>?> _get(String url) async {

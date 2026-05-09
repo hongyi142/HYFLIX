@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
 import 'tmdb_service.dart';
+import 'user_service.dart';
 
 const String _baseUrl =
     'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/';
@@ -17,9 +18,16 @@ class ApiService {
   static final Map<String, List<Map<String, dynamic>>> _rawSearchCache = {};
   static final Map<String, ContentModel?> _tmdbMatchCache = {};
   static SharedPreferences? _prefs;
+  static VideoSource? defaultSource;
 
   static Future<void> init() async {
     _prefs ??= await SharedPreferences.getInstance();
+  }
+
+  String get _activeBaseUrl => defaultSource?.baseUrl ?? _baseUrl;
+
+  static void setDefaultSourceByName(String name) {
+    defaultSource = sources.where((s) => s.name == name).firstOrNull;
   }
 
   /// Clear all cached content (call when language changes).
@@ -224,7 +232,7 @@ class ApiService {
     if (_rawSearchCache.containsKey(trimmed)) return _rawSearchCache[trimmed]!;
 
     // Fetch all pages to get complete season coverage
-    final base = '$_baseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(trimmed)}';
+    final base = '$_activeBaseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(trimmed)}';
     final (firstPage, pagecount, _) = await _fetchRawPaged(Uri.parse(base));
     final allItems = <Map<String, dynamic>>[...firstPage];
 
@@ -614,7 +622,7 @@ class ApiService {
 
     try {
       // type 13 = 港澳剧 (Hong Kong/Macau Drama)
-      final items = await _fetch(Uri.parse('$_baseUrl?ac=videolist&t=13&pg=1'));
+      final items = await _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=13&pg=1'));
       final results = items.take(count).toList();
 
       if (prefs != null && results.isNotEmpty) {
@@ -629,21 +637,21 @@ class ApiService {
   }
 
   Future<List<ContentModel>> fetchLatest({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&pg=$page'));
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&pg=$page'));
   Future<List<ContentModel>> fetchMovies({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=1&pg=$page'));
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=1&pg=$page'));
   Future<List<ContentModel>> fetchTVSeries({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=2&pg=$page'));
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=2&pg=$page'));
   Future<List<ContentModel>> fetchAnimation({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=4&pg=$page'));
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=4&pg=$page'));
   Future<List<ContentModel>> fetchChineseDramas({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=12&pg=$page')); // 12 is 国产剧
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=12&pg=$page')); // 12 is 国产剧
   Future<List<ContentModel>> fetchHongKongSeries({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=13&pg=$page')); // 13 is 港澳剧
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=13&pg=$page')); // 13 is 港澳剧
   Future<List<ContentModel>> fetchKoreanDramas({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=18&pg=$page')); // 18 is 韩剧
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=18&pg=$page')); // 18 is 韩剧
   Future<List<ContentModel>> fetchWesternSeries({int page = 1}) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&t=15&pg=$page')); // 15 is 欧美剧
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=15&pg=$page')); // 15 is 欧美剧
 
   Future<List<ContentModel>> fetchFiltered({
     int page = 1,
@@ -653,7 +661,7 @@ class ApiService {
     String? lang,
     String? by,
   }) {
-    var url = '$_baseUrl?ac=videolist&pg=$page';
+    var url = '$_activeBaseUrl?ac=videolist&pg=$page';
     if (typeId != null) url += '&t=$typeId';
     if (area != null && area.isNotEmpty && area != 'All') url += '&area=${Uri.encodeQueryComponent(area)}';
     if (year != null && year.isNotEmpty && year != 'All') url += '&year=$year';
@@ -663,7 +671,7 @@ class ApiService {
   }
 
   Future<List<ContentModel>> searchByTitle(String query) =>
-      _fetch(Uri.parse('$_baseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(query)}'));
+      _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&wd=${Uri.encodeQueryComponent(query)}'));
 
   // --- Multi-source support ---
 
@@ -675,6 +683,18 @@ class ApiService {
     VideoSource(
       name: 'FFZY',
       baseUrl: 'https://cj.ffzyapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'BFZY',
+      baseUrl: 'https://bfzyapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'LZ',
+      baseUrl: 'https://cj.lziapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'HW',
+      baseUrl: 'https://cj.hwlzmb.com/api.php/provide/vod/',
     ),
   ];
 

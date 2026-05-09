@@ -89,4 +89,12 @@ class UserService {
   static Future<String> getLanguage() async {
     return await FirestoreService.getLanguage();
   }
+
+  static Future<void> saveDefaultSource(String sourceName) async {
+    await FirestoreService.saveDefaultSource(sourceName);
+  }
+
+  static Future<String> getDefaultSource() async {
+    return await FirestoreService.getDefaultSource();
+  }
 }

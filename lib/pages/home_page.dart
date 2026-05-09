@@ -42,6 +42,10 @@ class HomePage extends StatefulWidget {
     _HomePageState._instance?._refreshContent();
   }
 
+  static void refreshFromSourceChange() {
+    _HomePageState._instance?._refreshContent();
+  }
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -92,6 +96,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadContent() async {
+    // Load default source preference
+    if (AuthService.isLoggedIn) {
+      try {
+        final sourceName = await UserService.getDefaultSource();
+        ApiService.setDefaultSourceByName(sourceName);
+      } catch (_) {}
+    }
+
     final trendingTmdbResults = await TmdbService.fetchRecentPopularMovies(
       count: 8,
     );
