@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
@@ -171,7 +172,7 @@ class _VideoCardState extends State<VideoCard> {
                     children: [
                       // Thumbnail (landscape)
                       Image.network(
-                        displayBanner,
+                        proxyImageUrl(displayBanner),
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(
                           color: AppTheme.cardLight,

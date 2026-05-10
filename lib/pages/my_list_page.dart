@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
+import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/episode.dart';
 import '../pages/video_player_screen.dart';
@@ -395,7 +396,7 @@ class _MyListPageState extends State<MyListPage> {
                   child: item.thumbnailUrl != null &&
                           item.thumbnailUrl!.isNotEmpty
                       ? Image.network(
-                          item.thumbnailUrl!,
+                          proxyImageUrl(item.thumbnailUrl!),
                           width: 80,
                           height: 45,
                           fit: BoxFit.cover,

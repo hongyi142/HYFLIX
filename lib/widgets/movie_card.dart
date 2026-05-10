@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
@@ -159,7 +160,7 @@ class _MovieCardState extends State<MovieCard> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.network(displayPoster, fit: BoxFit.cover,
+                        Image.network(proxyImageUrl(displayPoster), fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight,
                                 child: const Center(child: Icon(LucideIcons.image, color: AppTheme.textSecondary)))),
                         // Video preview on hover

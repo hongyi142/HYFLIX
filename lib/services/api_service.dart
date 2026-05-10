@@ -26,6 +26,13 @@ class ApiService {
 
   String get _activeBaseUrl => defaultSource?.baseUrl ?? _baseUrl;
 
+  /// On web, route VOD API requests through a Netlify proxy to bypass CORS.
+  Uri _proxyUri(Uri uri) {
+    if (!kIsWeb) return uri;
+    final encoded = Uri.encodeComponent(uri.toString());
+    return Uri.parse('/api/proxy?url=$encoded');
+  }
+
   static void setDefaultSourceByName(String name) {
     defaultSource = sources.where((s) => s.name == name).firstOrNull;
   }
@@ -43,11 +50,27 @@ class ApiService {
     }
   }
 
-  /// Parse ALL episodes from vod_play_url. Format: "EpName$url#EpName$url#..."
+  /// Parse ALL episodes from vod_play_url.
+  /// Format: "EpName$url#EpName$url#..." or multi-source "group1$$$group2"
+  /// where each group has the same episode format separated by #.
   static List<Episode> _parseEpisodes(String playUrl, {String imageUrl = ''}) {
     final episodes = <Episode>[];
     try {
-      for (final part in playUrl.split('#')) {
+      // Split multi-source groups (separated by $$$)
+      final groups = playUrl.split(r'$$$');
+      String targetGroup = groups.first;
+
+      // Prefer direct m3u8 URLs over share page URLs
+      if (groups.length > 1) {
+        for (final group in groups) {
+          if (group.contains('.m3u8') && !group.contains('/share/')) {
+            targetGroup = group;
+            break;
+          }
+        }
+      }
+
+      for (final part in targetGroup.split('#')) {
         final trimmed = part.trim();
         final idx = trimmed.indexOf('\$');
         if (idx != -1) {
@@ -185,7 +208,7 @@ class ApiService {
 
   Future<List<ContentModel>> _fetch(Uri uri) async {
     try {
-      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
@@ -201,7 +224,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> _fetchRaw(Uri uri) async {
     try {
-      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
@@ -214,7 +237,7 @@ class ApiService {
   /// Fetch raw results with pagination info: [items, pagecount, total].
   Future<(List<Map<String, dynamic>>, int, int)> _fetchRawPaged(Uri uri) async {
     try {
-      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return (<Map<String, dynamic>>[], 0, 0);
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
@@ -708,10 +731,6 @@ class ApiService {
     VideoSource(
       name: 'LZ',
       baseUrl: 'https://cj.lziapi.com/api.php/provide/vod/',
-    ),
-    VideoSource(
-      name: 'HW',
-      baseUrl: 'https://cj.hwlzmb.com/api.php/provide/vod/',
     ),
   ];
 

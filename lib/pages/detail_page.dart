@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
+import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
@@ -290,7 +291,8 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _play(int episodeIndex) {
-    final isTvShow = widget.content.episodes.length > 1;
+    final episodes = _sourceEpisodes ?? widget.content.episodes;
+    final isTvShow = episodes.length > 1;
     final poster = _tmdb?.posterUrl.isNotEmpty == true
         ? _tmdb!.posterUrl
         : widget.content.thumbnailUrl;
@@ -298,12 +300,12 @@ class _DetailPageState extends State<DetailPage> {
       context,
       MaterialPageRoute(
         builder: (_) => VideoPlayerScreen(
-          videoUrl: widget.content.episodes.isNotEmpty
-              ? widget.content.episodes[episodeIndex].url
+          videoUrl: episodes.isNotEmpty
+              ? episodes[episodeIndex].url
               : widget.content.m3u8Url,
           title: _tmdb?.englishTitle ?? widget.content.title,
           originalTitle: widget.content.title,
-          episodes: widget.content.episodes,
+          episodes: episodes,
           initialEpisodeIndex: episodeIndex,
           tmdbId: _tmdb?.id?.toString(),
           isTvShow: isTvShow,
@@ -463,7 +465,7 @@ class _DetailPageState extends State<DetailPage> {
           height: heroHeight,
           width: double.infinity,
           child: Image.network(
-            backdrop,
+            proxyImageUrl(backdrop),
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => Container(color: AppTheme.cardDark),
           ),
@@ -1078,7 +1080,7 @@ class _DetailPageState extends State<DetailPage> {
                     borderRadius: BorderRadius.circular(8),
                     child: episode.imageUrl.isNotEmpty
                         ? Image.network(
-                            episode.imageUrl,
+                            proxyImageUrl(episode.imageUrl),
                             width: double.infinity,
                             height: 160,
                             fit: BoxFit.cover,
@@ -1134,7 +1136,7 @@ class _DetailPageState extends State<DetailPage> {
                     borderRadius: BorderRadius.circular(8),
                     child: episode.imageUrl.isNotEmpty
                         ? Image.network(
-                            episode.imageUrl,
+                            proxyImageUrl(episode.imageUrl),
                             width: 120,
                             height: 68,
                             fit: BoxFit.cover,

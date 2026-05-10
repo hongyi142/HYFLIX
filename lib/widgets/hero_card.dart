@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
+import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
@@ -112,7 +113,7 @@ class _HeroSectionState extends State<HeroSection> {
                   fit: StackFit.expand,
                   children: [
                     Image.network(
-                      banner,
+                      proxyImageUrl(banner),
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) =>
                           Container(color: AppTheme.cardLight),

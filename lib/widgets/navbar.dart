@@ -16,26 +16,50 @@ class Navbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final layout = ResponsiveLayout.of(context);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: EdgeInsets.symmetric(
-        horizontal: layout.navHorizontalPadding,
-        vertical: layout.isPhone ? 12 : AppTheme.spacing16,
-      ),
-      decoration: BoxDecoration(
-        color: isScrolled
-            ? AppTheme.background.withOpacity(0.7)
-            : Colors.transparent,
+    final horizontalMargin = layout.isPhone
+        ? 12.0
+        : layout.isTablet
+            ? 24.0
+            : 48.0;
+    final radius = layout.isPhone ? 14.0 : 18.0;
+    return Container(
+      margin: EdgeInsets.fromLTRB(
+        horizontalMargin,
+        layout.isPhone ? 10 : 14,
+        horizontalMargin,
+        0,
       ),
       child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
         child: BackdropFilter(
           filter: ImageFilter.blur(
-            sigmaX: isScrolled ? 15 : 0,
-            sigmaY: isScrolled ? 15 : 0,
+            sigmaX: isScrolled ? 20 : 10,
+            sigmaY: isScrolled ? 20 : 10,
           ),
-          child: layout.isPhone
-              ? _buildMobileNavbar(context)
-              : _buildDesktopNavbar(context),
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: layout.isPhone ? 16 : layout.navHorizontalPadding,
+              vertical: layout.isPhone ? 10 : 12,
+            ),
+            decoration: BoxDecoration(
+              color: Color.fromRGBO(14, 18, 24, isScrolled ? 0.92 : 0.65),
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(
+                color: Colors.white.withOpacity(isScrolled ? 0.12 : 0.08),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(isScrolled ? 0.4 : 0.2),
+                  blurRadius: isScrolled ? 24 : 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: layout.isPhone
+                ? _buildMobileNavbar(context)
+                : _buildDesktopNavbar(context),
+          ),
         ),
       ),
     );
@@ -47,9 +71,9 @@ class Navbar extends StatelessWidget {
       children: [
         Image.asset(
           'assets/Logo.png',
-          height: 32,
+          height: 28,
           errorBuilder: (context, error, stackTrace) =>
-              const Icon(LucideIcons.image, color: Colors.white, size: 32),
+              const Icon(LucideIcons.image, color: Colors.white, size: 28),
         ),
         Row(
           children: [
@@ -66,34 +90,8 @@ class Navbar extends StatelessWidget {
               icon: LucideIcons.search,
               onTap: () => _openSearch(context),
             ),
-            const SizedBox(width: AppTheme.spacing16),
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const _NavIcon(icon: LucideIcons.bell),
-                Positioned(
-                  right: 4,
-                  top: 4,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: AppTheme.accent,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Text(
-                      '3',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: AppTheme.spacing16),
-            _ProfileAvatar(onTap: () => _openProfile(context)),
+            const SizedBox(width: 12),
+            _ProfileAvatar(onTap: () => _openProfile(context), size: 34),
           ],
         ),
       ],
@@ -106,31 +104,31 @@ class Navbar extends StatelessWidget {
         GestureDetector(
           onTap: () => _showMobileMenu(context),
           child: Container(
-            width: 42,
-            height: 42,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white10),
             ),
-            child: const Icon(LucideIcons.menu, color: Colors.white, size: 20),
+            child: const Icon(LucideIcons.menu, color: Colors.white, size: 18),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: Align(
             alignment: Alignment.centerLeft,
             child: Image.asset(
               'assets/Logo.png',
-              height: 28,
+              height: 26,
               errorBuilder: (context, error, stackTrace) =>
-                  const Icon(LucideIcons.image, color: Colors.white, size: 28),
+                  const Icon(LucideIcons.image, color: Colors.white, size: 26),
             ),
           ),
         ),
         _NavIcon(icon: LucideIcons.search, onTap: () => _openSearch(context)),
         const SizedBox(width: 6),
-        _ProfileAvatar(onTap: () => _openProfile(context), size: 38),
+        _ProfileAvatar(onTap: () => _openProfile(context), size: 36),
       ],
     );
   }

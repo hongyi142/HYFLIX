@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
+import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/user_profile.dart';
 import '../pages/detail_page.dart';
@@ -216,7 +217,7 @@ class _ProfilePageState extends State<ProfilePage> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.network('https://picsum.photos/seed/profilehero/1920/1080',
+          Image.network(proxyImageUrl('https://picsum.photos/seed/profilehero/1920/1080'),
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => Container(color: AppTheme.cardDark),
           ),
@@ -460,7 +461,7 @@ class _ProfilePageState extends State<ProfilePage> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: Stack(fit: StackFit.expand, children: [
-                  Image.network(poster, fit: BoxFit.cover,
+                  Image.network(proxyImageUrl(poster), fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight, child: const Center(child: Icon(LucideIcons.film, color: AppTheme.textSecondary)))),
                   Container(decoration: BoxDecoration(gradient: LinearGradient(
                     begin: Alignment.topCenter, end: Alignment.bottomCenter,
@@ -556,7 +557,7 @@ class _ProfilePageState extends State<ProfilePage> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Stack(fit: StackFit.expand, children: [
-                  Image.network(poster, fit: BoxFit.cover,
+                  Image.network(proxyImageUrl(poster), fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight, child: const Icon(LucideIcons.film, color: AppTheme.textSecondary))),
                   Positioned(top: 5, left: 5, child: Container(
                     padding: const EdgeInsets.all(3),
@@ -645,7 +646,7 @@ class _ProfilePageState extends State<ProfilePage> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Stack(fit: StackFit.expand, children: [
-                  Image.network(tmdb?.posterUrl ?? '', fit: BoxFit.cover,
+                  Image.network(proxyImageUrl(tmdb?.posterUrl ?? ''), fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight, child: const Icon(LucideIcons.film, color: AppTheme.textSecondary))),
                   Positioned(top: 5, right: 5, child: Container(
                     padding: const EdgeInsets.all(3),
