@@ -13,7 +13,9 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); item=d['list'][0]; print\\('Name:', item['vod_name']\\); print\\('Play from:', item.get\\('vod_play_from',''\\)\\); urls=item.get\\('vod_play_url',''\\); print\\('First 500 chars of play_url:', urls[:500]\\)\")",
       "Bash(python3 -c ' *)",
       "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('Total:', d.total||0\\); \\(d.list||[]\\).slice\\(0,3\\).forEach\\(i=>{const eps=\\(i.vod_play_url||''\\).split\\('#'\\).length; console.log\\('  ['+i.vod_id+'] '+i.vod_name+' \\('+\\( i.vod_year||''\\)+'\\) eps='+eps\\)}\\)\")",
-      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); \\(d.list||[]\\).slice\\(0,2\\).forEach\\(i=>{const url=\\(i.vod_play_url||''\\).split\\('#'\\)[0].split\\('$'\\)[1]||''; console.log\\(i.vod_name+': '+url\\)}\\)\")"
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); \\(d.list||[]\\).slice\\(0,2\\).forEach\\(i=>{const url=\\(i.vod_play_url||''\\).split\\('#'\\)[0].split\\('$'\\)[1]||''; console.log\\(i.vod_name+': '+url\\)}\\)\")",
+      "Bash(netlify *)",
+      "Bash(flutter build *)"
     ]
   }
 }
