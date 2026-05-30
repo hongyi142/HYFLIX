@@ -374,11 +374,37 @@ class AuthService {
   // ── Ensure valid token ───────────────────────────────────────────────
 
   static Future<bool> ensureValidToken() async {
-    if (_idToken != null) return true;
-    if (_refreshToken != null) {
+    if (_idToken == null) {
+      if (_refreshToken != null) {
+        await _refreshIdToken();
+        return _idToken != null;
+      }
+      return false;
+    }
+    // Check if token is expired by decoding JWT payload
+    if (_isTokenExpired(_idToken!)) {
       await _refreshIdToken();
       return _idToken != null;
     }
-    return false;
+    return true;
+  }
+
+  /// Check if a JWT token is expired (with 60s buffer).
+  static bool _isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      // Decode payload (part 1), pad to multiple of 4
+      var payload = parts[1];
+      while (payload.length % 4 != 0) payload += '=';
+      final decoded = utf8.decode(base64Url.decode(payload));
+      final Map<String, dynamic> claims = json.decode(decoded);
+      final exp = claims['exp'] as int?;
+      if (exp == null) return true;
+      // Add 60-second buffer so we refresh before actual expiry
+      return DateTime.now().millisecondsSinceEpoch / 1000 > exp - 60;
+    } catch (_) {
+      return true; // If we can't decode, assume expired
+    }
   }
 }

@@ -9,6 +9,7 @@ import '../models/content_model.dart';
 import '../pages/detail_page.dart';
 import '../pages/video_player_screen.dart';
 import '../services/tmdb_service.dart';
+import '../services/torrent_service.dart';
 
 class VideoCard extends StatefulWidget {
   final ContentModel content;
@@ -271,16 +272,26 @@ class _VideoCardState extends State<VideoCard> {
     return null;
   }
 
+  /// Whether the saved URL is a valid persistent VOD stream (not a dead torrent proxy URL).
+  static bool _isPlayableUrl(String url) {
+    if (url.isEmpty) return false;
+    final lower = url.toLowerCase();
+    if (lower.contains('localhost') || lower.contains('127.0.0.1')) return false;
+    return lower.contains('.m3u8') || lower.contains('.mp4') || lower.contains('http');
+  }
+
   void _handleTap() {
-    if (widget.content.resumeEpisodeIndex != null &&
-        widget.content.m3u8Url.isNotEmpty) {
+    final hasResume = widget.content.resumeEpisodeIndex != null;
+    final playableUrl = _isPlayableUrl(widget.content.m3u8Url);
+
+    if (hasResume && playableUrl) {
+      // VOD content with valid URL — resume directly in player
       final epIndex = widget.content.resumeEpisodeIndex!;
       final videoUrl =
           widget.content.episodes.isNotEmpty &&
               epIndex < widget.content.episodes.length
           ? widget.content.episodes[epIndex].url
           : widget.content.m3u8Url;
-      // Extract season number from the episode name
       final epName = widget.content.episodes.isNotEmpty &&
               epIndex < widget.content.episodes.length
           ? widget.content.episodes[epIndex].name
@@ -303,12 +314,118 @@ class _VideoCardState extends State<VideoCard> {
           ),
         ),
       ).then((_) => widget.onWatchHistoryChanged?.call());
+    } else if (hasResume && !playableUrl) {
+      // Torrent content with dead URL — fetch stream and go directly to player
+      _resumeTorrentPlayback();
     } else {
+      // No resume — open detail page
       DetailPage.show(
         context,
         widget.content,
         initialTmdb: _tmdbResult,
       ).then((_) => widget.onWatchHistoryChanged?.call());
     }
+  }
+
+  Future<void> _resumeTorrentPlayback() async {
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          color: Color(0xFF1A1F2E),
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Color(0xFFFF3B40)),
+                SizedBox(height: 16),
+                Text(
+                  'Finding stream...',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // Get TMDB info
+      final tmdb = _tmdbResult ?? await TmdbService.search(
+        widget.content.title,
+        year: widget.content.year,
+      );
+      if (tmdb == null || tmdb.id == null) {
+        if (mounted) Navigator.pop(context); // dismiss loading
+        _openDetailPage();
+        return;
+      }
+
+      final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
+      if (imdbId == null) {
+        if (mounted) Navigator.pop(context);
+        _openDetailPage();
+        return;
+      }
+
+      final epIndex = widget.content.resumeEpisodeIndex!;
+      final epName = widget.content.episodes.isNotEmpty &&
+              epIndex < widget.content.episodes.length
+          ? widget.content.episodes[epIndex].name
+          : '';
+      final seasonNum = _extractSeasonFromEpisodeName(epName) ?? 1;
+
+      final stream = await TorrentService().fetchBestStream(
+        imdbId,
+        tmdb.mediaType,
+        season: tmdb.mediaType == 'tv' ? seasonNum : null,
+        episode: tmdb.mediaType == 'tv' ? epIndex + 1 : null,
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss loading
+
+      if (stream == null) {
+        _openDetailPage();
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(
+            videoUrl: '',
+            title: _tmdbTitle ?? widget.content.title,
+            originalTitle: widget.content.title,
+            episodes: widget.content.episodes,
+            initialEpisodeIndex: epIndex,
+            tmdbId: tmdb.id?.toString(),
+            isTvShow: widget.content.episodes.length > 1,
+            seasonNumber: seasonNum,
+            posterUrl: widget.content.thumbnailUrl,
+            seekToSeconds: widget.content.resumePositionSeconds ?? 0,
+            torrentStream: stream,
+          ),
+        ),
+      ).then((_) => widget.onWatchHistoryChanged?.call());
+    } catch (e) {
+      debugPrint('[VideoCard] resumeTorrentPlayback error: $e');
+      if (mounted) {
+        Navigator.pop(context); // dismiss loading
+        _openDetailPage();
+      }
+    }
+  }
+
+  void _openDetailPage() {
+    DetailPage.show(
+      context,
+      widget.content,
+      initialTmdb: _tmdbResult,
+    ).then((_) => widget.onWatchHistoryChanged?.call());
   }
 }

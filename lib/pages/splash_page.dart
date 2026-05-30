@@ -38,8 +38,19 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
     if (mounted) setState(() => _progress += 1.0 / _totalSteps);
   }
 
+  static List<ContentModel> _tmdbToContent(List<TmdbResult> tmdbResults) {
+    return tmdbResults.map((tmdb) => ContentModel(
+      title: tmdb.englishTitle,
+      description: tmdb.overview,
+      thumbnailUrl: tmdb.posterUrl,
+      bannerUrl: tmdb.backdropUrl.isNotEmpty ? tmdb.backdropUrl : tmdb.posterUrl,
+      m3u8Url: '',
+      year: tmdb.year,
+      rating: tmdb.voteAverage,
+    )).toList();
+  }
+
   Future<void> _loadData() async {
-    final api = ApiService();
     try {
       // Load language and source preference before fetching content
       if (AuthService.isLoggedIn) {
@@ -52,24 +63,32 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
       }
       _tickProgress();
 
-      // Fetch all content in parallel — each fetch has its own error handling
-      // so a single failure doesn't discard all other results.
+      // Fetch all content directly from TMDB (no provider matching).
+      // Provider matching happens lazily in DetailPage on tap.
       final futures = [
-        api.fetchMatchedTrendingMovies(count: 10),
-        api.fetchMatchedTrendingTVSeries(count: 10),
-        api.fetchMatchedRecentPopularChineseAnimation(count: 10),
-        api.fetchMatchedRecentPopularChineseDramas(count: 10),
-        api.fetchMatchedRecentPopularKoreanDramas(count: 10),
-        api.fetchMatchedRecentPopularWesternSeries(count: 10),
-        api.fetchMatchedRecentPopularHongKongSeries(count: 10, withinDays: 365),
+        TmdbService.fetchTrendingMovies(count: 10),
+        TmdbService.fetchTrendingTVSeries(count: 10),
+        TmdbService.fetchTrendingChineseAnimationFromAniList(count: 10)
+            .then((results) async {
+              // Fallback to TMDB if AniList returns nothing
+              if (results.isEmpty) {
+                debugPrint('[splash] AniList returned empty, falling back to TMDB');
+                return TmdbService.fetchRecentPopularChineseAnimation(count: 10);
+              }
+              return results;
+            }),
+        TmdbService.fetchRecentPopularChineseDramas(count: 10),
+        TmdbService.fetchRecentPopularKoreanDramas(count: 10),
+        TmdbService.fetchRecentPopularWesternSeries(count: 10),
+        TmdbService.fetchRecentPopularHongKongSeries(count: 10, withinDays: 365),
       ];
 
       // Wait for all, catching individually so partial results survive
       final results = <List<ContentModel>>[];
       for (final f in futures) {
         try {
-          final r = await f;
-          results.add(r);
+          final tmdbResults = await f;
+          results.add(_tmdbToContent(tmdbResults));
         } catch (e) {
           debugPrint('[splash] Shelf fetch failed: $e');
           results.add([]);

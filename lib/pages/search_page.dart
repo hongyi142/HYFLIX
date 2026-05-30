@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
@@ -20,9 +21,57 @@ class _SearchPageState extends State<SearchPage> {
   List<ContentModel> _results = [];
   bool _isSearching = false;
   String? _translatedQuery;
+  List<String> _searchHistory = [];
+  static const int _maxHistory = 20;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList('search_history') ?? [];
+    if (mounted) setState(() => _searchHistory = history);
+  }
+
+  Future<void> _saveToHistory(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    _searchHistory.remove(trimmed);
+    _searchHistory.insert(0, trimmed);
+    if (_searchHistory.length > _maxHistory) {
+      _searchHistory = _searchHistory.sublist(0, _maxHistory);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('search_history', _searchHistory);
+  }
+
+  Future<void> _removeFromHistory(String query) async {
+    _searchHistory.remove(query);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('search_history', _searchHistory);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _clearHistory() async {
+    _searchHistory.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('search_history');
+    if (mounted) setState(() {});
+  }
 
   Future<void> _performSearch(String query) async {
     if (query.trim().isEmpty) return;
+
+    _saveToHistory(query);
 
     setState(() {
       _isSearching = true;
@@ -34,7 +83,7 @@ class _SearchPageState extends State<SearchPage> {
       final List<String> searchQueries = [query];
 
       // 1. If query is English, get ALL potential Chinese names from top TMDB hits
-      if (!RegExp(r'[\u4e00-\u9fa5]').hasMatch(query)) {
+      if (!RegExp(r'[一-龥]').hasMatch(query)) {
         final candidates = await TmdbService.findChineseTitles(query);
         if (candidates.isNotEmpty) {
           searchQueries.addAll(candidates);
@@ -79,6 +128,7 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final layout = ResponsiveLayout.of(context);
+    final showHistory = _controller.text.isEmpty && _results.isEmpty && !_isSearching;
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
@@ -96,9 +146,16 @@ class _SearchPageState extends State<SearchPage> {
             focusedBorder: InputBorder.none,
             suffixIcon: IconButton(
               icon: const Icon(LucideIcons.x, color: Colors.white70),
-              onPressed: () => _controller.clear(),
+              onPressed: () {
+                _controller.clear();
+                setState(() {
+                  _results = [];
+                  _translatedQuery = null;
+                });
+              },
             ),
           ),
+          onChanged: (_) => setState(() {}),
           onSubmitted: _performSearch,
         ),
       ),
@@ -122,25 +179,27 @@ class _SearchPageState extends State<SearchPage> {
                     child: CircularProgressIndicator(color: AppTheme.accent),
                   )
                 : _results.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          LucideIcons.search,
-                          size: 64,
-                          color: Colors.white12,
+                ? showHistory && _searchHistory.isNotEmpty
+                    ? _buildHistorySection(layout)
+                    : Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              LucideIcons.search,
+                              size: 64,
+                              color: Colors.white12,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _controller.text.isEmpty
+                                  ? 'Type to search'
+                                  : 'No results found for "${_controller.text}"',
+                              style: const TextStyle(color: AppTheme.textSecondary),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _controller.text.isEmpty
-                              ? 'Type to search'
-                              : 'No results found for "${_controller.text}"',
-                          style: const TextStyle(color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  )
+                      )
                 : GridView.builder(
                     padding: EdgeInsets.all(layout.pagePadding),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -163,6 +222,82 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildHistorySection(ResponsiveLayout layout) {
+    final padding = layout.isPhone ? 16.0 : 32.0;
+    return ListView(
+      padding: EdgeInsets.symmetric(horizontal: padding, vertical: 16),
+      children: [
+        Row(
+          children: [
+            const Text(
+              'Recent Searches',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: _clearHistory,
+              child: const Text(
+                'Clear All',
+                style: TextStyle(
+                  color: AppTheme.accent,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _searchHistory.map((query) {
+            return GestureDetector(
+              onTap: () {
+                _controller.text = query;
+                _performSearch(query);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.cardDark,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.clock, color: AppTheme.textSecondary, size: 14),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: layout.isPhone ? 200 : 300),
+                      child: Text(
+                        query,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => _removeFromHistory(query),
+                      child: const Icon(LucideIcons.x, color: AppTheme.textSecondary, size: 14),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 }

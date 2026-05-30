@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
+import '../models/episode.dart';
 import '../pages/browse_page.dart';
 import '../pages/category_page.dart';
 import '../pages/my_list_page.dart';
@@ -236,6 +237,14 @@ class _HomePageState extends State<HomePage> {
           ),
         );
       } else if (title.isNotEmpty) {
+        final savedM3u8Url = history['m3u8Url'] as String? ?? '';
+        final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
+        final positionSeconds =
+            (history['positionSeconds'] as num?)?.toInt() ?? 0;
+        final savedEpisodes = (history['episodes'] as List<dynamic>?)
+                ?.map((e) => Episode.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [];
         watchingItems.add(
           ContentModel(
             title: finalTitle,
@@ -243,11 +252,13 @@ class _HomePageState extends State<HomePage> {
             description: '',
             thumbnailUrl: posterUrl,
             bannerUrl: posterUrl,
-            m3u8Url: '',
+            m3u8Url: savedM3u8Url,
             year: '',
             rating: 0,
-            episodes: const [],
+            episodes: savedEpisodes,
             progress: progress,
+            resumeEpisodeIndex: episodeIndex,
+            resumePositionSeconds: positionSeconds,
           ),
         );
       }

@@ -8,6 +8,7 @@ import '../models/episode.dart';
 import '../pages/video_player_screen.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import '../services/torrent_service.dart';
 import '../services/watchlist_service.dart';
 import '../services/tmdb_service.dart';
 import '../widgets/buttons.dart';
@@ -62,6 +63,27 @@ class _DetailPageState extends State<DetailPage> {
   bool _reverseEpisodes = false;
   int _sourceGeneration = 0;
 
+  // Torrent streaming state
+  Map<int, List<TorrentStream>> _torrentStreamsByEpisode = {};
+  int _torrentEpisodeCount = 0;
+  int _torrentSeasonCount = 1;
+  bool _isLoadingTorrents = false;
+  bool _torrentFailed = false;
+  String _selectedQuality = '1080p';
+  List<String> _availableQualities = [];
+  String _selectedEncoder = '';
+  List<String> _availableEncoders = [];
+  Map<int, TmdbEpisodeInfo> _tmdbEpisodeDetails = {};
+  String? _cachedImdbId;
+
+  /// Whether this content should use Chinese VOD providers as primary source.
+  static bool _isChineseContent(TmdbResult? tmdb) {
+    if (tmdb == null) return false;
+    if (tmdb.originalLanguage == 'zh') return true;
+    if (tmdb.originCountries.any({'HK', 'TW'}.contains)) return true;
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -73,14 +95,29 @@ class _DetailPageState extends State<DetailPage> {
         if (mounted) {
           setState(() => _tmdb = r);
           _fetchCast();
+          _routeContentSource();
         }
       });
     } else {
       _fetchCast();
+      _routeContentSource();
     }
     _checkListed();
     _watchlistService.addListener(_checkListed);
     _downloadService.addListener(_onDownloadChanged);
+  }
+
+  /// Route to the appropriate content source based on content type.
+  /// Chinese content → VOD providers directly.
+  /// Western/Korean content → Torrentio first, VOD fallback.
+  void _routeContentSource() {
+    if (_isChineseContent(_tmdb)) {
+      _refreshSourceEpisodes();
+    } else {
+      // Initialize season from content subtitle if available
+      _selectedSeason = _extractSeasonNumber() ?? 1;
+      _fetchTorrentStreams();
+    }
   }
 
   @override
@@ -106,6 +143,270 @@ class _DetailPageState extends State<DetailPage> {
   void _refreshSourceEpisodes() {
     // Re-fetch episodes for the current source (used on initial load)
     _switchSource(_selectedSource, force: true);
+  }
+
+  /// Fetch torrent metadata for Western/Korean content.
+  /// Fetches IMDB ID + TMDB episode details in parallel (no Torrentio call yet).
+  /// Torrentio streams are fetched lazily when user taps an episode.
+  /// Falls back to VOD if no IMDB ID found.
+  Future<void> _fetchTorrentStreams() async {
+    final tmdb = _tmdb;
+    if (tmdb == null || tmdb.id == null) {
+      _fallbackToVod();
+      return;
+    }
+
+    setState(() => _isLoadingTorrents = true);
+
+    final isTv = tmdb.mediaType == 'tv';
+
+    // Fetch IMDB ID + TMDB metadata in parallel
+    final futures = <Future>[
+      TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType),
+      if (isTv) TmdbService.fetchSeasonCount(tmdb.id!),
+      if (isTv) TmdbService.fetchSeasonEpisodes(tmdb.id!, _selectedSeason),
+    ];
+
+    final results = await Future.wait(futures);
+    if (!mounted) return;
+
+    final imdbId = results[0] as String?;
+    if (imdbId == null) {
+      _fallbackToVod();
+      return;
+    }
+    _cachedImdbId = imdbId;
+
+    int tmdbEpisodeCount = 0;
+    final episodeDetailsMap = <int, TmdbEpisodeInfo>{};
+
+    if (isTv) {
+      _torrentSeasonCount = results[1] as int;
+      final episodes = results[2] as List<TmdbEpisodeInfo>;
+      tmdbEpisodeCount = episodes.length;
+      for (final ep in episodes) {
+        episodeDetailsMap[ep.episodeNumber] = ep;
+      }
+    }
+
+    // For movies, fetch streams now. For series, defer until episode tap.
+    if (!isTv) {
+      final streams = await TorrentService().fetchStreams(
+        imdbId, tmdb.mediaType,
+      );
+      if (!mounted) return;
+      if (streams.isEmpty) {
+        _fallbackToVod();
+        return;
+      }
+      setState(() {
+        _torrentStreamsByEpisode = {0: streams};
+        _torrentEpisodeCount = 1;
+        _tmdbEpisodeDetails = episodeDetailsMap;
+        _availableQualities = streams.map((s) => s.quality).toSet().toList()
+          ..sort((a, b) => _qualityRank(a).compareTo(_qualityRank(b)));
+        _selectedQuality = _availableQualities.contains('1080p') ? '1080p' : _availableQualities.first;
+        _availableEncoders = _extractEncoders(streams);
+        _selectedEncoder = _availableEncoders.isNotEmpty ? _availableEncoders.first : '';
+        _isLoadingTorrents = false;
+      });
+    } else {
+      // Series: show episode list immediately, fetch first episode streams for quality dropdown
+      setState(() {
+        _torrentStreamsByEpisode = {};
+        _torrentEpisodeCount = tmdbEpisodeCount > 0 ? tmdbEpisodeCount : 1;
+        _tmdbEpisodeDetails = episodeDetailsMap;
+        _availableQualities = [];
+        _selectedQuality = '1080p';
+        _availableEncoders = [];
+        _selectedEncoder = '';
+        _isLoadingTorrents = false;
+      });
+
+      // Pre-fetch first episode so quality/encoder dropdown shows all options
+      _fetchEpisodeStreams(1);
+
+      // Auto-resume: if coming from Continue Watching, play the saved episode
+      final resumeIndex = widget.content.resumeEpisodeIndex;
+      if (resumeIndex != null && resumeIndex < _torrentEpisodeCount) {
+        final resumePos = widget.content.resumePositionSeconds ?? 0;
+        _playWithTorrent(resumeIndex, seekToSeconds: resumePos);
+      }
+    }
+  }
+
+  /// Extract unique encoder/release group names from stream titles.
+  static List<String> _extractEncoders(List<TorrentStream> streams) {
+    final encoders = <String>{};
+    for (final s in streams) {
+      final text = '${s.filename} ${s.title}';
+      // Look for common encoder patterns: x265, x264, HEVC, H264, AV1
+      if (text.contains(RegExp(r'x265|HEVC|H\.?265', caseSensitive: false))) {
+        encoders.add('x265/HEVC');
+      }
+      if (text.contains(RegExp(r'x264|H\.?264|AVC', caseSensitive: false))) {
+        encoders.add('x264');
+      }
+      if (text.contains(RegExp(r'AV1', caseSensitive: false))) {
+        encoders.add('AV1');
+      }
+      // Look for release group (usually after last "-" in filename)
+      final groupMatch = RegExp(r'-([A-Za-z0-9]+)\.[a-z]{2,4}$').firstMatch(text);
+      if (groupMatch != null) {
+        encoders.add(groupMatch.group(1)!);
+      }
+    }
+    return encoders.toList()..sort();
+  }
+
+  /// Change the selected season for torrent content and re-fetch streams.
+  void _changeTorrentSeason(int season) {
+    if (season == _selectedSeason) return;
+    setState(() {
+      _selectedSeason = season;
+      _torrentStreamsByEpisode = {};
+      _torrentEpisodeCount = 0;
+      _tmdbEpisodeDetails = {};
+      _availableQualities = [];
+      _selectedQuality = '1080p';
+      _availableEncoders = [];
+      _selectedEncoder = '';
+    });
+    _fetchTorrentStreams();
+  }
+
+  /// Fall back to VOD provider when torrents aren't available.
+  void _fallbackToVod() {
+    setState(() {
+      _torrentFailed = true;
+      _isLoadingTorrents = false;
+    });
+    _refreshSourceEpisodes();
+  }
+
+  static int _qualityRank(String quality) {
+    switch (quality) {
+      case '4K': return 0;
+      case '1080p': return 1;
+      case '720p': return 2;
+      case '480p': return 3;
+      default: return 4;
+    }
+  }
+
+  /// Get the best torrent stream for the selected quality and encoder.
+  TorrentStream? _getStreamForSelection(int episodeNum) {
+    var streams = _torrentStreamsByEpisode[episodeNum] ?? [];
+
+    // Filter by encoder (skip if no encoder selected)
+    if (_selectedEncoder.isNotEmpty) {
+      final encoderLower = _selectedEncoder.toLowerCase();
+      final filtered = streams.where((s) {
+        final text = '${s.filename} ${s.title}'.toLowerCase();
+        return text.contains(encoderLower) ||
+            (_selectedEncoder == 'x265/HEVC' &&
+                (text.contains('x265') || text.contains('hevc') || text.contains('h.265'))) ||
+            (_selectedEncoder == 'x264' &&
+                (text.contains('x264') || text.contains('h.264') || text.contains('avc')));
+      }).toList();
+      if (filtered.isNotEmpty) streams = filtered;
+    }
+
+    // Filter by quality
+    final qualityFiltered = streams.where((s) => s.quality == _selectedQuality).toList();
+    if (qualityFiltered.isNotEmpty) {
+      qualityFiltered.sort((a, b) => b.seeders.compareTo(a.seeders));
+      return qualityFiltered.first;
+    }
+
+    // Fallback: best available
+    if (streams.isNotEmpty) {
+      streams.sort((a, b) => b.seeders.compareTo(a.seeders));
+      return streams.first;
+    }
+    return null;
+  }
+
+  /// Fetch streams for a specific episode (lazy loading for series).
+  Future<void> _fetchEpisodeStreams(int episodeNum) async {
+    final tmdb = _tmdb;
+    if (tmdb?.id == null || _torrentStreamsByEpisode.containsKey(episodeNum)) return;
+
+    final imdbId = _cachedImdbId ?? await TmdbService.fetchImdbId(tmdb!.id!, tmdb.mediaType);
+    if (imdbId == null || !mounted) return;
+    _cachedImdbId ??= imdbId;
+
+    final streams = await TorrentService().fetchStreams(
+      imdbId, 'tv',
+      season: _selectedSeason,
+      episode: episodeNum,
+    );
+
+    if (!mounted || streams.isEmpty) return;
+
+    // Merge quality/encoder options from every fetched episode
+    final newQualities = streams.map((s) => s.quality).toSet();
+    final mergedQualities = {..._availableQualities, ...newQualities}.toList()
+      ..sort((a, b) => _qualityRank(a).compareTo(_qualityRank(b)));
+    final newEncoders = _extractEncoders(streams);
+    final mergedEncoders = {..._availableEncoders, ...newEncoders}.toList()..sort();
+    setState(() {
+      _torrentStreamsByEpisode[episodeNum] = streams;
+      _availableQualities = mergedQualities;
+      if (!_availableQualities.contains(_selectedQuality)) {
+        _selectedQuality = _availableQualities.contains('1080p') ? '1080p' : _availableQualities.first;
+      }
+      _availableEncoders = mergedEncoders;
+      if (_selectedEncoder.isNotEmpty && !_availableEncoders.contains(_selectedEncoder)) {
+        _selectedEncoder = _availableEncoders.isNotEmpty ? _availableEncoders.first : '';
+      }
+    });
+  }
+
+  /// Play a torrent stream — navigates to player immediately, player handles buffering.
+  Future<void> _playWithTorrent(int episodeIndex, {int seekToSeconds = 0}) async {
+    final tmdb = _tmdb;
+    final episodeNum = episodeIndex + 1;
+
+    // Fetch streams for this episode if not already loaded
+    if (!_torrentStreamsByEpisode.containsKey(episodeNum)) {
+      setState(() => _isLoadingTorrents = true);
+      await _fetchEpisodeStreams(episodeNum);
+      if (!mounted) return;
+      setState(() => _isLoadingTorrents = false);
+    }
+
+    // Pick the best stream for selected quality/encoder
+    final picked = _getStreamForSelection(episodeNum);
+    if (picked == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No streams available for this episode.')),
+      );
+      return;
+    }
+
+    // Navigate to player immediately — player handles torrent buffering
+    final poster = tmdb?.posterUrl.isNotEmpty == true
+        ? tmdb!.posterUrl
+        : widget.content.thumbnailUrl;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerScreen(
+          videoUrl: '',
+          title: tmdb?.englishTitle ?? widget.content.title,
+          originalTitle: widget.content.title,
+          episodes: const [],
+          initialEpisodeIndex: 0,
+          tmdbId: tmdb?.id?.toString(),
+          isTvShow: _torrentEpisodeCount > 1,
+          seasonNumber: _selectedSeason,
+          posterUrl: poster,
+          torrentStream: picked,
+          seekToSeconds: seekToSeconds,
+        ),
+      ),
+    );
   }
 
   void _switchSource(VideoSource source, {bool force = false}) {
@@ -135,11 +436,23 @@ class _DetailPageState extends State<DetailPage> {
           return;
         }
         // Fallback: direct search by original title + cleaned title
-        final fallbackResults = await api.searchByTitleFromSource(
+        var fallbackResults = await api.searchByTitleFromSource(
           widget.content.title, source);
-        final allEps = <Episode>[];
+        var allEps = <Episode>[];
         for (final r in fallbackResults) {
           allEps.addAll(r.episodes);
+        }
+        // If still no results and we have a TMDB ID, try Chinese title
+        if (allEps.isEmpty && tmdb.id != null) {
+          final chineseTitle = await TmdbService.fetchChineseTitle(
+            tmdb.id!, tmdb.mediaType);
+          if (chineseTitle != null && chineseTitle != widget.content.title) {
+            fallbackResults = await api.searchByTitleFromSource(
+              chineseTitle, source);
+            for (final r in fallbackResults) {
+              allEps.addAll(r.episodes);
+            }
+          }
         }
         await applyEpisodes(allEps.isNotEmpty ? allEps : null);
       });
@@ -291,7 +604,32 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _play(int episodeIndex) {
+    // Route to torrent for non-Chinese content (unless torrent already failed)
+    if (!_isChineseContent(_tmdb) && !_torrentFailed) {
+      _playWithTorrent(episodeIndex);
+      return;
+    }
+
+    // VOD playback path
     final episodes = _sourceEpisodes ?? widget.content.episodes;
+    if (episodes.isEmpty) {
+      if (_isLoadingEpisodes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Loading episodes, please wait...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No streams available for this title.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
     final isTvShow = episodes.length > 1;
     final poster = _tmdb?.posterUrl.isNotEmpty == true
         ? _tmdb!.posterUrl
@@ -420,7 +758,13 @@ class _DetailPageState extends State<DetailPage> {
                             ],
                           ),
                   ),
-                  if (isMultiEpisode) ...[
+                  // Episodes/streams section
+                  if (!_isChineseContent(_tmdb) && !_torrentFailed) ...[
+                    // Torrent content: show quality filter + play/episode cards
+                    SizedBox(height: layout.isPhone ? 28 : 36),
+                    _buildTorrentEpisodesSection(layout),
+                  ] else if (isMultiEpisode) ...[
+                    // VOD content: show episode list
                     SizedBox(height: layout.isPhone ? 28 : 36),
                     _buildEpisodesSection(episodes, layout),
                   ],
@@ -432,6 +776,532 @@ class _DetailPageState extends State<DetailPage> {
         ),
       ),
       ),
+    );
+  }
+
+  Widget _buildTorrentEpisodesSection(ResponsiveLayout layout) {
+    final contentPadding = layout.isPhone ? 20.0 : 32.0;
+    final isMovie = _tmdb?.mediaType != 'tv';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header with quality dropdown + fallback button
+        Padding(
+          padding: EdgeInsets.fromLTRB(contentPadding, 0, contentPadding, 16),
+          child: Row(
+            children: [
+              if (isMovie)
+                const Text(
+                  'Stream',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.none,
+                  ),
+                )
+              else
+                const Text(
+                  'Episodes',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
+              // Season dropdown for multi-season TV shows
+              if (!isMovie && _torrentSeasonCount > 1) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardDark,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: DropdownButton<int>(
+                    value: _selectedSeason,
+                    dropdownColor: AppTheme.cardDark,
+                    underline: const SizedBox(),
+                    isDense: true,
+                    items: List.generate(_torrentSeasonCount, (i) => i + 1)
+                        .map((s) => DropdownMenuItem(
+                              value: s,
+                              child: Text(
+                                'Season $s',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) _changeTorrentSeason(v);
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(width: 12),
+              // Quality selector (dropdown if multiple, label if single)
+              if (_availableQualities.isNotEmpty)
+                _availableQualities.length > 1
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardDark,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: DropdownButton<String>(
+                          value: _selectedQuality,
+                          dropdownColor: AppTheme.cardDark,
+                          underline: const SizedBox(),
+                          isDense: true,
+                          items: _availableQualities
+                              .map((q) => DropdownMenuItem(
+                                    value: q,
+                                    child: Text(
+                                      q,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        decoration: TextDecoration.none,
+                                      ),
+                                    ),
+                                  ))
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) setState(() => _selectedQuality = v);
+                          },
+                        ),
+                      )
+                    : Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardDark,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Text(
+                          _selectedQuality,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ),
+              const SizedBox(width: 8),
+              // Encoder/source selector (dropdown if multiple, label if single)
+              if (_availableEncoders.isNotEmpty && _selectedEncoder.isNotEmpty)
+                _availableEncoders.length > 1
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardDark,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: DropdownButton<String>(
+                          value: _selectedEncoder,
+                          dropdownColor: AppTheme.cardDark,
+                          underline: const SizedBox(),
+                          isDense: true,
+                          items: _availableEncoders
+                              .map((e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(
+                                      e,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        decoration: TextDecoration.none,
+                                      ),
+                                    ),
+                                  ))
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) setState(() => _selectedEncoder = v);
+                          },
+                        ),
+                      )
+                    : Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardDark,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Text(
+                          _selectedEncoder,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ),
+              if (_isLoadingTorrents) ...[
+                const SizedBox(width: 8),
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.accent,
+                  ),
+                ),
+              ],
+              const Spacer(),
+              // Fallback button
+              HoverButton(
+                onTap: _fallbackToVod,
+                backgroundColor: const Color(0x662F3640),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text(
+                    'Try other sources',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Content: movie play card or episode list
+        if (_isLoadingTorrents)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: CircularProgressIndicator(color: AppTheme.accent),
+            ),
+          )
+        else if (isMovie)
+          _buildTorrentMovieCard(layout)
+        else
+          _buildTorrentEpisodeList(layout),
+      ],
+    );
+  }
+
+  Widget _buildTorrentMovieCard(ResponsiveLayout layout) {
+    final stream = _getStreamForSelection(0);
+    final contentPadding = layout.isPhone ? 20.0 : 32.0;
+
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: contentPadding, vertical: 6),
+      child: Material(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _playWithTorrent(0),
+          focusColor: Colors.white24,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                // Quality badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppTheme.accent.withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    _selectedQuality,
+                    style: const TextStyle(
+                      color: AppTheme.accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ),
+                if (stream?.isHDR == true) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'HDR',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 12),
+                // Stream info
+                if (stream != null) ...[
+                  Icon(Icons.people, color: AppTheme.textSecondary, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${stream.seeders}',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                  if (stream.size.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      stream.size,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ],
+                const Spacer(),
+                const Icon(LucideIcons.playCircle, color: AppTheme.textSecondary, size: 22),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTorrentEpisodeList(ResponsiveLayout layout) {
+    return Column(
+      children: List.generate(_torrentEpisodeCount, (i) {
+        return _buildTorrentEpisodeTile(i, layout);
+      }),
+    );
+  }
+
+  Widget _buildTorrentEpisodeTile(int index, ResponsiveLayout layout) {
+    final epNum = index + 1;
+    final stream = _getStreamForSelection(epNum);
+    final epDetail = _tmdbEpisodeDetails[epNum];
+    final epName = epDetail?.name.isNotEmpty == true ? epDetail!.name : 'Episode $epNum';
+    final epOverview = epDetail?.overview ?? '';
+    final stillUrl = epDetail?.stillUrl ?? '';
+
+    return Container(
+      margin: EdgeInsets.symmetric(
+        horizontal: layout.isPhone ? 20 : 32,
+        vertical: 6,
+      ),
+      child: Material(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _playWithTorrent(index),
+          focusColor: Colors.white24,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: layout.isPhone
+                ? _buildEpisodeTilePhone(epNum, epName, epOverview, stillUrl, stream)
+                : _buildEpisodeTileDesktop(epNum, epName, epOverview, stillUrl, stream),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEpisodeTilePhone(
+    int epNum, String epName, String epOverview, String stillUrl, TorrentStream? stream,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '$epNum',
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                decoration: TextDecoration.none,
+              ),
+            ),
+            const Spacer(),
+            const Icon(LucideIcons.playCircle, color: AppTheme.textSecondary, size: 22),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: stillUrl.isNotEmpty
+              ? Image.network(
+                  proxyImageUrl(stillUrl),
+                  width: double.infinity,
+                  height: 160,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _episodePlaceholder(width: double.infinity, height: 160),
+                )
+              : _episodePlaceholder(width: double.infinity, height: 160),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          epName,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            decoration: TextDecoration.none,
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (epOverview.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            epOverview,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              height: 1.4,
+              decoration: TextDecoration.none,
+            ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+        const SizedBox(height: 8),
+        _buildStreamBadges(stream),
+      ],
+    );
+  }
+
+  Widget _buildEpisodeTileDesktop(
+    int epNum, String epName, String epOverview, String stillUrl, TorrentStream? stream,
+  ) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 32,
+          child: Text(
+            '$epNum',
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              decoration: TextDecoration.none,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: stillUrl.isNotEmpty
+              ? Image.network(
+                  proxyImageUrl(stillUrl),
+                  width: 160,
+                  height: 90,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _episodePlaceholder(width: 160, height: 90),
+                )
+              : _episodePlaceholder(width: 160, height: 90),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                epName,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.none,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (epOverview.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  epOverview,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                    height: 1.4,
+                    decoration: TextDecoration.none,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 6),
+              _buildStreamBadges(stream),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Icon(LucideIcons.playCircle, color: AppTheme.textSecondary, size: 22),
+      ],
+    );
+  }
+
+  Widget _buildStreamBadges(TorrentStream? stream) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppTheme.accent.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            _selectedQuality,
+            style: const TextStyle(
+              color: AppTheme.accent,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              decoration: TextDecoration.none,
+            ),
+          ),
+        ),
+        if (stream != null) ...[
+          const SizedBox(width: 6),
+          Icon(Icons.people, color: AppTheme.textSecondary, size: 12),
+          const SizedBox(width: 2),
+          Text(
+            '${stream.seeders}',
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 11,
+              decoration: TextDecoration.none,
+            ),
+          ),
+          if (stream.size.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text(
+              stream.size,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 11,
+                decoration: TextDecoration.none,
+              ),
+            ),
+          ],
+        ],
+      ],
     );
   }
 

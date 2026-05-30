@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
@@ -45,6 +46,27 @@ class TmdbResult {
     this.originCountries = const [],
     this.releaseDate = '',
   });
+}
+
+class TmdbEpisodeInfo {
+  final int episodeNumber;
+  final String name;
+  final String overview;
+  final String? stillPath;
+  final int? runtime;
+  final String? airDate;
+
+  const TmdbEpisodeInfo({
+    required this.episodeNumber,
+    required this.name,
+    this.overview = '',
+    this.stillPath,
+    this.runtime,
+    this.airDate,
+  });
+
+  String get stillUrl =>
+      stillPath != null ? 'https://image.tmdb.org/t/p/w780$stillPath' : '';
 }
 
 class TmdbService {
@@ -351,6 +373,125 @@ class TmdbService {
         },
       );
 
+  /// Fetch trending Chinese animations (donghua) from AniList GraphQL API.
+  /// Returns TmdbResult-compatible objects for seamless pipeline integration.
+  /// Uses countryOfOrigin: CN to filter for Chinese animations specifically.
+  static Future<List<TmdbResult>> fetchTrendingChineseAnimationFromAniList({
+    int count = 10,
+  }) async {
+    const query = r'''
+      query ($page: Int, $perPage: Int) {
+        Page(page: $page, perPage: $perPage) {
+          media(type: ANIME, countryOfOrigin: CN, sort: TRENDING_DESC, status_not: NOT_YET_RELEASED) {
+            id
+            title { romaji english native }
+            description(asHtml: false)
+            coverImage { large extraLarge }
+            bannerImage
+            averageScore
+            meanScore
+            popularity
+            episodes
+            format
+            status
+            startDate { year month day }
+            genres
+            season
+            seasonYear
+          }
+        }
+      }
+    ''';
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://graphql.anilist.co'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode({
+          'query': query,
+          'variables': {'page': 1, 'perPage': count},
+        }),
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        debugPrint('[AniList] HTTP ${response.statusCode}');
+        return [];
+      }
+
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      final data = body['data'] as Map<String, dynamic>?;
+      if (data == null) return [];
+
+      final page = data['Page'] as Map<String, dynamic>;
+      final media = page['media'] as List<dynamic>? ?? [];
+
+      final results = <TmdbResult>[];
+      for (final m in media) {
+        final map = m as Map<String, dynamic>;
+        final title = map['title'] as Map<String, dynamic>;
+        final startDate = map['startDate'] as Map<String, dynamic>?;
+
+        final englishTitle = (title['english'] as String?) ??
+            (title['romaji'] as String?) ??
+            (title['native'] as String?) ??
+            '';
+        final originalTitle = (title['native'] as String?) ??
+            (title['romaji'] as String?) ??
+            '';
+
+        // Build poster URL from coverImage
+        final coverImage = map['coverImage'] as Map<String, dynamic>?;
+        final posterPath = coverImage?['extraLarge'] as String? ??
+            coverImage?['large'] as String? ??
+            '';
+        final posterUrl = posterPath.isNotEmpty ? posterPath : '';
+
+        final backdropUrl = (map['bannerImage'] as String?) ?? '';
+
+        // Overview — strip HTML tags
+        String overview = (map['description'] as String?) ?? '';
+        overview = overview.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+        if (overview.length > 500) overview = '${overview.substring(0, 500)}...';
+
+        final score = (map['averageScore'] as num?)?.toDouble() ?? 0;
+        final voteAverage = score > 0 ? score / 10.0 : 0.0; // AniList is 0-100, TMDB is 0-10
+
+        final year = startDate?['year']?.toString() ??
+            map['seasonYear']?.toString() ??
+            '';
+
+        final genres = (map['genres'] as List<dynamic>?)
+                ?.map((g) => g.toString())
+                .toList() ??
+            [];
+
+        results.add(TmdbResult(
+          id: map['id'] as int?,
+          englishTitle: englishTitle,
+          originalTitle: originalTitle,
+          overview: overview,
+          posterUrl: posterUrl,
+          backdropUrl: backdropUrl,
+          voteAverage: voteAverage,
+          year: year,
+          genres: genres,
+          mediaType: 'tv',
+          originalLanguage: 'zh',
+          originCountries: const ['CN'],
+        ));
+      }
+
+      debugPrint('[AniList] Fetched ${results.length} trending Chinese animations');
+      return results;
+    } catch (e) {
+      debugPrint('[AniList] Error: $e');
+      return [];
+    }
+  }
+
   static Future<List<TmdbResult>> fetchRecentPopularWesternSeries({
     int count = 10,
     int withinDays = 60,
@@ -477,6 +618,105 @@ class TmdbService {
     } catch (_) {
       _cache[cacheKey] = null;
       return null;
+    }
+  }
+
+  /// Fetches the Chinese title for a TMDB item by ID.
+  /// Uses the TMDB details endpoint with language=zh-CN.
+  static Future<String?> fetchChineseTitle(int id, String mediaType) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return null;
+    try {
+      final type = mediaType == 'tv' ? 'tv' : 'movie';
+      final uri = Uri.https('api.themoviedb.org', '/3/$type/$id', {
+        'api_key': tmdbApiKey,
+        'language': 'zh-CN',
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return null;
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final title = (body['title'] ?? body['name'] ?? '') as String;
+      return title.isNotEmpty ? title : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches the IMDB ID for a TMDB item by ID.
+  /// Uses the external_ids endpoint.
+  static Future<String?> fetchImdbId(int tmdbId, String mediaType) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return null;
+    try {
+      final type = mediaType == 'tv' ? 'tv' : 'movie';
+      final uri = Uri.https('api.themoviedb.org', '/3/$type/$tmdbId/external_ids', {
+        'api_key': tmdbApiKey,
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return null;
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final imdbId = body['imdb_id'] as String?;
+      return (imdbId != null && imdbId.isNotEmpty) ? imdbId : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches the number of seasons for a TV show.
+  static Future<int> fetchSeasonCount(int tmdbId) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return 1;
+    try {
+      final uri = Uri.https('api.themoviedb.org', '/3/tv/$tmdbId', {
+        'api_key': tmdbApiKey,
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return 1;
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      return (body['number_of_seasons'] as int?) ?? 1;
+    } catch (_) {
+      return 1;
+    }
+  }
+
+  /// Fetches the number of episodes in a given season of a TV show.
+  static Future<int> fetchEpisodeCount(int tmdbId, int season) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return 0;
+    try {
+      final uri = Uri.https('api.themoviedb.org', '/3/tv/$tmdbId/season/$season', {
+        'api_key': tmdbApiKey,
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return 0;
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final episodes = body['episodes'] as List<dynamic>?;
+      return episodes?.length ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Fetches episode details (name, overview, image) for a given season.
+  static Future<List<TmdbEpisodeInfo>> fetchSeasonEpisodes(int tmdbId, int season) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+    try {
+      final uri = Uri.https('api.themoviedb.org', '/3/tv/$tmdbId/season/$season', {
+        'api_key': tmdbApiKey,
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return [];
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final episodes = body['episodes'] as List<dynamic>? ?? [];
+      return episodes.map((e) {
+        final map = e as Map<String, dynamic>;
+        return TmdbEpisodeInfo(
+          episodeNumber: map['episode_number'] as int? ?? 0,
+          name: map['name'] as String? ?? '',
+          overview: map['overview'] as String? ?? '',
+          stillPath: map['still_path'] as String?,
+          runtime: map['runtime'] as int?,
+          airDate: map['air_date'] as String?,
+        );
+      }).toList();
+    } catch (_) {
+      return [];
     }
   }
 

@@ -42,6 +42,8 @@ class FirestoreService {
     String originalTitle = '',
     int episodeIndex = 0,
     int positionSeconds = 0,
+    String m3u8Url = '',
+    List<Map<String, dynamic>> episodes = const [],
   }) async {
     final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
     await _put('$_usersPath/watchHistory/$safeId.json', {
@@ -51,6 +53,8 @@ class FirestoreService {
       'progress': progress,
       'episodeIndex': episodeIndex,
       'positionSeconds': positionSeconds,
+      'm3u8Url': m3u8Url,
+      'episodes': episodes,
       'lastWatched': DateTime.now().toUtc().toIso8601String(),
     });
   }

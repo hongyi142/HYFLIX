@@ -10,7 +10,10 @@ import '../models/episode.dart';
 import '../services/subtitle_service.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
+import '../services/torrent_service.dart';
 import '../widgets/buttons.dart';
+import 'fullscreen_stub.dart'
+    if (dart.library.html) 'fullscreen_web.dart';
 class VideoPlayerScreen extends StatefulWidget {
   final String videoUrl;
   final String title;
@@ -22,6 +25,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final int? seasonNumber;
   final String posterUrl;
   final int seekToSeconds;
+  final TorrentStream? torrentStream;
 
   const VideoPlayerScreen({
     super.key,
@@ -35,6 +39,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.seasonNumber,
     this.posterUrl = '',
     this.seekToSeconds = 0,
+    this.torrentStream,
   });
 
   @override
@@ -47,6 +52,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _showControls = true;
   bool _showEpisodes = false;
   bool _showSubtitles = false;
+  bool _showStats = false;
   bool _hasError = false;
   late int _currentEpIndex;
   String? _currentTitle;
@@ -58,6 +64,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   StreamSubscription<Duration>? _positionSub;
   Map<String, dynamic>? _introTimestamp;
   bool _showSkipIntro = false;
+  bool _isFullScreen = false;
+
+  // Torrent state
+  bool _isTorrentBuffering = false;
+  String _torrentStatus = '';
+  Timer? _statsTimer;
+  Map<String, dynamic>? _torrentStats;
+
+  // Next episode autoplay
+  bool _showAutoplay = false;
+  int _autoplayCountdown = 5;
+  bool _autoPlaying = false;
+  Timer? _autoplayTimer;
+  StreamSubscription<bool>? _completedSub;
+
+  // Audio tracks
+  bool _showAudioTracks = false;
+  List<AudioTrack> _audioTracks = [];
+  AudioTrack? _selectedAudioTrack;
+  StreamSubscription<Tracks>? _audioTracksSub;
+
+  // Exit guard
+  bool _isExiting = false;
 
   @override
   void initState() {
@@ -67,31 +96,120 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _currentTitle = widget.title;
     _player = Player();
     _controller = VideoController(_player);
-    _openMedia(widget.videoUrl, seekToSeconds: widget.seekToSeconds);
+
+    if (widget.torrentStream != null) {
+      _startTorrentPlayback();
+    } else {
+      _openMedia(widget.videoUrl, seekToSeconds: widget.seekToSeconds);
+    }
+
     _loadIntroTimestamp();
     _listenPosition();
+    _setupAutoplay();
+    _listenAudioTracks();
     _scheduleHideControls();
+  }
+
+  /// Start torrent playback — show buffering overlay while metadata downloads.
+  Future<void> _startTorrentPlayback() async {
+    final stream = widget.torrentStream!;
+    debugPrint('[VideoPlayer] Starting torrent: ${stream.quality} '
+        'hash=${stream.infoHash.substring(0, 16)}... fileIdx=${stream.fileIdx}');
+
+    setState(() {
+      _isTorrentBuffering = true;
+      _torrentStatus = 'Connecting to peers...';
+    });
+
+    // Listen to buffering state changes for status text
+    _bufferingSub = _player.stream.buffering.listen((buffering) {
+      if (mounted) {
+        setState(() {
+          if (buffering) {
+            _torrentStatus = 'Buffering...';
+          }
+        });
+      }
+    });
+
+    // Update torrent stats periodically
+    _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        setState(() {
+          _torrentStats = TorrentService().getStreamStats();
+          // Update status text based on stats
+          if (_torrentStats != null && _isTorrentBuffering) {
+            final rate = _torrentStats!['downloadRate'] as int? ?? 0;
+            if (rate > 0) {
+              _torrentStatus = 'Downloading... ${_formatBytes(rate)}/s';
+            }
+          }
+        });
+      }
+    });
+
+    final url = await TorrentService().startStream(stream);
+    if (!mounted) return;
+
+    if (url == null) {
+      debugPrint('[VideoPlayer] Torrent stream failed');
+      setState(() {
+        _isTorrentBuffering = false;
+        _hasError = true;
+      });
+      return;
+    }
+
+    debugPrint('[VideoPlayer] Torrent stream ready: $url');
+    setState(() {
+      _isTorrentBuffering = false;
+      _torrentStatus = '';
+    });
+
+    _openMedia(url, seekToSeconds: widget.seekToSeconds);
+    _fetchSubtitles();
   }
 
   Future<void> _openMedia(String url, {int seekToSeconds = 0}) async {
     try {
+      debugPrint('[VideoPlayer] Opening media: $url');
       _bufferingSub?.cancel();
       await _player.open(Media(url));
-      // Wait for the player to finish buffering before seeking
+      debugPrint('[VideoPlayer] Media opened successfully');
+
+      // Listen to buffering state for debug logging and UI updates
+      _bufferingSub = _player.stream.buffering.listen((buffering) {
+        debugPrint('[VideoPlayer] Buffering: $buffering');
+        if (mounted) {
+          setState(() {
+            if (widget.torrentStream != null) {
+              _isTorrentBuffering = buffering;
+              if (buffering) _torrentStatus = 'Buffering...';
+            }
+          });
+        }
+      });
+
       if (seekToSeconds > 0) {
-        bool hasSeeked = false;
+        // Wait for buffering to finish, then seek and play
+        bool hasStarted = false;
         _bufferingSub = _player.stream.buffering.listen((buffering) {
-          if (!buffering && !hasSeeked && mounted) {
-            hasSeeked = true;
+          if (!buffering && !hasStarted && mounted) {
+            hasStarted = true;
             _player.seek(Duration(seconds: seekToSeconds));
+            _player.play();
             _bufferingSub?.cancel();
           }
         });
         // Also try immediate seek in case player is already ready
         await _player.seek(Duration(seconds: seekToSeconds));
+      } else {
+        // Autoplay — ensure video starts playing
+        _player.play();
       }
       _fetchSubtitles();
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[VideoPlayer] Error opening media: $e\n$st');
       if (mounted) setState(() => _hasError = true);
     }
   }
@@ -113,11 +231,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       bool shouldShow = false;
 
       if (_introTimestamp != null) {
-        final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ?? 
+        final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ??
                         (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
         shouldShow = sec < skipDur;
       } else {
-        shouldShow = sec < 600; // Allow recording within first 10 mins
+        shouldShow = sec < 300; // Allow recording within first 5 mins
       }
 
       if (shouldShow != _showSkipIntro) {
@@ -126,9 +244,92 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
   }
 
+  void _setupAutoplay() {
+    // Check position every second for next-episode trigger
+    _autoplayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _autoPlaying) return;
+      final hasEpisodes = widget.episodes.length > 1;
+      final hasNext = _currentEpIndex < widget.episodes.length - 1;
+      if (!hasEpisodes || !hasNext) return;
+
+      final pos = _player.state.position.inSeconds;
+      final dur = _player.state.duration.inSeconds;
+      if (dur <= 0) return;
+
+      final remaining = dur - pos;
+
+      if (remaining <= 10 && remaining > 0) {
+        if (!_showAutoplay) {
+          setState(() {
+            _showAutoplay = true;
+            _autoplayCountdown = 5;
+          });
+        }
+        if (_autoplayCountdown > 0) {
+          setState(() => _autoplayCountdown--);
+          if (_autoplayCountdown <= 0) {
+            _playNextEpisode();
+          }
+        }
+      } else if (remaining > 10 && _showAutoplay) {
+        // User seeked away from the end
+        setState(() {
+          _showAutoplay = false;
+          _autoplayCountdown = 5;
+        });
+      }
+    });
+
+    // Auto-advance when playback completes
+    _completedSub = _player.stream.completed.listen((completed) {
+      if (completed && mounted && !_autoPlaying) {
+        final hasNext = _currentEpIndex < widget.episodes.length - 1;
+        if (hasNext) {
+          _playNextEpisode();
+        }
+      }
+    });
+  }
+
+  void _cancelAutoplay() {
+    _autoplayTimer?.cancel();
+    _autoplayTimer = null;
+    _completedSub?.cancel();
+    _completedSub = null;
+  }
+
+  void _listenAudioTracks() {
+    _audioTracksSub = _player.stream.tracks.listen((tracks) {
+      if (!mounted) return;
+      final audioTracks = tracks.audio.where((t) => t.id != 'no' && t.id != 'auto').toList();
+      setState(() {
+        _audioTracks = audioTracks;
+        if (audioTracks.length <= 1) _showAudioTracks = false;
+      });
+    });
+  }
+
+  void _selectAudioTrack(AudioTrack track) {
+    _player.setAudioTrack(track);
+    setState(() {
+      _selectedAudioTrack = track;
+      _showAudioTracks = false;
+    });
+  }
+
+  void _playNextEpisode() {
+    if (_autoPlaying) return;
+    final nextIdx = _currentEpIndex + 1;
+    if (nextIdx >= widget.episodes.length) return;
+    _autoPlaying = true;
+    _showAutoplay = false;
+    _autoplayCountdown = 5;
+    _playEpisode(nextIdx);
+  }
+
   Future<void> _skipIntro() async {
     if (_introTimestamp != null) {
-      final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ?? 
+      final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ??
                       (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
       _player.seek(Duration(seconds: skipDur));
     }
@@ -213,11 +414,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _hasError = false;
       _showEpisodes = false;
       _showSubtitles = false;
+      _showAudioTracks = false;
+      _showAutoplay = false;
+      _autoplayCountdown = 5;
+      _autoPlaying = false;
       _selectedSub = null;
+      _selectedAudioTrack = null;
       _availableSubs = [];
     });
     _openMedia(ep.url);
     _loadIntroTimestamp();
+  }
+
+  void _toggleFullScreen() {
+    setState(() => _isFullScreen = !_isFullScreen);
+    toggleFullScreen();
   }
 
   void _scheduleHideControls() {
@@ -233,14 +444,43 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
-    _bufferingSub?.cancel();
-    _positionSub?.cancel();
-    _player.dispose();
+    try {
+      _cancelAutoplay();
+      _bufferingSub?.cancel();
+      _positionSub?.cancel();
+      _statsTimer?.cancel();
+      _audioTracksSub?.cancel();
+      _player.dispose();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error in dispose cleanup: $e');
+    }
+    // Only stop torrent here if _exitPlayer didn't already handle it
+    if (!_isExiting) {
+      TorrentService().stopStream().catchError((e) {
+        debugPrint('[VideoPlayer] Error stopping torrent in dispose: $e');
+      });
+    }
     super.dispose();
   }
 
   Future<void> _exitPlayer() async {
-    await _saveWatchData();
+    if (_isExiting) return;
+    _isExiting = true;
+    _cancelAutoplay();
+    _statsTimer?.cancel();
+    _bufferingSub?.cancel();
+    _audioTracksSub?.cancel();
+    try {
+      await _saveWatchData();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error saving watch data: $e');
+    }
+    // Stop torrent before navigating away
+    try {
+      await TorrentService().stopStream();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error stopping torrent: $e');
+    }
     if (mounted) Navigator.pop(context);
   }
 
@@ -266,8 +506,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         originalTitle: widget.originalTitle,
         episodeIndex: _currentEpIndex,
         positionSeconds: position.inSeconds,
+        m3u8Url: widget.videoUrl,
+        episodes: widget.episodes.map((e) => e.toJson()).toList(),
       );
     }
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   @override
@@ -277,23 +526,27 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         ? widget.episodes[_currentEpIndex].name
         : widget.title;
 
-    return KeyboardListener(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _exitPlayer();
+      },
+      child: KeyboardListener(
       focusNode: FocusNode()..requestFocus(),
       autofocus: true,
       onKeyEvent: (e) {
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) _exitPlayer();
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.space) _player.playOrPause();
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
-          if (_introTimestamp == null) _recordIntro();
-          else _skipIntro();
+          if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
         }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: GestureDetector(
           onTap: () {
-            if (_showSubtitles || _showEpisodes) {
-              setState(() { _showSubtitles = false; _showEpisodes = false; });
+            if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks) {
+              setState(() { _showSubtitles = false; _showEpisodes = false; _showStats = false; _showAudioTracks = false; });
             } else {
               _toggleControls();
             }
@@ -314,6 +567,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 ),
               ),
+
+              // Torrent buffering overlay
+              if (_isTorrentBuffering)
+                _buildBufferingOverlay(),
 
               // Error state
               if (_hasError)
@@ -346,8 +603,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  _introTimestamp == null ? LucideIcons.circleDot : LucideIcons.skipForward, 
-                                  color: Colors.white, 
+                                  _introTimestamp == null ? LucideIcons.circleDot : LucideIcons.skipForward,
+                                  color: Colors.white,
                                   size: 16
                                 ),
                                 const SizedBox(width: 8),
@@ -367,6 +624,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
               ),
 
+              // Next episode autoplay card (Netflix-style bottom-right)
+              if (_showAutoplay && widget.episodes.length > 1)
+                Positioned(
+                  bottom: 100,
+                  right: 24,
+                  child: _buildAutoplayCard(),
+                ),
+
               // Subtitle panel (slides from right)
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 300),
@@ -375,6 +640,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 right: _showSubtitles ? 0 : -300,
                 width: 300,
                 child: _buildSubtitlePanel(),
+              ),
+
+              // Audio track panel (slides from right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: 0, bottom: 0,
+                right: _showAudioTracks ? 0 : -300,
+                width: 300,
+                child: _buildAudioTrackPanel(),
               ),
 
               // Episode panel (slides from right)
@@ -387,10 +662,169 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   width: 300,
                   child: _buildEpisodePanel(),
                 ),
+
+              // Stats panel (slides from top-right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: _showStats ? 70 : -600,
+                right: 20,
+                width: 280,
+                child: _buildStatsPanel(),
+              ),
             ],
           ),
         ),
       ),
+      ),
+    );
+  }
+
+  Widget _buildBufferingOverlay() {
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 48,
+              height: 48,
+              child: CircularProgressIndicator(
+                color: AppTheme.accent,
+                strokeWidth: 3,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              _torrentStatus.isNotEmpty ? _torrentStatus : 'Loading...',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (_torrentStats != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                '${_torrentStats!['numPeers'] ?? 0} peers connected',
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsPanel() {
+    final stats = _torrentStats;
+    final isTorrent = widget.torrentStream != null;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Network Stats',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            StreamBuilder<bool>(
+              stream: _player.stream.buffering,
+              builder: (context, snap) {
+                final buffering = snap.data ?? false;
+                final status = buffering
+                    ? 'Buffering'
+                    : (_player.state.playing ? 'Playing' : 'Paused');
+                return _statRow('Status', status,
+                    color: buffering ? Colors.orange : Colors.green);
+              },
+            ),
+            const SizedBox(height: 8),
+            StreamBuilder<int?>(
+              stream: _player.stream.width,
+              builder: (context, wSnap) => StreamBuilder<int?>(
+                stream: _player.stream.height,
+                builder: (context, hSnap) {
+                  final w = wSnap.data ?? _player.state.width;
+                  final h = hSnap.data ?? _player.state.height;
+                  final res = (w != null && h != null && w > 0 && h > 0)
+                      ? '${w}x$h'
+                      : 'Detecting...';
+                  return _statRow('Resolution', res);
+                },
+              ),
+            ),
+            if (isTorrent && stats != null) ...[
+              const SizedBox(height: 8),
+              _statRow('Download', '${_formatBytes(stats['downloadRate'] ?? 0)}/s'),
+              const SizedBox(height: 8),
+              _statRow('Upload', '${_formatBytes(stats['uploadRate'] ?? 0)}/s'),
+              const SizedBox(height: 8),
+              _statRow('Peers', '${stats['numPeers'] ?? 0}'),
+              const SizedBox(height: 8),
+              _statRow('Seeds', '${stats['numSeeds'] ?? 0}'),
+              const SizedBox(height: 8),
+              _statRow('Progress',
+                  '${((stats['progress'] as double? ?? 0) * 100).toStringAsFixed(1)}%'),
+              const SizedBox(height: 8),
+              _statRow('Downloaded',
+                  _formatBytes(stats['totalDone'] ?? 0)),
+              if (stats['totalWanted'] != null && (stats['totalWanted'] as int) > 0) ...[
+                const SizedBox(height: 8),
+                _statRow('Total Size',
+                    _formatBytes(stats['totalWanted'] ?? 0)),
+              ],
+              const SizedBox(height: 8),
+              _statRow('Quality', widget.torrentStream!.quality),
+            ] else if (!isTorrent) ...[
+              const SizedBox(height: 8),
+              _statRow('Type', 'VOD Stream'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statRow(String label, String value, {Color? color}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 13,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: color ?? Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 
@@ -443,10 +877,27 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       overflow: TextOverflow.ellipsis),
                 ),
                 const SizedBox(width: 16),
+                // Network stats icon
+                HoverButton(
+                  onTap: () => setState(() {
+                    _showStats = !_showStats;
+                    _showSubtitles = false;
+                    _showEpisodes = false;
+                    _showAudioTracks = false;
+                  }),
+                  backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: const Icon(LucideIcons.wifi, color: Colors.white, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 16),
                 HoverButton(
                   onTap: () => setState(() {
                     _showSubtitles = !_showSubtitles;
                     _showEpisodes = false;
+                    _showStats = false;
+                    _showAudioTracks = false;
                   }),
                   backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
                   child: Padding(
@@ -454,12 +905,30 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     child: const Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
                   ),
                 ),
+                if (_audioTracks.length > 1) ...[
+                  const SizedBox(width: 16),
+                  HoverButton(
+                    onTap: () => setState(() {
+                      _showAudioTracks = !_showAudioTracks;
+                      _showSubtitles = false;
+                      _showEpisodes = false;
+                      _showStats = false;
+                    }),
+                    backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: const Icon(LucideIcons.volume2, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
                 if (hasEpisodes) ...[
                   const SizedBox(width: 16),
                   HoverButton(
                     onTap: () => setState(() {
                       _showEpisodes = !_showEpisodes;
                       _showSubtitles = false;
+                      _showStats = false;
+                      _showAudioTracks = false;
                     }),
                     backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
                     child: Padding(
@@ -472,39 +941,58 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
           ),
 
-          // Center play/pause
-          Center(
-            child: StreamBuilder(
-              stream: _player.stream.playing,
-              builder: (context, snap) {
-                final playing = snap.data ?? false;
-                return HoverButton(
-                  onTap: () {
-                    _player.playOrPause();
-                    setState(() {});
-                  },
-                  backgroundColor: Colors.transparent,
-                  child: ClipOval(
-                    child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.all(28),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(_showControls ? 0.15 : 0.0),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white.withOpacity(0.2)),
-                        ),
-                        child: Icon(
-                          playing ? LucideIcons.pause : LucideIcons.play,
-                          color: Colors.white.withOpacity(0.9),
-                          size: 38,
+          // Center play/pause (hidden during buffering)
+          if (!_isTorrentBuffering && !_player.state.buffering)
+            Center(
+              child: StreamBuilder(
+                stream: _player.stream.playing,
+                builder: (context, snap) {
+                  final playing = snap.data ?? _player.state.playing;
+                  return HoverButton(
+                    onTap: () {
+                      _player.playOrPause();
+                      setState(() {});
+                    },
+                    backgroundColor: Colors.transparent,
+                    child: ClipOval(
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(28),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(_showControls ? 0.15 : 0.0),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white.withOpacity(0.2)),
+                          ),
+                          child: Icon(
+                            playing ? LucideIcons.pause : LucideIcons.play,
+                            color: Colors.white.withOpacity(0.9),
+                            size: 38,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
+            ),
+
+          // Fullscreen button (bottom right)
+          Positioned(
+            bottom: 10,
+            right: 16,
+            child: HoverButton(
+              onTap: _toggleFullScreen,
+              backgroundColor: Colors.black54,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(
+                  _isFullScreen ? LucideIcons.minimize : LucideIcons.maximize,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
             ),
           ),
 
@@ -651,6 +1139,72 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
+  Widget _buildAudioTrackPanel() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
+              child: Text('Audio Tracks',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+            ),
+            if (_audioTracks.isEmpty)
+              const Expanded(
+                child: Center(
+                    child: Text('No alternate audio tracks',
+                        style: TextStyle(color: AppTheme.textSecondary))),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: _audioTracks.length,
+                  itemBuilder: (context, i) {
+                    final track = _audioTracks[i];
+                    final isActive = _selectedAudioTrack == track ||
+                        (_selectedAudioTrack == null && i == 0);
+                    final label = _audioTrackLabel(track);
+                    return GestureDetector(
+                      onTap: () => _selectAudioTrack(track),
+                      child: _panelTile(label, isActive),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _audioTrackLabel(AudioTrack track) {
+    final parts = <String>[];
+    if (track.language != null && track.language!.isNotEmpty) {
+      parts.add(track.language!.toUpperCase());
+    }
+    if (track.title != null && track.title!.isNotEmpty) {
+      parts.add(track.title!);
+    }
+    if (track.codec != null && track.codec!.isNotEmpty) {
+      parts.add(track.codec!.toUpperCase());
+    }
+    if (track.channels != null && track.channels!.isNotEmpty) {
+      parts.add(track.channels!);
+    }
+    return parts.isNotEmpty ? parts.join(' - ') : 'Track ${track.id}';
+  }
+
   Widget _panelTile(String title, bool isActive) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
@@ -681,6 +1235,188 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAutoplayCard() {
+    final nextIdx = _currentEpIndex + 1;
+    final nextEp = nextIdx < widget.episodes.length
+        ? widget.episodes[nextIdx]
+        : null;
+    final nextTitle = nextEp?.name ?? 'Episode ${nextIdx + 1}';
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) {
+        return Transform.translate(
+          offset: Offset((1 - value) * 120, 0),
+          child: Opacity(
+            opacity: value.clamp(0.0, 1.0),
+            child: child,
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: () {}, // absorb taps
+        child: Container(
+          width: 320,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1F2E),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white12),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 24),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                child: Text(
+                  'Next Episode in $_autoplayCountdown',
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Episode info
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    // Episode thumbnail placeholder
+                    Container(
+                      width: 120,
+                      height: 68,
+                      decoration: BoxDecoration(
+                        color: AppTheme.cardLight,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          LucideIcons.play,
+                          color: Colors.white54,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Episode details
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            nextTitle,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.title,
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Buttons
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: Row(
+                  children: [
+                    // Cancel button
+                    Expanded(
+                      child: HoverButton(
+                        onTap: () {
+                          setState(() {
+                            _showAutoplay = false;
+                            _autoplayCountdown = 5;
+                          });
+                        },
+                        backgroundColor: Colors.white12,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                LucideIcons.x,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // Play Now button
+                    Expanded(
+                      child: HoverButton(
+                        onTap: _playNextEpisode,
+                        backgroundColor: Colors.white,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                LucideIcons.play,
+                                color: Colors.black,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Play Now',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

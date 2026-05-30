@@ -15,7 +15,12 @@
       "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('Total:', d.total||0\\); \\(d.list||[]\\).slice\\(0,3\\).forEach\\(i=>{const eps=\\(i.vod_play_url||''\\).split\\('#'\\).length; console.log\\('  ['+i.vod_id+'] '+i.vod_name+' \\('+\\( i.vod_year||''\\)+'\\) eps='+eps\\)}\\)\")",
       "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); \\(d.list||[]\\).slice\\(0,2\\).forEach\\(i=>{const url=\\(i.vod_play_url||''\\).split\\('#'\\)[0].split\\('$'\\)[1]||''; console.log\\(i.vod_name+': '+url\\)}\\)\")",
       "Bash(netlify *)",
-      "Bash(flutter build *)"
+      "Bash(flutter build *)",
+      "WebFetch(domain:blog.stremio.com)",
+      "WebFetch(domain:www.reddit.com)",
+      "WebFetch(domain:developer.themoviedb.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.anilist.co)"
     ]
   }
 }

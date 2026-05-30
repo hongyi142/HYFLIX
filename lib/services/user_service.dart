@@ -20,6 +20,8 @@ class UserService {
     String originalTitle = '',
     int episodeIndex = 0,
     int positionSeconds = 0,
+    String m3u8Url = '',
+    List<Map<String, dynamic>> episodes = const [],
   }) async {
     await FirestoreService.saveWatchHistory(
       contentId: contentId,
@@ -29,6 +31,8 @@ class UserService {
       originalTitle: originalTitle,
       episodeIndex: episodeIndex,
       positionSeconds: positionSeconds,
+      m3u8Url: m3u8Url,
+      episodes: episodes,
     );
   }
 
