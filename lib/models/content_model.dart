@@ -1,4 +1,5 @@
 import '../models/episode.dart';
+import '../services/tmdb_service.dart';
 
 class ContentModel {
   final String title;
@@ -90,5 +91,15 @@ class ContentModel {
         year: json['year'] as String? ?? '',
         resumeEpisodeIndex: json['resumeEpisodeIndex'] as int?,
         resumePositionSeconds: json['resumePositionSeconds'] as int?,
+      );
+
+  factory ContentModel.fromTmdb(TmdbResult tmdb) => ContentModel(
+        title: tmdb.englishTitle,
+        description: tmdb.overview,
+        thumbnailUrl: tmdb.posterUrl,
+        bannerUrl: tmdb.backdropUrl.isNotEmpty ? tmdb.backdropUrl : tmdb.posterUrl,
+        m3u8Url: '',
+        year: tmdb.year,
+        rating: tmdb.voteAverage,
       );
 }

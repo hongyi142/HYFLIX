@@ -39,15 +39,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   }
 
   static List<ContentModel> _tmdbToContent(List<TmdbResult> tmdbResults) {
-    return tmdbResults.map((tmdb) => ContentModel(
-      title: tmdb.englishTitle,
-      description: tmdb.overview,
-      thumbnailUrl: tmdb.posterUrl,
-      bannerUrl: tmdb.backdropUrl.isNotEmpty ? tmdb.backdropUrl : tmdb.posterUrl,
-      m3u8Url: '',
-      year: tmdb.year,
-      rating: tmdb.voteAverage,
-    )).toList();
+    return tmdbResults.map(ContentModel.fromTmdb).toList();
   }
 
   Future<void> _loadData() async {

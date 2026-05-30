@@ -338,7 +338,7 @@ class _DetailPageState extends State<DetailPage> {
     _cachedImdbId ??= imdbId;
 
     final streams = await TorrentService().fetchStreams(
-      imdbId, 'tv',
+      imdbId, _torrentEpisodeCount <= 1 ? 'movie' : 'tv',
       season: _selectedSeason,
       episode: episodeNum,
     );
@@ -367,7 +367,8 @@ class _DetailPageState extends State<DetailPage> {
   /// Play a torrent stream — navigates to player immediately, player handles buffering.
   Future<void> _playWithTorrent(int episodeIndex, {int seekToSeconds = 0}) async {
     final tmdb = _tmdb;
-    final episodeNum = episodeIndex + 1;
+    // Movies store streams at key 0, TV shows at key 1+
+    final episodeNum = _torrentEpisodeCount <= 1 ? 0 : episodeIndex + 1;
 
     // Fetch streams for this episode if not already loaded
     if (!_torrentStreamsByEpisode.containsKey(episodeNum)) {
@@ -390,7 +391,7 @@ class _DetailPageState extends State<DetailPage> {
     final poster = tmdb?.posterUrl.isNotEmpty == true
         ? tmdb!.posterUrl
         : widget.content.thumbnailUrl;
-    Navigator.push(
+    final result = await Navigator.push<int>(
       context,
       MaterialPageRoute(
         builder: (_) => VideoPlayerScreen(
@@ -405,9 +406,14 @@ class _DetailPageState extends State<DetailPage> {
           posterUrl: poster,
           torrentStream: picked,
           seekToSeconds: seekToSeconds,
+          episodeCount: _torrentEpisodeCount,
         ),
       ),
     );
+    // Handle skip next/prev from video player for torrent content
+    if (result != null && mounted) {
+      _playWithTorrent(result);
+    }
   }
 
   void _switchSource(VideoSource source, {bool force = false}) {

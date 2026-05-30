@@ -219,15 +219,20 @@ class Navbar extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => const BrowsePage(
           title: 'Movies',
-          baseTypeId: 1,
-          subTypes: [
-            FilterOption('All Movies', '1'),
-            FilterOption('Action', '5'),
-            FilterOption('Comedy', '6'),
-            FilterOption('Romance', '7'),
-            FilterOption('Sci-Fi', '8'),
-            FilterOption('Horror', '9'),
-            FilterOption('Drama', '10'),
+          mediaType: 'movie',
+          genres: [
+            FilterOption('All Genres', ''),
+            FilterOption('Action', '28'),
+            FilterOption('Comedy', '35'),
+            FilterOption('Romance', '10749'),
+            FilterOption('Sci-Fi', '878'),
+            FilterOption('Horror', '27'),
+            FilterOption('Drama', '18'),
+            FilterOption('Thriller', '53'),
+            FilterOption('Adventure', '12'),
+            FilterOption('Fantasy', '14'),
+            FilterOption('Crime', '80'),
+            FilterOption('Mystery', '9648'),
           ],
         ),
       ),
@@ -240,16 +245,24 @@ class Navbar extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => const BrowsePage(
           title: 'TV Shows',
-          baseTypeId: 2,
-          subTypes: [
-            FilterOption('All TV Shows', '2'),
-            FilterOption('Chinese Drama', '12'),
-            FilterOption('Hong Kong/Macau', '13'),
-            FilterOption('Japanese', '14'),
-            FilterOption('Western', '15'),
-            FilterOption('Taiwanese', '16'),
-            FilterOption('Thai', '17'),
-            FilterOption('Korean', '18'),
+          mediaType: 'tv',
+          genres: [
+            FilterOption('All Genres', ''),
+            FilterOption('Drama', '18'),
+            FilterOption('Comedy', '35'),
+            FilterOption('Crime', '80'),
+            FilterOption('Sci-Fi & Fantasy', '10765'),
+            FilterOption('Action & Adventure', '10759'),
+            FilterOption('Mystery', '9648'),
+            FilterOption('War & Politics', '10768'),
+          ],
+          languages: [
+            FilterOption('All', ''),
+            FilterOption('Korean', 'ko'),
+            FilterOption('Chinese', 'zh'),
+            FilterOption('Japanese', 'ja'),
+            FilterOption('Western', 'en'),
+            FilterOption('Thai', 'th'),
           ],
         ),
       ),
@@ -262,10 +275,15 @@ class Navbar extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => const BrowsePage(
           title: 'Animation',
-          baseTypeId: 4,
-          subTypes: [
-            FilterOption('All Animation', '4'),
-            FilterOption('Anime Movies', '20'),
+          mediaType: 'tv',
+          genres: [
+            FilterOption('All Animation', '16'),
+          ],
+          languages: [
+            FilterOption('All', ''),
+            FilterOption('Japanese Anime', 'ja'),
+            FilterOption('Chinese Donghua', 'zh'),
+            FilterOption('Other', 'other'),
           ],
         ),
       ),

@@ -3,7 +3,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
-import '../services/api_service.dart';
+import '../services/tmdb_service.dart';
 import '../widgets/movie_card.dart';
 import '../widgets/buttons.dart';
 
@@ -15,16 +15,18 @@ class FilterOption {
 
 class BrowsePage extends StatefulWidget {
   final String title;
-  final int baseTypeId;
-  final List<FilterOption> subTypes;
-  final bool showArea;
+  final String mediaType; // 'movie' or 'tv'
+  final List<FilterOption> genres;
+  final List<FilterOption>? languages;
+  final String defaultSort;
 
   const BrowsePage({
     super.key,
     required this.title,
-    required this.baseTypeId,
-    required this.subTypes,
-    this.showArea = true,
+    required this.mediaType,
+    required this.genres,
+    this.languages,
+    this.defaultSort = 'popularity.desc',
   });
 
   @override
@@ -36,39 +38,37 @@ class _BrowsePageState extends State<BrowsePage> {
   bool _isLoading = false;
   bool _hasMore = true;
   int _page = 1;
+  int _totalPages = 0;
   final ScrollController _scrollController = ScrollController();
 
-  late String _selectedType;
-  String _selectedArea = 'All';
+  late String _selectedGenre;
+  String _selectedLanguage = '';
   String _selectedYear = 'All';
-  String _selectedSort = 'time';
-
-  final List<FilterOption> _areas = const [
-    FilterOption('All Areas', 'All'),
-    FilterOption('Mainland China', '大陆'),
-    FilterOption('Hong Kong', '香港'),
-    FilterOption('Taiwan', '台湾'),
-    FilterOption('USA', '美国'),
-    FilterOption('Korea', '韩国'),
-    FilterOption('Japan', '日本'),
-  ];
+  late String _selectedSort;
 
   final List<FilterOption> _years = [
     const FilterOption('All Years', 'All'),
     for (int y = DateTime.now().year; y >= 2010; y--) FilterOption('$y', '$y'),
-    const FilterOption('Older', '2009'),
+    const FilterOption('Older', 'older'),
   ];
 
-  final List<FilterOption> _sorts = const [
-    FilterOption('Latest', 'time'),
-    FilterOption('Popular', 'hits'),
-    FilterOption('Top Rated', 'score'),
-  ];
+  late final List<FilterOption> _sorts;
 
   @override
   void initState() {
     super.initState();
-    _selectedType = widget.baseTypeId.toString();
+    _selectedGenre = widget.genres.isNotEmpty ? widget.genres.first.value : '';
+    _selectedSort = widget.defaultSort;
+
+    _sorts = [
+      const FilterOption('Popular', 'popularity.desc'),
+      const FilterOption('Top Rated', 'vote_average.desc'),
+      if (widget.mediaType == 'movie')
+        const FilterOption('Latest', 'primary_release_date.desc')
+      else
+        const FilterOption('Latest', 'first_air_date.desc'),
+    ];
+
     _loadMore();
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
@@ -85,6 +85,7 @@ class _BrowsePageState extends State<BrowsePage> {
       _items.clear();
       _page = 1;
       _hasMore = true;
+      _totalPages = 0;
     });
     _loadMore();
   }
@@ -94,22 +95,57 @@ class _BrowsePageState extends State<BrowsePage> {
     setState(() => _isLoading = true);
 
     try {
-      final newItems = await ApiService().fetchFiltered(
+      final params = <String, String>{
+        'sort_by': _selectedSort,
+      };
+
+      if (_selectedGenre.isNotEmpty) {
+        params['with_genres'] = _selectedGenre;
+      }
+
+      if (_selectedLanguage.isNotEmpty) {
+        if (_selectedLanguage == 'other') {
+          params['without_original_language'] = 'ja,zh';
+        } else {
+          params['with_original_language'] = _selectedLanguage;
+        }
+      }
+
+      if (_selectedYear.isNotEmpty && _selectedYear != 'All') {
+        if (_selectedYear == 'older') {
+          if (widget.mediaType == 'movie') {
+            params['primary_release_date.lte'] = '2009-12-31';
+          } else {
+            params['first_air_date.lte'] = '2009-12-31';
+          }
+        } else {
+          if (widget.mediaType == 'movie') {
+            params['primary_release_year'] = _selectedYear;
+          } else {
+            params['first_air_date_year'] = _selectedYear;
+          }
+        }
+      }
+
+      if (_selectedSort == 'vote_average.desc') {
+        params['vote_count.gte'] = '50';
+      }
+
+      final result = await TmdbService.discoverBrowsePage(
+        mediaType: widget.mediaType,
         page: _page,
-        typeId: int.tryParse(_selectedType),
-        area: _selectedArea,
-        year: _selectedYear,
-        by: _selectedSort,
+        params: params,
       );
 
       if (mounted) {
         setState(() {
-          if (newItems.isEmpty) {
+          _totalPages = result.totalPages;
+          final newItems = result.items.map(ContentModel.fromTmdb).toList();
+          if (newItems.isEmpty || _page >= _totalPages) {
             _hasMore = false;
-          } else {
-            _items.addAll(newItems);
-            _page++;
           }
+          _items.addAll(newItems);
+          _page++;
           _isLoading = false;
         });
       }
@@ -192,26 +228,27 @@ class _BrowsePageState extends State<BrowsePage> {
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: Row(
                     children: [
-                      if (widget.subTypes.isNotEmpty) ...[
+                      if (widget.genres.length > 1) ...[
                         _buildDropdown(
-                          value: _selectedType,
-                          options: widget.subTypes,
+                          value: _selectedGenre,
+                          options: widget.genres,
                           onChanged: (v) {
                             if (v != null) {
-                              _selectedType = v;
+                              _selectedGenre = v;
                               _onFilterChanged();
                             }
                           },
                         ),
                         const SizedBox(width: 12),
                       ],
-                      if (widget.showArea) ...[
+                      if (widget.languages != null &&
+                          widget.languages!.isNotEmpty) ...[
                         _buildDropdown(
-                          value: _selectedArea,
-                          options: _areas,
+                          value: _selectedLanguage,
+                          options: widget.languages!,
                           onChanged: (v) {
                             if (v != null) {
-                              _selectedArea = v;
+                              _selectedLanguage = v;
                               _onFilterChanged();
                             }
                           },

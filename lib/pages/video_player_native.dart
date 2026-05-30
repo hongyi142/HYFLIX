@@ -26,6 +26,8 @@ class VideoPlayerScreen extends StatefulWidget {
   final String posterUrl;
   final int seekToSeconds;
   final TorrentStream? torrentStream;
+  /// Total episode count for torrent TV shows (episodes list is empty for torrents).
+  final int episodeCount;
 
   const VideoPlayerScreen({
     super.key,
@@ -40,6 +42,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.posterUrl = '',
     this.seekToSeconds = 0,
     this.torrentStream,
+    this.episodeCount = 0,
   });
 
   @override
@@ -66,6 +69,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _showSkipIntro = false;
   bool _isFullScreen = false;
 
+  // Hold-to-speed state
+  bool _isLongPressSpeed = false;
+
   // Torrent state
   bool _isTorrentBuffering = false;
   String _torrentStatus = '';
@@ -74,7 +80,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   // Next episode autoplay
   bool _showAutoplay = false;
-  int _autoplayCountdown = 5;
+  int _autoplayCountdown = 180;
   bool _autoPlaying = false;
   Timer? _autoplayTimer;
   StreamSubscription<bool>? _completedSub;
@@ -87,6 +93,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   // Exit guard
   bool _isExiting = false;
+
+  /// Effective episode count: uses episodes list length if available,
+  /// otherwise falls back to episodeCount param (for torrent content).
+  int get _effectiveEpisodeCount =>
+      widget.episodes.isNotEmpty ? widget.episodes.length : widget.episodeCount;
+
+  /// Whether this is a multi-episode TV show (VOD or torrent).
+  bool get _hasMultipleEpisodes => _effectiveEpisodeCount > 1;
 
   @override
   void initState() {
@@ -241,49 +255,66 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (shouldShow != _showSkipIntro) {
         setState(() => _showSkipIntro = shouldShow);
       }
+
+      // Also check autoplay on every position change (responsive to seeks)
+      _checkAutoplay();
     });
   }
 
+  /// Evaluate whether the autoplay next-episode card should be shown.
+  /// Called from both the periodic timer and the position listener so the
+  /// card appears immediately after a seek, not just on the next tick.
+  void _checkAutoplay() {
+    if (!mounted || _autoPlaying) return;
+    final hasEpisodes = _hasMultipleEpisodes;
+    final hasNext = _currentEpIndex < _effectiveEpisodeCount - 1;
+    if (!hasEpisodes || !hasNext) return;
+
+    final pos = _player.state.position.inSeconds;
+    final dur = _player.state.duration.inSeconds;
+    if (dur <= 0) return;
+
+    final remaining = dur - pos;
+
+    if (remaining <= 180 && remaining > 0) {
+      if (!_showAutoplay) {
+        setState(() {
+          _showAutoplay = true;
+          _autoplayCountdown = 180;
+        });
+      }
+    } else if (remaining > 180 && _showAutoplay) {
+      // User seeked away from the end
+      setState(() {
+        _showAutoplay = false;
+        _autoplayCountdown = 180;
+      });
+    }
+  }
+
   void _setupAutoplay() {
-    // Check position every second for next-episode trigger
+    // Check autoplay every second — handles both detection and countdown.
+    // This is the primary trigger; the position listener also calls
+    // _checkAutoplay() for instant response during active playback.
     _autoplayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _autoPlaying) return;
-      final hasEpisodes = widget.episodes.length > 1;
-      final hasNext = _currentEpIndex < widget.episodes.length - 1;
-      if (!hasEpisodes || !hasNext) return;
 
-      final pos = _player.state.position.inSeconds;
-      final dur = _player.state.duration.inSeconds;
-      if (dur <= 0) return;
-
-      final remaining = dur - pos;
-
-      if (remaining <= 10 && remaining > 0) {
-        if (!_showAutoplay) {
-          setState(() {
-            _showAutoplay = true;
-            _autoplayCountdown = 5;
-          });
+      if (!_showAutoplay) {
+        // Not showing yet — check if we should start
+        _checkAutoplay();
+      } else if (_autoplayCountdown > 0) {
+        // Card is visible — tick the countdown
+        setState(() => _autoplayCountdown--);
+        if (_autoplayCountdown <= 0) {
+          _playNextEpisode();
         }
-        if (_autoplayCountdown > 0) {
-          setState(() => _autoplayCountdown--);
-          if (_autoplayCountdown <= 0) {
-            _playNextEpisode();
-          }
-        }
-      } else if (remaining > 10 && _showAutoplay) {
-        // User seeked away from the end
-        setState(() {
-          _showAutoplay = false;
-          _autoplayCountdown = 5;
-        });
       }
     });
 
     // Auto-advance when playback completes
     _completedSub = _player.stream.completed.listen((completed) {
       if (completed && mounted && !_autoPlaying) {
-        final hasNext = _currentEpIndex < widget.episodes.length - 1;
+        final hasNext = _currentEpIndex < _effectiveEpisodeCount - 1;
         if (hasNext) {
           _playNextEpisode();
         }
@@ -320,10 +351,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void _playNextEpisode() {
     if (_autoPlaying) return;
     final nextIdx = _currentEpIndex + 1;
-    if (nextIdx >= widget.episodes.length) return;
+    if (nextIdx >= _effectiveEpisodeCount) return;
     _autoPlaying = true;
     _showAutoplay = false;
-    _autoplayCountdown = 5;
+    _autoplayCountdown = 180;
+    // For torrent content (no episode URLs), pop with the next episode index
+    if (widget.episodes.isEmpty && widget.torrentStream != null) {
+      Navigator.of(context).pop(nextIdx);
+      return;
+    }
     _playEpisode(nextIdx);
   }
 
@@ -407,7 +443,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   void _playEpisode(int index) {
-    if (index < 0 || index >= widget.episodes.length) return;
+    if (index < 0 || index >= _effectiveEpisodeCount) return;
+    // For torrent content (no episode URLs), pop with the target episode index
+    if (widget.episodes.isEmpty && widget.torrentStream != null) {
+      Navigator.of(context).pop(index);
+      return;
+    }
     final ep = widget.episodes[index];
     setState(() {
       _currentEpIndex = index;
@@ -416,7 +457,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showSubtitles = false;
       _showAudioTracks = false;
       _showAutoplay = false;
-      _autoplayCountdown = 5;
+      _autoplayCountdown = 180;
       _autoPlaying = false;
       _selectedSub = null;
       _selectedAudioTrack = null;
@@ -509,10 +550,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       debugPrint('[VideoPlayer] Error stopping torrent: $e');
     }
 
-    // Save watch data (fire-and-forget, don't block navigation)
-    _saveWatchData(position, duration).catchError((e) {
+    // Save watch data before navigating away
+    try {
+      await _saveWatchData(position, duration);
+    } catch (e) {
       debugPrint('[VideoPlayer] Error saving watch data: $e');
-    });
+    }
 
     if (mounted) Navigator.pop(context);
   }
@@ -521,13 +564,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (AuthService.uid == null) return;
     final elapsed = _startTime != null ? DateTime.now().difference(_startTime!).inSeconds : 0;
     if (elapsed > 5) {
-      UserService.addWatchTime(elapsed);
+      await UserService.addWatchTime(elapsed);
     }
     final progress = duration.inSeconds > 0
         ? (position.inSeconds / duration.inSeconds).clamp(0.0, 1.0)
         : 0.0;
     final currentEp = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
-    if (currentEp != null || widget.videoUrl.isNotEmpty) {
+    if (currentEp != null || widget.videoUrl.isNotEmpty || widget.torrentStream != null) {
       await UserService.saveWatchHistory(
         contentId: widget.tmdbId ?? widget.title,
         title: widget.title,
@@ -551,9 +594,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final hasEpisodes = widget.episodes.length > 1;
+    final hasEpisodes = _hasMultipleEpisodes;
     final currentEpName = hasEpisodes
-        ? widget.episodes[_currentEpIndex].name
+        ? (widget.episodes.isNotEmpty
+            ? widget.episodes[_currentEpIndex].name
+            : 'Episode ${_currentEpIndex + 1}')
         : widget.title;
 
     return PopScope(
@@ -570,32 +615,64 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
           if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
         }
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          final pos = _player.state.position;
+          _player.seek(pos - const Duration(seconds: 5));
+        }
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.arrowRight) {
+          final pos = _player.state.position;
+          _player.seek(pos + const Duration(seconds: 5));
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: GestureDetector(
-          onTap: () {
-            if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks) {
-              setState(() { _showSubtitles = false; _showEpisodes = false; _showStats = false; _showAudioTracks = false; });
-            } else {
-              _toggleControls();
-            }
-          },
-          child: Stack(
+        body: Stack(
             fit: StackFit.expand,
             children: [
-              Video(
-                controller: _controller,
-                controls: NoVideoControls,
-                subtitleViewConfiguration: const SubtitleViewConfiguration(
-                  style: TextStyle(
-                    fontSize: 28,
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    backgroundColor: Color(0xDD000000),
+              // IgnorePointer ensures the Video widget never absorbs taps;
+              // all gestures are handled by the overlay controls above it.
+              IgnorePointer(
+                child: Video(
+                  controller: _controller,
+                  controls: NoVideoControls,
+                  subtitleViewConfiguration: const SubtitleViewConfiguration(
+                    style: TextStyle(
+                      fontSize: 28,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      backgroundColor: Color(0xDD000000),
+                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                   ),
-                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 ),
+              ),
+
+              // Tap catcher — sits behind all overlays so tapping the
+              // video area toggles controls, but tapping any overlay
+              // button/panel is handled by that overlay's own gesture
+              // detectors (rendered later → higher z-order).
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks) {
+                    setState(() { _showSubtitles = false; _showEpisodes = false; _showStats = false; _showAudioTracks = false; });
+                  } else {
+                    _toggleControls();
+                  }
+                },
+                onLongPressStart: (_) {
+                  if (!_isLongPressSpeed) {
+                    setState(() => _isLongPressSpeed = true);
+                    _player.setRate(2.0);
+                  }
+                },
+                onLongPressEnd: (_) {
+                  if (_isLongPressSpeed) {
+                    setState(() => _isLongPressSpeed = false);
+                    _player.setRate(1.0);
+                  }
+                },
+                child: const SizedBox.expand(),
               ),
 
               // Torrent buffering overlay
@@ -605,6 +682,38 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               // Error state
               if (_hasError)
                 _errorWidget(context),
+
+              // Long-press speed indicator
+              if (_isLongPressSpeed)
+                Positioned(
+                  top: 80,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.zap, color: Colors.amber, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            '2x Speed',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
 
               // Controls overlay
               AnimatedOpacity(
@@ -655,7 +764,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               ),
 
               // Next episode autoplay card (Netflix-style bottom-right)
-              if (_showAutoplay && widget.episodes.length > 1)
+              if (_showAutoplay && _hasMultipleEpisodes)
                 Positioned(
                   bottom: 100,
                   right: 24,
@@ -682,8 +791,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 child: _buildAudioTrackPanel(),
               ),
 
-              // Episode panel (slides from right)
-              if (hasEpisodes)
+              // Episode panel (slides from right) — only for VOD with episode list
+              if (hasEpisodes && widget.episodes.isNotEmpty)
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeInOut,
@@ -705,7 +814,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ],
           ),
         ),
-      ),
       ),
     );
   }
@@ -951,7 +1059,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     ),
                   ),
                 ],
-                if (hasEpisodes) ...[
+                if (hasEpisodes && widget.episodes.isNotEmpty) ...[
                   const SizedBox(width: 16),
                   HoverButton(
                     onTap: () => setState(() {
@@ -1005,6 +1113,55 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     ),
                   );
                 },
+              ),
+            ),
+
+          // Episode navigation buttons (bottom left)
+          if (hasEpisodes)
+            Positioned(
+              bottom: 10,
+              left: 16,
+              child: Row(
+                children: [
+                  HoverButton(
+                    onTap: _currentEpIndex > 0
+                        ? () => _playEpisode(_currentEpIndex - 1)
+                        : () {},
+                    backgroundColor: _currentEpIndex > 0
+                        ? Colors.black54
+                        : Colors.black26,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Icon(
+                        LucideIcons.skipBack,
+                        color: _currentEpIndex > 0
+                            ? Colors.white
+                            : Colors.white30,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  HoverButton(
+                    onTap: _currentEpIndex < _effectiveEpisodeCount - 1
+                        ? () => _playEpisode(_currentEpIndex + 1)
+                        : () {},
+                    backgroundColor:
+                        _currentEpIndex < _effectiveEpisodeCount - 1
+                            ? Colors.black54
+                            : Colors.black26,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Icon(
+                        LucideIcons.skipForward,
+                        color: _currentEpIndex < _effectiveEpisodeCount - 1
+                            ? Colors.white
+                            : Colors.white30,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -1274,7 +1431,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final nextEp = nextIdx < widget.episodes.length
         ? widget.episodes[nextIdx]
         : null;
-    final nextTitle = nextEp?.name ?? 'Episode ${nextIdx + 1}';
+    final nextTitle = nextEp?.name ?? 'Episode $nextIdx';
 
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -1309,7 +1466,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                 child: Text(
-                  'Next Episode in $_autoplayCountdown',
+                  'Next Episode in ${_autoplayCountdown ~/ 60}:${(_autoplayCountdown % 60).toString().padLeft(2, '0')}',
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
@@ -1377,13 +1534,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                 child: Row(
                   children: [
-                    // Cancel button
+                    // Skip Later button
                     Expanded(
                       child: HoverButton(
                         onTap: () {
                           setState(() {
                             _showAutoplay = false;
-                            _autoplayCountdown = 5;
+                            _autoplayCountdown = 180;
                           });
                         },
                         backgroundColor: Colors.white12,
@@ -1393,13 +1550,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               const Icon(
-                                LucideIcons.x,
+                                LucideIcons.clock,
                                 color: Colors.white,
                                 size: 16,
                               ),
                               const SizedBox(width: 6),
                               const Text(
-                                'Cancel',
+                                'Skip Later',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 14,
@@ -1412,7 +1569,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    // Play Now button
+                    // Skip Now button
                     Expanded(
                       child: HoverButton(
                         onTap: _playNextEpisode,
@@ -1423,13 +1580,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               const Icon(
-                                LucideIcons.play,
+                                LucideIcons.skipForward,
                                 color: Colors.black,
                                 size: 16,
                               ),
                               const SizedBox(width: 6),
                               const Text(
-                                'Play Now',
+                                'Skip Now',
                                 style: TextStyle(
                                   color: Colors.black,
                                   fontSize: 14,

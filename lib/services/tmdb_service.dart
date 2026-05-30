@@ -282,6 +282,52 @@ class TmdbService {
     return items;
   }
 
+  /// Fetches a single page from TMDB discover API for browse use.
+  /// Returns the parsed items and total available pages.
+  static Future<({List<TmdbResult> items, int totalPages})> discoverBrowsePage({
+    required String mediaType,
+    required int page,
+    Map<String, String> params = const {},
+  }) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) {
+      return (items: <TmdbResult>[], totalPages: 0);
+    }
+
+    try {
+      final query = <String, String>{
+        'api_key': tmdbApiKey,
+        'language': currentLanguage,
+        'include_adult': 'false',
+        'page': '$page',
+        ...params,
+      };
+
+      if (mediaType == 'movie') {
+        query['include_video'] = 'false';
+      } else {
+        query['include_null_first_air_dates'] = 'false';
+      }
+
+      final uri = Uri.https('api.themoviedb.org', '/3/discover/$mediaType', query);
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return (items: <TmdbResult>[], totalPages: 0);
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final totalPages = (body['total_pages'] as int?) ?? 0;
+      final results = _mapResults(
+        (body['results'] as List<dynamic>? ?? []).map((item) {
+          final map = Map<String, dynamic>.from(item as Map);
+          map['media_type'] = mediaType;
+          return map;
+        }).toList(),
+      );
+
+      return (items: results, totalPages: totalPages);
+    } catch (_) {
+      return (items: <TmdbResult>[], totalPages: 0);
+    }
+  }
+
   static Map<String, String> _recentDateParams({
     required String mediaType,
     required int withinDays,
