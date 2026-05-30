@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
 import '../services/tmdb_service.dart';
+import '../services/video_preview.dart';
+import 'video_preview_widget.dart';
 
 class MovieCard extends StatefulWidget {
   final ContentModel content;
@@ -30,8 +31,7 @@ class _MovieCardState extends State<MovieCard> {
   String? _tmdbPosterUrl;
   String? _tmdbTitle;
   Timer? _hoverTimer;
-  Player? _previewPlayer;
-  VideoController? _previewController;
+  final PreviewPlayer _preview = PreviewPlayer();
   bool _showPreview = false;
   TmdbResult? _tmdbResult;
 
@@ -65,34 +65,24 @@ class _MovieCardState extends State<MovieCard> {
   }
 
   Future<void> _startPreview() async {
-    if (!_isHovered || widget.content.m3u8Url.isEmpty) return;
-    final player = Player();
-    final controller = VideoController(player);
-    await player.setVolume(0);
-    await player.open(Media(widget.content.m3u8Url));
-    await player.seek(const Duration(minutes: 5));
-    if (mounted && _isHovered) {
-      setState(() {
-        _previewPlayer = player;
-        _previewController = controller;
-        _showPreview = true;
-      });
+    if (kIsWeb || !_isHovered || widget.content.m3u8Url.isEmpty) return;
+    await _preview.init(widget.content.m3u8Url);
+    if (mounted && _isHovered && _preview.controller != null) {
+      setState(() => _showPreview = true);
     } else {
-      player.dispose();
+      _preview.dispose();
     }
   }
 
   void _stopPreview() {
-    _previewPlayer?.dispose();
-    _previewPlayer = null;
-    _previewController = null;
+    _preview.dispose();
     if (mounted) setState(() => _showPreview = false);
   }
 
   @override
   void dispose() {
     _hoverTimer?.cancel();
-    _previewPlayer?.dispose();
+    _preview.dispose();
     super.dispose();
   }
 
@@ -164,14 +154,11 @@ class _MovieCardState extends State<MovieCard> {
                             errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight,
                                 child: const Center(child: Icon(LucideIcons.image, color: AppTheme.textSecondary)))),
                         // Video preview on hover
-                        if (_showPreview && _previewController != null)
+                        if (_showPreview && _preview.controller != null)
                           AnimatedOpacity(
                             opacity: 1.0,
                             duration: const Duration(milliseconds: 400),
-                            child: Video(
-                              controller: _previewController!,
-                              controls: NoVideoControls,
-                            ),
+                            child: buildPreviewWidget(_preview.controller!),
                           ),
                         // Hover overlay when NOT showing video
                         if (!_showPreview)

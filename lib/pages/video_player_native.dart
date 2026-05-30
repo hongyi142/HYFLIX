@@ -1,0 +1,1487 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+import '../core/theme.dart';
+import '../models/episode.dart';
+import '../services/subtitle_service.dart';
+import '../services/auth_service.dart';
+import '../services/user_service.dart';
+import '../services/torrent_service.dart';
+import '../widgets/buttons.dart';
+import 'fullscreen_stub.dart'
+    if (dart.library.html) 'fullscreen_web.dart';
+class VideoPlayerScreen extends StatefulWidget {
+  final String videoUrl;
+  final String title;
+  final String originalTitle;
+  final List<Episode> episodes;
+  final int initialEpisodeIndex;
+  final String? tmdbId;
+  final bool isTvShow;
+  final int? seasonNumber;
+  final String posterUrl;
+  final int seekToSeconds;
+  final TorrentStream? torrentStream;
+
+  const VideoPlayerScreen({
+    super.key,
+    required this.videoUrl,
+    this.title = '',
+    this.originalTitle = '',
+    this.episodes = const [],
+    this.initialEpisodeIndex = 0,
+    this.tmdbId,
+    this.isTvShow = false,
+    this.seasonNumber,
+    this.posterUrl = '',
+    this.seekToSeconds = 0,
+    this.torrentStream,
+  });
+
+  @override
+  State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
+}
+
+class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
+  late final Player _player;
+  late final VideoController _controller;
+  bool _showControls = true;
+  bool _showEpisodes = false;
+  bool _showSubtitles = false;
+  bool _showStats = false;
+  bool _hasError = false;
+  late int _currentEpIndex;
+  String? _currentTitle;
+  List<SubtitleItem> _availableSubs = [];
+  SubtitleItem? _selectedSub;
+  bool _loadingSubs = false;
+  DateTime? _startTime;
+  StreamSubscription<bool>? _bufferingSub;
+  StreamSubscription<Duration>? _positionSub;
+  Map<String, dynamic>? _introTimestamp;
+  bool _showSkipIntro = false;
+  bool _isFullScreen = false;
+
+  // Torrent state
+  bool _isTorrentBuffering = false;
+  String _torrentStatus = '';
+  Timer? _statsTimer;
+  Map<String, dynamic>? _torrentStats;
+
+  // Next episode autoplay
+  bool _showAutoplay = false;
+  int _autoplayCountdown = 5;
+  bool _autoPlaying = false;
+  Timer? _autoplayTimer;
+  StreamSubscription<bool>? _completedSub;
+
+  // Audio tracks
+  bool _showAudioTracks = false;
+  List<AudioTrack> _audioTracks = [];
+  AudioTrack? _selectedAudioTrack;
+  StreamSubscription<Tracks>? _audioTracksSub;
+
+  // Exit guard
+  bool _isExiting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTime = DateTime.now();
+    _currentEpIndex = widget.initialEpisodeIndex;
+    _currentTitle = widget.title;
+    _player = Player();
+    _controller = VideoController(_player);
+
+    if (widget.torrentStream != null) {
+      _startTorrentPlayback();
+    } else {
+      _openMedia(widget.videoUrl, seekToSeconds: widget.seekToSeconds);
+    }
+
+    _loadIntroTimestamp();
+    _listenPosition();
+    _setupAutoplay();
+    _listenAudioTracks();
+    _scheduleHideControls();
+  }
+
+  /// Start torrent playback — show buffering overlay while metadata downloads.
+  Future<void> _startTorrentPlayback() async {
+    final stream = widget.torrentStream!;
+    debugPrint('[VideoPlayer] Starting torrent: ${stream.quality} '
+        'hash=${stream.infoHash.substring(0, 16)}... fileIdx=${stream.fileIdx}');
+
+    setState(() {
+      _isTorrentBuffering = true;
+      _torrentStatus = 'Connecting to peers...';
+    });
+
+    // Listen to buffering state changes for status text
+    _bufferingSub = _player.stream.buffering.listen((buffering) {
+      if (mounted) {
+        setState(() {
+          if (buffering) {
+            _torrentStatus = 'Buffering...';
+          }
+        });
+      }
+    });
+
+    // Update torrent stats periodically
+    _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        setState(() {
+          _torrentStats = TorrentService().getStreamStats();
+          // Update status text based on stats
+          if (_torrentStats != null && _isTorrentBuffering) {
+            final rate = _torrentStats!['downloadRate'] as int? ?? 0;
+            if (rate > 0) {
+              _torrentStatus = 'Downloading... ${_formatBytes(rate)}/s';
+            }
+          }
+        });
+      }
+    });
+
+    final url = await TorrentService().startStream(stream);
+    if (!mounted) return;
+
+    if (url == null) {
+      debugPrint('[VideoPlayer] Torrent stream failed');
+      setState(() {
+        _isTorrentBuffering = false;
+        _hasError = true;
+      });
+      return;
+    }
+
+    debugPrint('[VideoPlayer] Torrent stream ready: $url');
+    setState(() {
+      _isTorrentBuffering = false;
+      _torrentStatus = '';
+    });
+
+    _openMedia(url, seekToSeconds: widget.seekToSeconds);
+    _fetchSubtitles();
+  }
+
+  Future<void> _openMedia(String url, {int seekToSeconds = 0}) async {
+    try {
+      debugPrint('[VideoPlayer] Opening media: $url');
+      _bufferingSub?.cancel();
+      await _player.open(Media(url));
+      debugPrint('[VideoPlayer] Media opened successfully');
+
+      // Listen to buffering state for debug logging and UI updates
+      _bufferingSub = _player.stream.buffering.listen((buffering) {
+        debugPrint('[VideoPlayer] Buffering: $buffering');
+        if (mounted) {
+          setState(() {
+            if (widget.torrentStream != null) {
+              _isTorrentBuffering = buffering;
+              if (buffering) _torrentStatus = 'Buffering...';
+            }
+          });
+        }
+      });
+
+      if (seekToSeconds > 0) {
+        // Wait for buffering to finish, then seek and play
+        bool hasStarted = false;
+        _bufferingSub = _player.stream.buffering.listen((buffering) {
+          if (!buffering && !hasStarted && mounted) {
+            hasStarted = true;
+            _player.seek(Duration(seconds: seekToSeconds));
+            _player.play();
+            _bufferingSub?.cancel();
+          }
+        });
+        // Also try immediate seek in case player is already ready
+        await _player.seek(Duration(seconds: seekToSeconds));
+      } else {
+        // Autoplay — ensure video starts playing
+        _player.play();
+      }
+      _fetchSubtitles();
+    } catch (e, st) {
+      debugPrint('[VideoPlayer] Error opening media: $e\n$st');
+      if (mounted) setState(() => _hasError = true);
+    }
+  }
+
+  /// Series-level content ID for intro timestamps (same across all episodes).
+  String get _seriesContentId => widget.tmdbId ?? widget.originalTitle;
+
+  Future<void> _loadIntroTimestamp() async {
+    final data = await UserService.getIntroTimestamp(_seriesContentId);
+    if (data != null && mounted) {
+      setState(() => _introTimestamp = data);
+    }
+  }
+
+  void _listenPosition() {
+    _positionSub = _player.stream.position.listen((pos) {
+      if (!mounted) return;
+      final sec = pos.inSeconds;
+      bool shouldShow = false;
+
+      if (_introTimestamp != null) {
+        final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ??
+                        (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
+        shouldShow = sec < skipDur;
+      } else {
+        shouldShow = sec < 300; // Allow recording within first 5 mins
+      }
+
+      if (shouldShow != _showSkipIntro) {
+        setState(() => _showSkipIntro = shouldShow);
+      }
+    });
+  }
+
+  void _setupAutoplay() {
+    // Check position every second for next-episode trigger
+    _autoplayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _autoPlaying) return;
+      final hasEpisodes = widget.episodes.length > 1;
+      final hasNext = _currentEpIndex < widget.episodes.length - 1;
+      if (!hasEpisodes || !hasNext) return;
+
+      final pos = _player.state.position.inSeconds;
+      final dur = _player.state.duration.inSeconds;
+      if (dur <= 0) return;
+
+      final remaining = dur - pos;
+
+      if (remaining <= 10 && remaining > 0) {
+        if (!_showAutoplay) {
+          setState(() {
+            _showAutoplay = true;
+            _autoplayCountdown = 5;
+          });
+        }
+        if (_autoplayCountdown > 0) {
+          setState(() => _autoplayCountdown--);
+          if (_autoplayCountdown <= 0) {
+            _playNextEpisode();
+          }
+        }
+      } else if (remaining > 10 && _showAutoplay) {
+        // User seeked away from the end
+        setState(() {
+          _showAutoplay = false;
+          _autoplayCountdown = 5;
+        });
+      }
+    });
+
+    // Auto-advance when playback completes
+    _completedSub = _player.stream.completed.listen((completed) {
+      if (completed && mounted && !_autoPlaying) {
+        final hasNext = _currentEpIndex < widget.episodes.length - 1;
+        if (hasNext) {
+          _playNextEpisode();
+        }
+      }
+    });
+  }
+
+  void _cancelAutoplay() {
+    _autoplayTimer?.cancel();
+    _autoplayTimer = null;
+    _completedSub?.cancel();
+    _completedSub = null;
+  }
+
+  void _listenAudioTracks() {
+    _audioTracksSub = _player.stream.tracks.listen((tracks) {
+      if (!mounted) return;
+      final audioTracks = tracks.audio.where((t) => t.id != 'no' && t.id != 'auto').toList();
+      setState(() {
+        _audioTracks = audioTracks;
+        if (audioTracks.length <= 1) _showAudioTracks = false;
+      });
+    });
+  }
+
+  void _selectAudioTrack(AudioTrack track) {
+    _player.setAudioTrack(track);
+    setState(() {
+      _selectedAudioTrack = track;
+      _showAudioTracks = false;
+    });
+  }
+
+  void _playNextEpisode() {
+    if (_autoPlaying) return;
+    final nextIdx = _currentEpIndex + 1;
+    if (nextIdx >= widget.episodes.length) return;
+    _autoPlaying = true;
+    _showAutoplay = false;
+    _autoplayCountdown = 5;
+    _playEpisode(nextIdx);
+  }
+
+  Future<void> _skipIntro() async {
+    if (_introTimestamp != null) {
+      final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ??
+                      (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
+      _player.seek(Duration(seconds: skipDur));
+    }
+  }
+
+  Future<void> _recordIntro() async {
+    final pos = _player.state.position.inSeconds;
+    await UserService.saveIntroTimestamp(
+      contentId: _seriesContentId,
+      skipDuration: pos,
+    );
+    if (mounted) {
+      setState(() {
+        _introTimestamp = {'skipDuration': pos};
+      });
+    }
+  }
+
+  Future<void> _fetchSubtitles() async {
+    if (mounted) setState(() => _loadingSubs = true);
+    try {
+      final currentEpisode = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
+      final subs = await SubtitleService.searchSubtitles(
+        _currentTitle ?? '',
+        tmdbId: widget.tmdbId,
+        seasonNumber: widget.seasonNumber,
+        episodeName: currentEpisode?.name,
+        isTvShow: widget.isTvShow,
+      );
+      if (mounted) {
+        setState(() {
+          _availableSubs = subs;
+          _loadingSubs = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingSubs = false);
+    }
+  }
+
+  Future<void> _selectSubtitle(SubtitleItem item) async {
+    if (mounted) {
+      setState(() {
+        _selectedSub = item;
+        _showSubtitles = false;
+      });
+    }
+
+    final srtContent = await SubtitleService.fetchSubtitleContent(item);
+
+    if (srtContent != null && srtContent.trim().isNotEmpty && mounted) {
+      await _player.setSubtitleTrack(SubtitleTrack.data(
+        srtContent,
+        title: item.fileName,
+        language: item.language,
+      ));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Subtitles active: ${item.language.toUpperCase()}'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to load subtitle content'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _playEpisode(int index) {
+    if (index < 0 || index >= widget.episodes.length) return;
+    final ep = widget.episodes[index];
+    setState(() {
+      _currentEpIndex = index;
+      _hasError = false;
+      _showEpisodes = false;
+      _showSubtitles = false;
+      _showAudioTracks = false;
+      _showAutoplay = false;
+      _autoplayCountdown = 5;
+      _autoPlaying = false;
+      _selectedSub = null;
+      _selectedAudioTrack = null;
+      _availableSubs = [];
+    });
+    _openMedia(ep.url);
+    _loadIntroTimestamp();
+  }
+
+  void _toggleFullScreen() {
+    setState(() => _isFullScreen = !_isFullScreen);
+    toggleFullScreen();
+  }
+
+  void _scheduleHideControls() {
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && _showControls) setState(() => _showControls = false);
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    if (_showControls) _scheduleHideControls();
+  }
+
+  @override
+  void dispose() {
+    try {
+      _cancelAutoplay();
+      _bufferingSub?.cancel();
+      _positionSub?.cancel();
+      _statsTimer?.cancel();
+      _audioTracksSub?.cancel();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error cancelling subscriptions: $e');
+    }
+    try {
+      _player.dispose();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error disposing player: $e');
+    }
+    // Only stop torrent here if _exitPlayer didn't already handle it
+    if (!_isExiting) {
+      TorrentService().stopStream().catchError((e) {
+        debugPrint('[VideoPlayer] Error stopping torrent in dispose: $e');
+      });
+    }
+    super.dispose();
+  }
+
+  void _exitPlayer() {
+    if (_isExiting) return;
+    _isExiting = true;
+    _cancelAutoplay();
+    _statsTimer?.cancel();
+    _bufferingSub?.cancel();
+    _positionSub?.cancel();
+    _audioTracksSub?.cancel();
+
+    // Capture player state before disposal
+    final position = _player.state.position;
+    final duration = _player.state.duration;
+
+    // Fire-and-forget async cleanup — don't await, just pop immediately
+    _saveWatchData(position, duration).catchError((e) {
+      debugPrint('[VideoPlayer] Error saving watch data: $e');
+    });
+    TorrentService().stopStream().catchError((e) {
+      debugPrint('[VideoPlayer] Error stopping torrent: $e');
+    });
+
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _saveWatchData(Duration position, Duration duration) async {
+    if (AuthService.uid == null) return;
+    final elapsed = _startTime != null ? DateTime.now().difference(_startTime!).inSeconds : 0;
+    if (elapsed > 5) {
+      UserService.addWatchTime(elapsed);
+    }
+    final progress = duration.inSeconds > 0
+        ? (position.inSeconds / duration.inSeconds).clamp(0.0, 1.0)
+        : 0.0;
+    final currentEp = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
+    if (currentEp != null || widget.videoUrl.isNotEmpty) {
+      await UserService.saveWatchHistory(
+        contentId: widget.tmdbId ?? widget.title,
+        title: widget.title,
+        posterUrl: widget.posterUrl,
+        progress: progress,
+        originalTitle: widget.originalTitle,
+        episodeIndex: _currentEpIndex,
+        positionSeconds: position.inSeconds,
+        m3u8Url: widget.videoUrl,
+        episodes: widget.episodes.map((e) => e.toJson()).toList(),
+      );
+    }
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasEpisodes = widget.episodes.length > 1;
+    final currentEpName = hasEpisodes
+        ? widget.episodes[_currentEpIndex].name
+        : widget.title;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _exitPlayer();
+      },
+      child: KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      autofocus: true,
+      onKeyEvent: (e) {
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) _exitPlayer();
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.space) _player.playOrPause();
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
+          if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: GestureDetector(
+          onTap: () {
+            if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks) {
+              setState(() { _showSubtitles = false; _showEpisodes = false; _showStats = false; _showAudioTracks = false; });
+            } else {
+              _toggleControls();
+            }
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Video(
+                controller: _controller,
+                controls: NoVideoControls,
+                subtitleViewConfiguration: const SubtitleViewConfiguration(
+                  style: TextStyle(
+                    fontSize: 28,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    backgroundColor: Color(0xDD000000),
+                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
+
+              // Torrent buffering overlay
+              if (_isTorrentBuffering)
+                _buildBufferingOverlay(),
+
+              // Error state
+              if (_hasError)
+                _errorWidget(context),
+
+              // Controls overlay
+              AnimatedOpacity(
+                opacity: _showControls ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                child: IgnorePointer(
+                  ignoring: !_showControls,
+                  child: _buildControls(context, currentEpName, hasEpisodes),
+                ),
+              ),
+
+              // Skip Intro / Record Intro button
+              Positioned(
+                bottom: 100,
+                left: 24,
+                child: AnimatedOpacity(
+                  opacity: _showSkipIntro ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: _showSkipIntro
+                      ? HoverButton(
+                          onTap: _introTimestamp == null ? _recordIntro : _skipIntro,
+                          backgroundColor: Colors.black.withOpacity(0.7),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _introTimestamp == null ? LucideIcons.circleDot : LucideIcons.skipForward,
+                                  color: Colors.white,
+                                  size: 16
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _introTimestamp == null ? 'Record Intro Time' : 'Skip Intro',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : const SizedBox(),
+                ),
+              ),
+
+              // Next episode autoplay card (Netflix-style bottom-right)
+              if (_showAutoplay && widget.episodes.length > 1)
+                Positioned(
+                  bottom: 100,
+                  right: 24,
+                  child: _buildAutoplayCard(),
+                ),
+
+              // Subtitle panel (slides from right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: 0, bottom: 0,
+                right: _showSubtitles ? 0 : -300,
+                width: 300,
+                child: _buildSubtitlePanel(),
+              ),
+
+              // Audio track panel (slides from right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: 0, bottom: 0,
+                right: _showAudioTracks ? 0 : -300,
+                width: 300,
+                child: _buildAudioTrackPanel(),
+              ),
+
+              // Episode panel (slides from right)
+              if (hasEpisodes)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  top: 0, bottom: 0,
+                  right: _showEpisodes ? 0 : -300,
+                  width: 300,
+                  child: _buildEpisodePanel(),
+                ),
+
+              // Stats panel (slides from top-right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: _showStats ? 70 : -600,
+                right: 20,
+                width: 280,
+                child: _buildStatsPanel(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+
+  Widget _buildBufferingOverlay() {
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 48,
+              height: 48,
+              child: CircularProgressIndicator(
+                color: AppTheme.accent,
+                strokeWidth: 3,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              _torrentStatus.isNotEmpty ? _torrentStatus : 'Loading...',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (_torrentStats != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                '${_torrentStats!['numPeers'] ?? 0} peers connected',
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsPanel() {
+    final stats = _torrentStats;
+    final isTorrent = widget.torrentStream != null;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Network Stats',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            StreamBuilder<bool>(
+              stream: _player.stream.buffering,
+              builder: (context, snap) {
+                final buffering = snap.data ?? false;
+                final status = buffering
+                    ? 'Buffering'
+                    : (_player.state.playing ? 'Playing' : 'Paused');
+                return _statRow('Status', status,
+                    color: buffering ? Colors.orange : Colors.green);
+              },
+            ),
+            const SizedBox(height: 8),
+            StreamBuilder<int?>(
+              stream: _player.stream.width,
+              builder: (context, wSnap) => StreamBuilder<int?>(
+                stream: _player.stream.height,
+                builder: (context, hSnap) {
+                  final w = wSnap.data ?? _player.state.width;
+                  final h = hSnap.data ?? _player.state.height;
+                  final res = (w != null && h != null && w > 0 && h > 0)
+                      ? '${w}x$h'
+                      : 'Detecting...';
+                  return _statRow('Resolution', res);
+                },
+              ),
+            ),
+            if (isTorrent && stats != null) ...[
+              const SizedBox(height: 8),
+              _statRow('Download', '${_formatBytes(stats['downloadRate'] ?? 0)}/s'),
+              const SizedBox(height: 8),
+              _statRow('Upload', '${_formatBytes(stats['uploadRate'] ?? 0)}/s'),
+              const SizedBox(height: 8),
+              _statRow('Peers', '${stats['numPeers'] ?? 0}'),
+              const SizedBox(height: 8),
+              _statRow('Seeds', '${stats['numSeeds'] ?? 0}'),
+              const SizedBox(height: 8),
+              _statRow('Progress',
+                  '${((stats['progress'] as double? ?? 0) * 100).toStringAsFixed(1)}%'),
+              const SizedBox(height: 8),
+              _statRow('Downloaded',
+                  _formatBytes(stats['totalDone'] ?? 0)),
+              if (stats['totalWanted'] != null && (stats['totalWanted'] as int) > 0) ...[
+                const SizedBox(height: 8),
+                _statRow('Total Size',
+                    _formatBytes(stats['totalWanted'] ?? 0)),
+              ],
+              const SizedBox(height: 8),
+              _statRow('Quality', widget.torrentStream!.quality),
+            ] else if (!isTorrent) ...[
+              const SizedBox(height: 8),
+              _statRow('Type', 'VOD Stream'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statRow(String label, String value, {Color? color}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 13,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: color ?? Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _errorWidget(BuildContext context) => Container(
+    color: Colors.black87,
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(LucideIcons.alertCircle, color: AppTheme.accent, size: 56),
+          const SizedBox(height: 16),
+          const Text('Failed to load stream.', style: TextStyle(color: Colors.white, fontSize: 18)),
+          const SizedBox(height: 24),
+          TextButton(onPressed: _exitPlayer,
+              child: const Text('Go Back', style: TextStyle(color: AppTheme.accent, fontSize: 16))),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildControls(BuildContext context, String epName, bool hasEpisodes) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.black87, Colors.transparent, Colors.transparent, Colors.black87],
+          stops: const [0, 0.25, 0.7, 1.0],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // Top bar
+          Positioned(
+            top: 32, left: 20, right: 20,
+            child: Row(
+              children: [
+                HoverButton(
+                  onTap: _exitPlayer,
+                  backgroundColor: Colors.black54,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 22),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(epName,
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 16),
+                // Network stats icon
+                HoverButton(
+                  onTap: () => setState(() {
+                    _showStats = !_showStats;
+                    _showSubtitles = false;
+                    _showEpisodes = false;
+                    _showAudioTracks = false;
+                  }),
+                  backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: const Icon(LucideIcons.wifi, color: Colors.white, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                HoverButton(
+                  onTap: () => setState(() {
+                    _showSubtitles = !_showSubtitles;
+                    _showEpisodes = false;
+                    _showStats = false;
+                    _showAudioTracks = false;
+                  }),
+                  backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: const Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
+                  ),
+                ),
+                if (_audioTracks.length > 1) ...[
+                  const SizedBox(width: 16),
+                  HoverButton(
+                    onTap: () => setState(() {
+                      _showAudioTracks = !_showAudioTracks;
+                      _showSubtitles = false;
+                      _showEpisodes = false;
+                      _showStats = false;
+                    }),
+                    backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: const Icon(LucideIcons.volume2, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
+                if (hasEpisodes) ...[
+                  const SizedBox(width: 16),
+                  HoverButton(
+                    onTap: () => setState(() {
+                      _showEpisodes = !_showEpisodes;
+                      _showSubtitles = false;
+                      _showStats = false;
+                      _showAudioTracks = false;
+                    }),
+                    backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: const Icon(LucideIcons.list, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // Center play/pause (hidden during buffering)
+          if (!_isTorrentBuffering && !_player.state.buffering)
+            Center(
+              child: StreamBuilder(
+                stream: _player.stream.playing,
+                builder: (context, snap) {
+                  final playing = snap.data ?? _player.state.playing;
+                  return HoverButton(
+                    onTap: () {
+                      _player.playOrPause();
+                      setState(() {});
+                    },
+                    backgroundColor: Colors.transparent,
+                    child: ClipOval(
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(28),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(_showControls ? 0.15 : 0.0),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white.withOpacity(0.2)),
+                          ),
+                          child: Icon(
+                            playing ? LucideIcons.pause : LucideIcons.play,
+                            color: Colors.white.withOpacity(0.9),
+                            size: 38,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          // Fullscreen button (bottom right)
+          Positioned(
+            bottom: 10,
+            right: 16,
+            child: HoverButton(
+              onTap: _toggleFullScreen,
+              backgroundColor: Colors.black54,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(
+                  _isFullScreen ? LucideIcons.minimize : LucideIcons.maximize,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+
+          // Bottom progress + time
+          Positioned(
+            bottom: 32,
+            left: 32,
+            right: 32,
+            child: StreamBuilder(
+              stream: _player.stream.position,
+              builder: (context, posSnap) => StreamBuilder(
+                stream: _player.stream.duration,
+                builder: (context, durSnap) {
+                  final pos = posSnap.data ?? Duration.zero;
+                  final dur = durSnap.data ?? Duration.zero;
+                  final progress = dur.inMilliseconds > 0
+                      ? pos.inMilliseconds / dur.inMilliseconds
+                      : 0.0;
+                  return Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(_fmt(pos),
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 13)),
+                          Text(_fmt(dur),
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 4,
+                          thumbColor: AppTheme.accent,
+                          activeTrackColor: AppTheme.accent,
+                          inactiveTrackColor: Colors.white24,
+                          thumbShape:
+                              const RoundSliderThumbShape(enabledThumbRadius: 7),
+                          overlayShape:
+                              const RoundSliderOverlayShape(overlayRadius: 14),
+                        ),
+                        child: Slider(
+                          value: progress.clamp(0.0, 1.0),
+                          onChanged: (v) {
+                            if (dur != Duration.zero) {
+                              _player.seek(Duration(
+                                  milliseconds:
+                                      (v * dur.inMilliseconds).round()));
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubtitlePanel() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {}, // absorb taps so they don't close the panel
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
+            child: Text('Subtitles',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700)),
+          ),
+          if (_loadingSubs)
+            const Expanded(
+              child: Center(
+                  child: CircularProgressIndicator(color: AppTheme.accent)),
+            )
+          else if (_availableSubs.isEmpty)
+            const Expanded(
+              child: Center(
+                  child: Text('No subtitles found',
+                      style: TextStyle(color: AppTheme.textSecondary))),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: _availableSubs.length + 1,
+                itemBuilder: (context, i) {
+                    return FocusableActionDetector(
+                      actions: {
+                        ActivateIntent: CallbackAction<ActivateIntent>(
+                          onInvoke: (intent) {
+                            if (i == 0) {
+                              _player.setSubtitleTrack(SubtitleTrack.no());
+                              setState(() {
+                                _selectedSub = null;
+                                _showSubtitles = false;
+                              });
+                            } else {
+                              _selectSubtitle(_availableSubs[i - 1]);
+                            }
+                            return null;
+                          },
+                        ),
+                      },
+                      child: GestureDetector(
+                        onTap: () {
+                          if (i == 0) {
+                            _player.setSubtitleTrack(SubtitleTrack.no());
+                            setState(() {
+                              _selectedSub = null;
+                              _showSubtitles = false;
+                            });
+                          } else {
+                            _selectSubtitle(_availableSubs[i - 1]);
+                          }
+                        },
+                        child: _panelTile(
+                          i == 0 ? 'Off' : '${_availableSubs[i - 1].language.toUpperCase()} - ${_availableSubs[i - 1].fileName}',
+                          i == 0 ? (_selectedSub == null) : (_selectedSub?.id == _availableSubs[i - 1].id),
+                        ),
+                      ),
+                    );
+                },
+              ),
+            ),
+        ],
+      ),
+      ),
+    );
+  }
+
+  Widget _buildAudioTrackPanel() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
+              child: Text('Audio Tracks',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+            ),
+            if (_audioTracks.isEmpty)
+              const Expanded(
+                child: Center(
+                    child: Text('No alternate audio tracks',
+                        style: TextStyle(color: AppTheme.textSecondary))),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: _audioTracks.length,
+                  itemBuilder: (context, i) {
+                    final track = _audioTracks[i];
+                    final isActive = _selectedAudioTrack == track ||
+                        (_selectedAudioTrack == null && i == 0);
+                    final label = _audioTrackLabel(track);
+                    return GestureDetector(
+                      onTap: () => _selectAudioTrack(track),
+                      child: _panelTile(label, isActive),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _audioTrackLabel(AudioTrack track) {
+    final parts = <String>[];
+    if (track.language != null && track.language!.isNotEmpty) {
+      parts.add(track.language!.toUpperCase());
+    }
+    if (track.title != null && track.title!.isNotEmpty) {
+      parts.add(track.title!);
+    }
+    if (track.codec != null && track.codec!.isNotEmpty) {
+      parts.add(track.codec!.toUpperCase());
+    }
+    if (track.channels != null && track.channels!.isNotEmpty) {
+      parts.add(track.channels!);
+    }
+    return parts.isNotEmpty ? parts.join(' - ') : 'Track ${track.id}';
+  }
+
+  Widget _panelTile(String title, bool isActive) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isActive ? AppTheme.accent : Colors.white24,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(isActive ? LucideIcons.checkCircle : LucideIcons.circle,
+              color: isActive ? AppTheme.accent : AppTheme.textSecondary,
+              size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: isActive ? Colors.white : AppTheme.textSecondary,
+                fontSize: 13,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAutoplayCard() {
+    final nextIdx = _currentEpIndex + 1;
+    final nextEp = nextIdx < widget.episodes.length
+        ? widget.episodes[nextIdx]
+        : null;
+    final nextTitle = nextEp?.name ?? 'Episode ${nextIdx + 1}';
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) {
+        return Transform.translate(
+          offset: Offset((1 - value) * 120, 0),
+          child: Opacity(
+            opacity: value.clamp(0.0, 1.0),
+            child: child,
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: () {}, // absorb taps
+        child: Container(
+          width: 320,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1F2E),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white12),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 24),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                child: Text(
+                  'Next Episode in $_autoplayCountdown',
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Episode info
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    // Episode thumbnail placeholder
+                    Container(
+                      width: 120,
+                      height: 68,
+                      decoration: BoxDecoration(
+                        color: AppTheme.cardLight,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          LucideIcons.play,
+                          color: Colors.white54,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Episode details
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            nextTitle,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.title,
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Buttons
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: Row(
+                  children: [
+                    // Cancel button
+                    Expanded(
+                      child: HoverButton(
+                        onTap: () {
+                          setState(() {
+                            _showAutoplay = false;
+                            _autoplayCountdown = 5;
+                          });
+                        },
+                        backgroundColor: Colors.white12,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                LucideIcons.x,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // Play Now button
+                    Expanded(
+                      child: HoverButton(
+                        onTap: _playNextEpisode,
+                        backgroundColor: Colors.white,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                LucideIcons.play,
+                                color: Colors.black,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Play Now',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEpisodePanel() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {}, // absorb taps so they don't close the panel
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
+              child: Text('Episodes',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+            ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: widget.episodes.length,
+                itemBuilder: (context, i) {
+                  final ep = widget.episodes[i];
+                  final isActive = i == _currentEpIndex;
+                  return FocusableActionDetector(
+                    actions: {
+                      ActivateIntent: CallbackAction<ActivateIntent>(
+                        onInvoke: (intent) {
+                          _playEpisode(i);
+                          return null;
+                        },
+                      ),
+                    },
+                    child: GestureDetector(
+                      onTap: () => _playEpisode(i),
+                      child: _panelTile(
+                        ep.name.isNotEmpty ? ep.name : 'Episode ${i + 1}',
+                        isActive,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+}

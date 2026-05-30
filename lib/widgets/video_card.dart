@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import '../core/proxy_url.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
@@ -10,6 +9,8 @@ import '../pages/detail_page.dart';
 import '../pages/video_player_screen.dart';
 import '../services/tmdb_service.dart';
 import '../services/torrent_service.dart';
+import '../services/video_preview.dart';
+import 'video_preview_widget.dart';
 
 class VideoCard extends StatefulWidget {
   final ContentModel content;
@@ -34,8 +35,7 @@ class _VideoCardState extends State<VideoCard> {
   String? _tmdbBackdropUrl;
   String? _tmdbTitle;
   Timer? _hoverTimer;
-  Player? _previewPlayer;
-  VideoController? _previewController;
+  final PreviewPlayer _preview = PreviewPlayer();
   bool _showPreview = false;
   TmdbResult? _tmdbResult;
 
@@ -72,34 +72,24 @@ class _VideoCardState extends State<VideoCard> {
   }
 
   Future<void> _startPreview() async {
-    if (!_isHovered || widget.content.m3u8Url.isEmpty) return;
-    final player = Player();
-    final controller = VideoController(player);
-    await player.setVolume(0);
-    await player.open(Media(widget.content.m3u8Url));
-    await player.seek(const Duration(minutes: 5));
-    if (mounted && _isHovered) {
-      setState(() {
-        _previewPlayer = player;
-        _previewController = controller;
-        _showPreview = true;
-      });
+    if (kIsWeb || !_isHovered || widget.content.m3u8Url.isEmpty) return;
+    await _preview.init(widget.content.m3u8Url);
+    if (mounted && _isHovered && _preview.controller != null) {
+      setState(() => _showPreview = true);
     } else {
-      player.dispose();
+      _preview.dispose();
     }
   }
 
   void _stopPreview() {
-    _previewPlayer?.dispose();
-    _previewPlayer = null;
-    _previewController = null;
+    _preview.dispose();
     if (mounted) setState(() => _showPreview = false);
   }
 
   @override
   void dispose() {
     _hoverTimer?.cancel();
-    _previewPlayer?.dispose();
+    _preview.dispose();
     super.dispose();
   }
 
@@ -186,14 +176,11 @@ class _VideoCardState extends State<VideoCard> {
                         ),
                       ),
                       // Hover video preview
-                      if (_showPreview && _previewController != null)
+                      if (_showPreview && _preview.controller != null)
                         AnimatedOpacity(
                           opacity: _showPreview ? 1.0 : 0.0,
                           duration: const Duration(milliseconds: 400),
-                          child: Video(
-                            controller: _previewController!,
-                            controls: NoVideoControls,
-                          ),
+                          child: buildPreviewWidget(_preview.controller!),
                         ),
                       // Play icon
                       if (!_showPreview)
@@ -315,8 +302,17 @@ class _VideoCardState extends State<VideoCard> {
         ),
       ).then((_) => widget.onWatchHistoryChanged?.call());
     } else if (hasResume && !playableUrl) {
-      // Torrent content with dead URL — fetch stream and go directly to player
-      _resumeTorrentPlayback();
+      if (kIsWeb) {
+        // Web: can't resume torrents, open detail page instead
+        DetailPage.show(
+          context,
+          widget.content,
+          initialTmdb: _tmdbResult,
+        ).then((_) => widget.onWatchHistoryChanged?.call());
+      } else {
+        // Torrent content with dead URL — fetch stream and go directly to player
+        _resumeTorrentPlayback();
+      }
     } else {
       // No resume — open detail page
       DetailPage.show(

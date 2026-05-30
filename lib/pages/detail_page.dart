@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
 import '../core/proxy_url.dart';
@@ -111,7 +112,7 @@ class _DetailPageState extends State<DetailPage> {
   /// Chinese content → VOD providers directly.
   /// Western/Korean content → Torrentio first, VOD fallback.
   void _routeContentSource() {
-    if (_isChineseContent(_tmdb)) {
+    if (kIsWeb || _isChineseContent(_tmdb)) {
       _refreshSourceEpisodes();
     } else {
       // Initialize season from content subtitle if available
@@ -604,8 +605,8 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _play(int episodeIndex) {
-    // Route to torrent for non-Chinese content (unless torrent already failed)
-    if (!_isChineseContent(_tmdb) && !_torrentFailed) {
+    // Route to torrent for non-Chinese content (unless torrent already failed or on web)
+    if (!kIsWeb && !_isChineseContent(_tmdb) && !_torrentFailed) {
       _playWithTorrent(episodeIndex);
       return;
     }
@@ -759,7 +760,7 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                   ),
                   // Episodes/streams section
-                  if (!_isChineseContent(_tmdb) && !_torrentFailed) ...[
+                  if (!kIsWeb && !_isChineseContent(_tmdb) && !_torrentFailed) ...[
                     // Torrent content: show quality filter + play/episode cards
                     SizedBox(height: layout.isPhone ? 28 : 36),
                     _buildTorrentEpisodesSection(layout),

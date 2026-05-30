@@ -193,6 +193,57 @@ class SubtitleService {
     }
   }
 
+  /// Check if a subtitle filename matches the given season/episode.
+  /// Returns true if the filename has no episode info (keep it) or if it matches.
+  /// Returns false only if the filename explicitly references a different episode.
+  static bool _matchesEpisode(String fileName, int? season, int? episode) {
+    final lower = fileName.toLowerCase();
+
+    // Try to extract S##E## pattern
+    final seMatch = RegExp(r'[Ss](\d{1,2})[Ee](\d{1,3})').firstMatch(lower);
+    if (seMatch != null) {
+      final fileSeason = int.tryParse(seMatch.group(1)!);
+      final fileEp = int.tryParse(seMatch.group(2)!);
+      // If we can parse both, check against target
+      if (fileEp != null) {
+        if (episode != null && fileEp != episode) return false;
+        if (season != null && fileSeason != null && fileSeason != season) return false;
+      }
+      return true;
+    }
+
+    // Try 1x04 pattern (season x episode)
+    final xMatch = RegExp(r'(\d{1,2})[Xx](\d{1,3})').firstMatch(lower);
+    if (xMatch != null) {
+      final fileSeason = int.tryParse(xMatch.group(1)!);
+      final fileEp = int.tryParse(xMatch.group(2)!);
+      if (fileEp != null) {
+        if (episode != null && fileEp != episode) return false;
+        if (season != null && fileSeason != null && fileSeason != season) return false;
+      }
+      return true;
+    }
+
+    // Try E## or EP## pattern (episode only, no season)
+    final eMatch = RegExp(r'(?:^|[^a-z])(?:ep?)(\d{1,3})(?:[^a-z0-9]|$)').firstMatch(lower);
+    if (eMatch != null) {
+      final fileEp = int.tryParse(eMatch.group(1)!);
+      if (fileEp != null && episode != null && fileEp != episode) return false;
+      return true;
+    }
+
+    // Try 第X季第Y集 pattern (Chinese)
+    final cnMatch = RegExp(r'第\d+季第(\d+)集').firstMatch(fileName);
+    if (cnMatch != null) {
+      final fileEp = int.tryParse(cnMatch.group(1)!);
+      if (fileEp != null && episode != null && fileEp != episode) return false;
+      return true;
+    }
+
+    // No episode info found in filename — keep it (might be a general subtitle)
+    return true;
+  }
+
   // ─── Public API ─────────────────────────────────────────────────
 
   static Future<List<SubtitleItem>> searchSubtitles(
@@ -239,12 +290,17 @@ class SubtitleService {
       }
     }
 
-    if (merged.isEmpty) {
+    // Filter by episode: keep subtitles that match the current episode or have no episode info
+    final filtered = effectiveSeason != null || episodeNum != null
+        ? merged.where((s) => _matchesEpisode(s.fileName, effectiveSeason, episodeNum != null ? int.tryParse(episodeNum) : null)).toList()
+        : merged;
+
+    if (filtered.isEmpty) {
       print('No subtitles found for $cacheKey');
     }
 
-    _cache[cacheKey] = merged;
-    return merged;
+    _cache[cacheKey] = filtered;
+    return filtered;
   }
 
   static Future<String?> fetchSubtitleContent(SubtitleItem item) async {

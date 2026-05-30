@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
+import 'services/media_init.dart';
 import 'core/theme.dart';
 import 'pages/splash_page.dart';
 import 'pages/auth_page.dart';
@@ -11,7 +11,7 @@ import 'services/watchlist_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  ensureMediaKitInitialized();
   await ApiService.init();
   await WatchlistService().init();
   await DownloadService().init();
