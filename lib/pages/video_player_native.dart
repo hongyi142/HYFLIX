@@ -426,9 +426,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _loadIntroTimestamp();
   }
 
-  void _toggleFullScreen() {
+  Future<void> _toggleFullScreen() async {
     setState(() => _isFullScreen = !_isFullScreen);
-    toggleFullScreen();
+    try {
+      await toggleFullScreen();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Fullscreen toggle error: $e');
+      // Revert UI state on failure
+      if (mounted) setState(() => _isFullScreen = !_isFullScreen);
+    }
   }
 
   void _scheduleHideControls() {
@@ -453,21 +459,28 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     } catch (e) {
       debugPrint('[VideoPlayer] Error cancelling subscriptions: $e');
     }
+    // If _exitPlayer already handled cleanup, it will have stopped the player
+    // and torrent before Navigator.pop triggers this dispose. In that case
+    // we just need to release the native player object.
+    if (!_isExiting) {
+      // Framework-driven dispose (e.g. parent route removed) — stop
+      // playback before tearing down so the player releases HTTP connections.
+      try {
+        _player.stop();
+      } catch (_) {}
+      TorrentService().stopStream().catchError((e) {
+        debugPrint('[VideoPlayer] Error stopping torrent in dispose: $e');
+      });
+    }
     try {
       _player.dispose();
     } catch (e) {
       debugPrint('[VideoPlayer] Error disposing player: $e');
     }
-    // Only stop torrent here if _exitPlayer didn't already handle it
-    if (!_isExiting) {
-      TorrentService().stopStream().catchError((e) {
-        debugPrint('[VideoPlayer] Error stopping torrent in dispose: $e');
-      });
-    }
     super.dispose();
   }
 
-  void _exitPlayer() {
+  Future<void> _exitPlayer() async {
     if (_isExiting) return;
     _isExiting = true;
     _cancelAutoplay();
@@ -480,12 +493,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final position = _player.state.position;
     final duration = _player.state.duration;
 
-    // Fire-and-forget async cleanup — don't await, just pop immediately
+    // Stop the player first so it closes its HTTP connections to the
+    // torrent streaming server. If we stop the torrent while the player
+    // is still reading, the broken pipe causes a crash.
+    try {
+      await _player.stop();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error stopping player: $e');
+    }
+
+    // Now safe to tear down the torrent HTTP server
+    try {
+      await TorrentService().stopStream();
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error stopping torrent: $e');
+    }
+
+    // Save watch data (fire-and-forget, don't block navigation)
     _saveWatchData(position, duration).catchError((e) {
       debugPrint('[VideoPlayer] Error saving watch data: $e');
-    });
-    TorrentService().stopStream().catchError((e) {
-      debugPrint('[VideoPlayer] Error stopping torrent: $e');
     });
 
     if (mounted) Navigator.pop(context);

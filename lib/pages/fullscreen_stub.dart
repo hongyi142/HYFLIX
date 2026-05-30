@@ -15,10 +15,10 @@ Future<void> toggleFullScreen() async {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
   } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-    // Desktop: use window_manager
+    // Desktop: use window_manager — query actual state to stay in sync
     try {
-      _isFullScreen = !_isFullScreen;
-      await WindowManager.instance.setFullScreen(_isFullScreen);
+      final isFullscreen = await WindowManager.instance.isFullScreen();
+      await WindowManager.instance.setFullScreen(!isFullscreen);
     } catch (e) {
       debugPrint('[Fullscreen] Desktop toggle error: $e');
     }

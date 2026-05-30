@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'services/media_init.dart';
 import 'core/theme.dart';
 import 'pages/splash_page.dart';
@@ -11,6 +13,13 @@ import 'services/watchlist_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize window_manager for desktop fullscreen support
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await WindowManager.instance.ensureInitialized();
+    await WindowManager.instance.waitUntilReadyToShow();
+  }
+
   ensureMediaKitInitialized();
   await ApiService.init();
   await WatchlistService().init();
