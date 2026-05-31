@@ -20,7 +20,8 @@
       "WebFetch(domain:www.reddit.com)",
       "WebFetch(domain:developer.themoviedb.org)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:docs.anilist.co)"
+      "WebFetch(domain:docs.anilist.co)",
+      "WebFetch(domain:stremio-addons.net)"
     ]
   }
 }

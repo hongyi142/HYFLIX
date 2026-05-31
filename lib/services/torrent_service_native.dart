@@ -23,15 +23,15 @@ class TorrentService {
     try {
       await LibtorrentFlutter.init(
         fetchTrackers: true,
-        pollInterval: const Duration(milliseconds: 400),
+        pollInterval: const Duration(milliseconds: 200),
       );
 
       // Apply streaming-optimized configuration
       LibtorrentFlutter.instance.configureSession(const BtConfig(
-        cacheSize: 128 * 1024 * 1024,       // 128MB cache (default 64MB)
-        readerReadAhead: 95,                  // 95% for read-ahead
-        preloadCache: 80,                     // preload 80% of cache on start
-        connectionsLimit: 60,                 // 60 concurrent piece requests (default 25)
+        cacheSize: 32 * 1024 * 1024,        // 32MB cache — small so playback starts fast
+        readerReadAhead: 20,                  // serve after 20% of cache filled (~6MB)
+        preloadCache: 10,                     // preload 10% of cache on start
+        connectionsLimit: 80,                 // 80 concurrent piece requests (default 25)
         torrentDisconnectTimeout: 120,        // keep alive 2 minutes
         forceEncrypt: false,                  // allow both encrypted and plain
         disableTcp: false,                    // keep TCP
@@ -50,7 +50,15 @@ class TorrentService {
     }
   }
 
-  /// Fetch available streams from Torrentio for a given IMDB ID.
+  /// All Stremio addon base URLs to query for streams.
+  static const List<String> _addonBaseUrls = [
+    torrentioBaseUrl,
+    thepiratebayBaseUrl,
+    meteorBaseUrl,
+  ];
+
+  /// Fetch available streams from all Stremio addons for a given IMDB ID.
+  /// Queries multiple addons in parallel and deduplicates by infoHash.
   Future<List<TorrentStream>> fetchStreams(
     String imdbId,
     String mediaType, {
@@ -65,16 +73,53 @@ class TorrentService {
         path = '/stream/movie/$imdbId.json';
       }
 
-      final uri = Uri.parse('$torrentioBaseUrl$path');
-      debugPrint('[TorrentService] Fetching streams: $uri');
+      // Query all addons in parallel
+      final futures = _addonBaseUrls.map((baseUrl) =>
+          _fetchFromAddon(baseUrl, path));
+      final allResults = await Future.wait(futures);
+
+      // Merge and deduplicate by infoHash, keeping the entry with more seeders
+      final byHash = <String, TorrentStream>{};
+      for (final streams in allResults) {
+        for (final stream in streams) {
+          final existing = byHash[stream.infoHash];
+          if (existing == null || stream.seeders > existing.seeders) {
+            byHash[stream.infoHash] = stream;
+          }
+        }
+      }
+
+      final results = byHash.values.toList();
+      results.sort((a, b) {
+        final qA = _qualityRank(a.quality);
+        final qB = _qualityRank(b.quality);
+        if (qA != qB) return qA.compareTo(qB);
+        return b.seeders.compareTo(a.seeders);
+      });
+
+      debugPrint('[TorrentService] Merged ${results.length} unique streams '
+          '(4K: ${results.where((s) => s.quality == "4K").length}, '
+          '1080p: ${results.where((s) => s.quality == "1080p").length}, '
+          '720p: ${results.where((s) => s.quality == "720p").length})');
+
+      return results;
+    } catch (e, st) {
+      debugPrint('[TorrentService] fetchStreams error: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Fetch streams from a single Stremio addon.
+  Future<List<TorrentStream>> _fetchFromAddon(
+      String baseUrl, String path) async {
+    try {
+      final uri = Uri.parse('$baseUrl$path');
       final res = await http.get(uri).timeout(const Duration(seconds: 15));
-      debugPrint('[TorrentService] Response: ${res.statusCode}');
 
       if (res.statusCode != 200) return [];
 
       final body = json.decode(res.body) as Map<String, dynamic>;
       final streams = body['streams'] as List<dynamic>? ?? [];
-      debugPrint('[TorrentService] Raw streams count: ${streams.length}');
 
       final results = <TorrentStream>[];
       for (final s in streams) {
@@ -104,26 +149,23 @@ class TorrentService {
           fileIdx: fileIdx,
           isHDR: isHDR,
           filename: filename,
+          source: _addonName(baseUrl),
         ));
       }
 
-      results.sort((a, b) {
-        final qA = _qualityRank(a.quality);
-        final qB = _qualityRank(b.quality);
-        if (qA != qB) return qA.compareTo(qB);
-        return b.seeders.compareTo(a.seeders);
-      });
-
-      debugPrint('[TorrentService] Parsed ${results.length} streams '
-          '(4K: ${results.where((s) => s.quality == "4K").length}, '
-          '1080p: ${results.where((s) => s.quality == "1080p").length}, '
-          '720p: ${results.where((s) => s.quality == "720p").length})');
-
+      debugPrint('[TorrentService] ${_addonName(baseUrl)}: ${results.length} streams');
       return results;
-    } catch (e, st) {
-      debugPrint('[TorrentService] fetchStreams error: $e\n$st');
+    } catch (e) {
+      debugPrint('[TorrentService] ${_addonName(baseUrl)} failed: $e');
       return [];
     }
+  }
+
+  static String _addonName(String baseUrl) {
+    if (baseUrl.contains('torrentio')) return 'Torrentio';
+    if (baseUrl.contains('piratebay')) return 'TPB+';
+    if (baseUrl.contains('meteor')) return 'Meteor';
+    return baseUrl;
   }
 
   /// Start streaming a torrent. Returns the local HTTP URL for playback.
@@ -180,26 +222,28 @@ class TorrentService {
             'out of ${files.length} files');
       }
 
+      // Use a small initial cache so playback starts quickly.
+      // readAheadPct controls how much of the cache must be filled before serving —
+      // 95% of 256MB = 243MB is why the player waits for the entire file to download.
       final streamInfo = engine.startStream(
         torrentId,
         fileIndex: stream.fileIdx,
-        maxCacheBytes: 256 * 1024 * 1024, // 256MB stream cache
+        maxCacheBytes: 32 * 1024 * 1024, // 32MB — enough for ~2min of 1080p
       );
       final url = streamInfo.url;
 
-      // Preload head+tail bytes for fast playback start
-      engine.preloadStream(streamInfo.id, preloadBytes: 16 * 1024 * 1024);
-
-      // Configure per-stream cache for aggressive read-ahead
+      // Configure cache BEFORE preloading so read-ahead doesn't fight playback
       engine.setCacheSettings(
         streamInfo.id,
-        capacity: 128 * 1024 * 1024, // 128MB
-        readAheadPct: 95,
-        connectionsLimit: 50,
+        capacity: 32 * 1024 * 1024, // 32MB
+        readAheadPct: 20,            // serve as soon as ~6MB is buffered
+        connectionsLimit: 60,
       );
 
-      debugPrint('[TorrentService] Stream started: $url '
-          '(preloaded 16MB, cache 128MB, 50 connections)');
+      // Preload enough data for the player to start (~4MB covers key frames + init)
+      engine.preloadStream(streamInfo.id, preloadBytes: 4 * 1024 * 1024);
+
+      debugPrint('[TorrentService] Stream started: $url (cache 32MB, readAhead 20%)');
       return url.isNotEmpty ? url : null;
     } catch (e, st) {
       debugPrint('[TorrentService] startStream error: $e\n$st');

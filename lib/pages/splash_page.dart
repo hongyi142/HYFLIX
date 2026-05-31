@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/tmdb_service.dart';
 import '../services/user_service.dart';
+import '../widgets/splash_animation.dart';
 import 'home_page.dart';
 
 class SplashPage extends StatefulWidget {
@@ -14,23 +15,13 @@ class SplashPage extends StatefulWidget {
   State<SplashPage> createState() => _SplashPageState();
 }
 
-class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+class _SplashPageState extends State<SplashPage> {
   double _progress = 0.0;
   static const int _totalSteps = 8; // 7 content fetches + 1 language load
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.8, end: 1.2).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-
     _loadData();
   }
 
@@ -118,12 +109,6 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   }
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -131,27 +116,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ScaleTransition(
-              scale: _animation,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppTheme.accent.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.accent.withOpacity(0.5)),
-                ),
-                child: const Text(
-                  'HYFLIX',
-                  style: TextStyle(
-                    color: AppTheme.accent,
-                    fontSize: 48,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 4,
-                    decoration: TextDecoration.none,
-                  ),
-                ),
-              ),
-            ),
+            const SplashAnimation(),
             const SizedBox(height: 32),
             SizedBox(
               width: 200,

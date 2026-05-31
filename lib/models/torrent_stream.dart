@@ -7,6 +7,7 @@ class TorrentStream {
   final int fileIdx;
   final bool isHDR;
   final String filename;
+  final String source;
 
   const TorrentStream({
     required this.infoHash,
@@ -17,6 +18,7 @@ class TorrentStream {
     required this.fileIdx,
     required this.isHDR,
     required this.filename,
+    this.source = '',
   });
 
   String get magnetUri =>

@@ -9,5 +9,7 @@ const String subdlApiKey = '_QFbdnITc00ZzFTFO6KtBJnt81h-pwLi';
 // Free tier: ~100 requests/day. Leave empty string to disable.
 const String openSubtitlesApiKey = '';
 
-// Torrentio addon base URL for torrent stream discovery
+// Stremio addon base URLs for torrent stream discovery
 const String torrentioBaseUrl = 'https://torrentio.strem.fun';
+const String thepiratebayBaseUrl = 'https://thepiratebay-plus.strem.fun';
+const String meteorBaseUrl = 'https://meteorfortheweebs.midnightignite.me';

@@ -65,7 +65,7 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _watchHistory = [];
   List<ContentModel> _trendingItems = [];
   Map<int, TmdbResult> _trendingTmdb = {};
-  bool _isLoading = true;
+  bool _isLoading = false;
   List<ContentModel> _providerContent = [];
 
   final ScrollController _scrollController = ScrollController();

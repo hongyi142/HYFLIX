@@ -51,6 +51,8 @@ class DetailPage extends StatefulWidget {
 }
 
 class _DetailPageState extends State<DetailPage> {
+  static const _torrentSource = VideoSource(name: 'Torrent', baseUrl: '');
+
   TmdbResult? _tmdb;
   int _selectedSeason = 1;
   final _watchlistService = WatchlistService();
@@ -84,6 +86,10 @@ class _DetailPageState extends State<DetailPage> {
     if (tmdb.originCountries.any({'HK', 'TW'}.contains)) return true;
     return false;
   }
+
+  /// Whether this content is non-Chinese (eligible for torrent streaming).
+  bool get _isNonChineseContent =>
+      !kIsWeb && !_isChineseContent(_tmdb);
 
   @override
   void initState() {
@@ -283,6 +289,20 @@ class _DetailPageState extends State<DetailPage> {
       _isLoadingTorrents = false;
     });
     _refreshSourceEpisodes();
+  }
+
+  /// Retry torrent streaming after falling back to VOD.
+  void _retryTorrent() {
+    setState(() {
+      _torrentFailed = false;
+      _isLoadingTorrents = true;
+      _torrentStreamsByEpisode = {};
+      _torrentEpisodeCount = 0;
+      _availableQualities = [];
+      _availableEncoders = [];
+    });
+    _selectedSeason = _extractSeasonNumber() ?? 1;
+    _fetchTorrentStreams();
   }
 
   static int _qualityRank(String quality) {
@@ -1801,23 +1821,41 @@ class _DetailPageState extends State<DetailPage> {
                   dropdownColor: AppTheme.cardDark,
                   underline: const SizedBox(),
                   isDense: true,
-                  items: ApiService.sources
-                      .map(
-                        (s) => DropdownMenuItem(
-                          value: s,
-                          child: Text(
-                            s.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              decoration: TextDecoration.none,
-                            ),
+                  items: [
+                    if (_isNonChineseContent && _torrentFailed)
+                      const DropdownMenuItem(
+                        value: _torrentSource,
+                        child: Text(
+                          'Torrent',
+                          style: TextStyle(
+                            color: AppTheme.accent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.none,
                           ),
                         ),
-                      )
-                      .toList(),
+                      ),
+                    ...ApiService.sources.map(
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(
+                          s.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   onChanged: (v) {
-                    if (v != null) _switchSource(v);
+                    if (v == null) return;
+                    if (v == _torrentSource) {
+                      _retryTorrent();
+                    } else {
+                      _switchSource(v);
+                    }
                   },
                 ),
               ),

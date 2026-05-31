@@ -667,6 +667,38 @@ class TmdbService {
     }
   }
 
+  /// Searches TMDB and returns multiple results (movies + TV shows).
+  /// Filters to items with posters and valid media types.
+  static Future<List<TmdbResult>> searchMultiple(String query, {int maxResults = 20}) async {
+    if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
+    if (query.trim().isEmpty) return [];
+
+    try {
+      final uri = Uri.https('api.themoviedb.org', '/3/search/multi', {
+        'api_key': tmdbApiKey,
+        'query': query,
+        'language': currentLanguage,
+        'include_adult': 'false',
+      });
+
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return [];
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final results = (body['results'] as List<dynamic>? ?? []);
+
+      // Filter to movie/tv with posters
+      final filtered = results.where((r) {
+        final type = r['media_type'] as String?;
+        return (type == 'movie' || type == 'tv') && r['poster_path'] != null;
+      }).toList();
+
+      return _mapResults(filtered).take(maxResults).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Fetches the Chinese title for a TMDB item by ID.
   /// Uses the TMDB details endpoint with language=zh-CN.
   static Future<String?> fetchChineseTitle(int id, String mediaType) async {

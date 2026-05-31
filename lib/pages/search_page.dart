@@ -80,49 +80,48 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      final List<String> searchQueries = [query];
+      final isChinese = RegExp(r'[一-龥]').hasMatch(query);
 
-      // 1. If query is English, get ALL potential Chinese names from top TMDB hits
-      if (!RegExp(r'[一-龥]').hasMatch(query)) {
-        final candidates = await TmdbService.findChineseTitles(query);
-        if (candidates.isNotEmpty) {
-          searchQueries.addAll(candidates);
-          _translatedQuery = candidates.join(', ');
-        }
-      }
-
-      // 2. Search ALL sources for ALL candidates in parallel
-      final List<ContentModel> allResults = [];
-      final Set<String> seenTitles = {};
-
-      // Search both Hong Niu and FFZY sources for every query
-      final List<Future<List<ContentModel>>> searchFutures = [];
-      for (final q in searchQueries) {
-        for (final source in ApiService.sources) {
-          searchFutures.add(_api.searchByTitleFromSource(q, source));
-        }
-      }
-
-      final resultsList = await Future.wait(searchFutures);
-
-      for (var list in resultsList) {
-        for (var item in list) {
-          if (!seenTitles.contains(item.title)) {
-            allResults.add(item);
-            seenTitles.add(item.title);
-          }
-        }
+      List<ContentModel> results;
+      if (isChinese) {
+        // Chinese query → search VOD sources only
+        results = await _searchVod([query]);
+      } else {
+        // English query → search TMDB only (richer metadata, no duplicates)
+        final tmdbResults = await TmdbService.searchMultiple(query, maxResults: 20);
+        results = tmdbResults.map((tmdb) => ContentModel.fromTmdb(tmdb)).toList();
       }
 
       if (mounted) {
         setState(() {
-          _results = allResults;
+          _results = results;
           _isSearching = false;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _isSearching = false);
     }
+  }
+
+  Future<List<ContentModel>> _searchVod(List<String> queries) async {
+    final List<Future<List<ContentModel>>> futures = [];
+    for (final q in queries) {
+      for (final source in ApiService.sources) {
+        futures.add(_api.searchByTitleFromSource(q, source));
+      }
+    }
+    final resultsList = await Future.wait(futures);
+    final List<ContentModel> all = [];
+    final Set<String> seen = {};
+    for (final list in resultsList) {
+      for (final item in list) {
+        if (!seen.contains(item.title)) {
+          all.add(item);
+          seen.add(item.title);
+        }
+      }
+    }
+    return all;
   }
 
   @override

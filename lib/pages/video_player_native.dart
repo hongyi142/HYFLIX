@@ -94,6 +94,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   // Exit guard
   bool _isExiting = false;
 
+  // Scrubbing state — prevents seek on every drag pixel
+  bool _isSeeking = false;
+  double _seekValue = 0.0;
+
   /// Effective episode count: uses episodes list length if available,
   /// otherwise falls back to episodeCount param (for torrent content).
   int get _effectiveEpisodeCount =>
@@ -727,7 +731,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
               // Skip Intro / Record Intro button
               Positioned(
-                bottom: 100,
+                bottom: 160,
                 left: 24,
                 child: AnimatedOpacity(
                   opacity: _showSkipIntro ? 1.0 : 0.0,
@@ -766,7 +770,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               // Next episode autoplay card (Netflix-style bottom-right)
               if (_showAutoplay && _hasMultipleEpisodes)
                 Positioned(
-                  bottom: 100,
+                  bottom: 160,
                   right: 24,
                   child: _buildAutoplayCard(),
                 ),
@@ -819,40 +823,42 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildBufferingOverlay() {
-    return Container(
-      color: Colors.black87,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 48,
-              height: 48,
-              child: CircularProgressIndicator(
-                color: AppTheme.accent,
-                strokeWidth: 3,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              _torrentStatus.isNotEmpty ? _torrentStatus : 'Loading...',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            if (_torrentStats != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                '${_torrentStats!['numPeers'] ?? 0} peers connected',
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
+    return IgnorePointer(
+      child: Container(
+        color: Colors.black87,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(
+                  color: AppTheme.accent,
+                  strokeWidth: 3,
                 ),
               ),
+              const SizedBox(height: 20),
+              Text(
+                _torrentStatus.isNotEmpty ? _torrentStatus : 'Loading...',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (_torrentStats != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '${_torrentStats!['numPeers'] ?? 0} peers connected',
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -932,7 +938,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     _formatBytes(stats['totalWanted'] ?? 0)),
               ],
               const SizedBox(height: 8),
-              _statRow('Quality', widget.torrentStream!.quality),
+              _statRow('Source', widget.torrentStream!.source),
             ] else if (!isTorrent) ...[
               const SizedBox(height: 8),
               _statRow('Type', 'VOD Stream'),
@@ -1119,8 +1125,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           // Episode navigation buttons (bottom left)
           if (hasEpisodes)
             Positioned(
-              bottom: 10,
-              left: 16,
+              bottom: 16,
+              left: 24,
               child: Row(
                 children: [
                   HoverButton(
@@ -1167,8 +1173,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
           // Fullscreen button (bottom right)
           Positioned(
-            bottom: 10,
-            right: 16,
+            bottom: 16,
+            right: 24,
             child: HoverButton(
               onTap: _toggleFullScreen,
               backgroundColor: Colors.black54,
@@ -1185,9 +1191,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
           // Bottom progress + time
           Positioned(
-            bottom: 32,
-            left: 32,
-            right: 32,
+            bottom: 52,
+            left: 40,
+            right: 40,
             child: StreamBuilder(
               stream: _player.stream.position,
               builder: (context, posSnap) => StreamBuilder(
@@ -1224,13 +1230,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                               const RoundSliderOverlayShape(overlayRadius: 14),
                         ),
                         child: Slider(
-                          value: progress.clamp(0.0, 1.0),
+                          value: _isSeeking
+                              ? _seekValue
+                              : progress.clamp(0.0, 1.0),
+                          onChangeStart: (v) {
+                            _isSeeking = true;
+                            _seekValue = v;
+                          },
                           onChanged: (v) {
+                            _seekValue = v;
+                            setState(() {});
+                          },
+                          onChangeEnd: (v) {
+                            _isSeeking = false;
                             if (dur != Duration.zero) {
                               _player.seek(Duration(
                                   milliseconds:
                                       (v * dur.inMilliseconds).round()));
                             }
+                            setState(() {});
                           },
                         ),
                       ),

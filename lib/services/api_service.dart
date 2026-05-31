@@ -732,6 +732,10 @@ class ApiService {
       name: 'LZ',
       baseUrl: 'https://cj.lziapi.com/api.php/provide/vod/',
     ),
+    VideoSource(
+      name: '1080ZYK',
+      baseUrl: 'https://api.1080zyku.com/inc/apijson.php/provide/vod/',
+    ),
   ];
 
   Future<List<ContentModel>> searchByTitleFromSource(
