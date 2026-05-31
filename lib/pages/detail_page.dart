@@ -123,6 +123,7 @@ class _DetailPageState extends State<DetailPage> {
     } else {
       // Initialize season from content subtitle if available
       _selectedSeason = _extractSeasonNumber() ?? 1;
+      _selectedSource = _torrentSource;
       _fetchTorrentStreams();
     }
   }
@@ -287,6 +288,7 @@ class _DetailPageState extends State<DetailPage> {
     setState(() {
       _torrentFailed = true;
       _isLoadingTorrents = false;
+      _selectedSource = ApiService.sources.first;
     });
     _refreshSourceEpisodes();
   }
@@ -300,6 +302,7 @@ class _DetailPageState extends State<DetailPage> {
       _torrentEpisodeCount = 0;
       _availableQualities = [];
       _availableEncoders = [];
+      _selectedSource = _torrentSource;
     });
     _selectedSeason = _extractSeasonNumber() ?? 1;
     _fetchTorrentStreams();
@@ -1822,7 +1825,7 @@ class _DetailPageState extends State<DetailPage> {
                   underline: const SizedBox(),
                   isDense: true,
                   items: [
-                    if (_isNonChineseContent && _torrentFailed)
+                    if (_isNonChineseContent)
                       const DropdownMenuItem(
                         value: _torrentSource,
                         child: Text(

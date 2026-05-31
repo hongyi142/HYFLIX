@@ -22,10 +22,12 @@ class Navbar extends StatelessWidget {
             ? 24.0
             : 48.0;
     final radius = layout.isPhone ? 14.0 : 18.0;
+    final topPadding = MediaQuery.of(context).padding.top;
+    final topMargin = topPadding + (layout.isPhone ? 10 : 14);
     return Container(
       margin: EdgeInsets.fromLTRB(
         horizontalMargin,
-        layout.isPhone ? 10 : 14,
+        topMargin,
         horizontalMargin,
         0,
       ),

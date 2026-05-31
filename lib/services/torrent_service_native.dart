@@ -28,9 +28,9 @@ class TorrentService {
 
       // Apply streaming-optimized configuration
       LibtorrentFlutter.instance.configureSession(const BtConfig(
-        cacheSize: 32 * 1024 * 1024,        // 32MB cache — small so playback starts fast
-        readerReadAhead: 20,                  // serve after 20% of cache filled (~6MB)
-        preloadCache: 10,                     // preload 10% of cache on start
+        cacheSize: 256 * 1024 * 1024,       // 256MB cache for smooth playback
+        readerReadAhead: 95,                  // (stored but unused by serve_range)
+        preloadCache: 40,                     // preload 40% of cache on start
         connectionsLimit: 80,                 // 80 concurrent piece requests (default 25)
         torrentDisconnectTimeout: 120,        // keep alive 2 minutes
         forceEncrypt: false,                  // allow both encrypted and plain
@@ -210,40 +210,26 @@ class TorrentService {
         return null;
       }
 
-      // Focus bandwidth on the target file for multi-file torrents
-      final files = engine.getFiles(torrentId);
-      if (files.length > 1) {
-        final priorities = List<int>.generate(
-          files.length,
-          (i) => i == stream.fileIdx ? 7 : 0,
-        );
-        engine.setFilePriorities(torrentId, priorities);
-        debugPrint('[TorrentService] Set file priorities: target=${stream.fileIdx} '
-            'out of ${files.length} files');
-      }
+      // IMPORTANT: Do NOT call setFilePriorities() before startStream().
+      // prioritize_files() is ASYNC — if it completes after startStream() sets
+      // per-piece priorities, it resets ALL piece priorities back to file-level
+      // defaults, undoing the sequential streaming setup and causing the player
+      // to wait for the entire file to download.
+      // startStream() handles piece prioritization internally (head/tail priority,
+      // sequential serving via serve_range).
 
-      // Use a small initial cache so playback starts quickly.
-      // readAheadPct controls how much of the cache must be filled before serving —
-      // 95% of 256MB = 243MB is why the player waits for the entire file to download.
       final streamInfo = engine.startStream(
         torrentId,
         fileIndex: stream.fileIdx,
-        maxCacheBytes: 32 * 1024 * 1024, // 32MB — enough for ~2min of 1080p
+        maxCacheBytes: 256 * 1024 * 1024, // 256MB piece cache
       );
       final url = streamInfo.url;
 
-      // Configure cache BEFORE preloading so read-ahead doesn't fight playback
-      engine.setCacheSettings(
-        streamInfo.id,
-        capacity: 32 * 1024 * 1024, // 32MB
-        readAheadPct: 20,            // serve as soon as ~6MB is buffered
-        connectionsLimit: 60,
-      );
+      // Preload head+tail of the file so the player has data to start.
+      // The library preloads ~8MB head + ~8MB tail by default.
+      engine.preloadStream(streamInfo.id, preloadBytes: 16 * 1024 * 1024);
 
-      // Preload enough data for the player to start (~4MB covers key frames + init)
-      engine.preloadStream(streamInfo.id, preloadBytes: 4 * 1024 * 1024);
-
-      debugPrint('[TorrentService] Stream started: $url (cache 32MB, readAhead 20%)');
+      debugPrint('[TorrentService] Stream started: $url');
       return url.isNotEmpty ? url : null;
     } catch (e, st) {
       debugPrint('[TorrentService] startStream error: $e\n$st');
