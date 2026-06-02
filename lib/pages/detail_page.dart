@@ -422,7 +422,7 @@ class _DetailPageState extends State<DetailPage> {
           title: tmdb?.englishTitle ?? widget.content.title,
           originalTitle: widget.content.title,
           episodes: const [],
-          initialEpisodeIndex: 0,
+          initialEpisodeIndex: episodeIndex,
           tmdbId: tmdb?.id?.toString(),
           isTvShow: _torrentEpisodeCount > 1,
           seasonNumber: _selectedSeason,

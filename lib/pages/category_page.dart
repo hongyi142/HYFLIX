@@ -8,11 +8,13 @@ import '../widgets/movie_card.dart';
 class CategoryPage extends StatefulWidget {
   final String title;
   final Future<List<ContentModel>> Function(int page) fetchFunction;
+  final List<ContentModel> initialItems;
 
   const CategoryPage({
     super.key,
     required this.title,
     required this.fetchFunction,
+    this.initialItems = const [],
   });
 
   @override
@@ -29,6 +31,10 @@ class _CategoryPageState extends State<CategoryPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialItems.isNotEmpty) {
+      _items.addAll(widget.initialItems);
+      _page = 2;
+    }
     _loadMore();
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=

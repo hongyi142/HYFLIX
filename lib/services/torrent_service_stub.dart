@@ -15,7 +15,15 @@ class TorrentService {
     int? episode,
   }) async => [];
 
-  Future<String?> startStream(TorrentStream stream) async => null;
+  Future<(String, int)?> startStream(TorrentStream stream) async => null;
+
+  Future<bool> waitForBuffer(
+    int streamId, {
+    double targetBufferSeconds = 10.0,
+    Duration timeout = const Duration(seconds: 20),
+  }) async => false;
+
+  Stream<Map<int, dynamic>>? get streamUpdates => null;
 
   Future<void> stopStream() async {}
 

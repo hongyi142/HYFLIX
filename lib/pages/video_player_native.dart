@@ -77,6 +77,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   String _torrentStatus = '';
   Timer? _statsTimer;
   Map<String, dynamic>? _torrentStats;
+  Map<String, dynamic>? _streamBufferInfo;
+  StreamSubscription<Map<int, dynamic>>? _streamInfoSub;
+  String? _torrentUrl;
 
   // Next episode autoplay
   bool _showAutoplay = false;
@@ -97,6 +100,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   // Scrubbing state — prevents seek on every drag pixel
   bool _isSeeking = false;
   double _seekValue = 0.0;
+
+  // Seek recovery for torrent streams
+  Timer? _seekRecoveryTimer;
 
   /// Effective episode count: uses episodes list length if available,
   /// otherwise falls back to episodeCount param (for torrent content).
@@ -166,10 +172,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
     });
 
-    final url = await TorrentService().startStream(stream);
+    final result = await TorrentService().startStream(stream);
     if (!mounted) return;
 
-    if (url == null) {
+    if (result == null) {
       debugPrint('[VideoPlayer] Torrent stream failed');
       setState(() {
         _isTorrentBuffering = false;
@@ -178,14 +184,90 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       return;
     }
 
-    debugPrint('[VideoPlayer] Torrent stream ready: $url');
+    final (url, streamId) = result;
+    _torrentUrl = url;
+
+    // Subscribe to stream updates for real-time buffer info in the overlay
+    _streamInfoSub = TorrentService().streamUpdates?.listen((streams) {
+      if (!mounted) return;
+      final info = streams[streamId];
+      if (info != null) {
+        setState(() {
+          _streamBufferInfo = {
+            'bufferSeconds': info.bufferSeconds,
+            'bufferPieces': info.bufferPieces,
+            'readaheadWindow': info.readaheadWindow,
+            'bufferPct': info.bufferPct,
+            'downloadRate': info.downloadRate,
+          };
+        });
+      }
+    });
+
+    // Update status while waiting for buffer
+    setState(() {
+      _torrentStatus = 'Preparing stream...';
+    });
+
+    // Wait for buffer to reach 10 seconds of video (or timeout after 20s)
+    // For 4K, this ensures enough data is buffered before mpv starts reading
+    final bufferReady = await TorrentService().waitForBuffer(
+      streamId,
+      targetBufferSeconds: 10.0,
+      timeout: const Duration(seconds: 20),
+    );
+
+    if (!mounted) return;
+
+    debugPrint('[VideoPlayer] Buffer ready: $bufferReady, opening media');
+    // Keep _streamInfoSub alive so the stats panel shows live buffer info
     setState(() {
       _isTorrentBuffering = false;
       _torrentStatus = '';
     });
 
+    await _configureMpvForTorrent();
     _openMedia(url, seekToSeconds: widget.seekToSeconds);
     _fetchSubtitles();
+  }
+
+  /// Configure mpv for torrent streaming — increase timeouts and enable
+  /// readahead so seeking into unbuffered regions doesn't cause a stall.
+  Future<void> _configureMpvForTorrent() async {
+    try {
+      final native = _player.platform as NativePlayer;
+      // Default is 5s; torrent HTTP server can block up to 60s waiting for pieces
+      await native.setProperty('network-timeout', '60');
+      // Keep 60s of video cached ahead of the playhead
+      await native.setProperty('cache-secs', '60');
+      // Demuxer readahead window — mpv prefetches data this far ahead
+      await native.setProperty('demuxer-readahead-secs', '60');
+      debugPrint('[VideoPlayer] Configured mpv for torrent streaming');
+    } catch (e) {
+      debugPrint('[VideoPlayer] Failed to configure mpv for torrent: $e');
+    }
+  }
+
+  /// Start a recovery timer for torrent seeks. If the player is still
+  /// buffering after [timeout], reopen the media at the seek target position.
+  /// This handles the case where mpv's HTTP connection stalls because the
+  /// torrent piece at the seek position isn't available yet.
+  void _startSeekRecovery(Duration target, {Duration timeout = const Duration(seconds: 15)}) {
+    _seekRecoveryTimer?.cancel();
+    if (widget.torrentStream == null || _torrentUrl == null) return;
+
+    _seekRecoveryTimer = Timer(timeout, () async {
+      if (!mounted) return;
+      // If still buffering after the timeout, reopen at the target position
+      if (_isTorrentBuffering || _player.state.buffering) {
+        debugPrint('[VideoPlayer] Seek recovery: reopening at ${target.inSeconds}s');
+        setState(() {
+          _isTorrentBuffering = true;
+          _torrentStatus = 'Reconnecting...';
+        });
+        await _openMedia(_torrentUrl!, seekToSeconds: target.inSeconds);
+      }
+    });
   }
 
   Future<void> _openMedia(String url, {int seekToSeconds = 0}) async {
@@ -202,7 +284,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           setState(() {
             if (widget.torrentStream != null) {
               _isTorrentBuffering = buffering;
-              if (buffering) _torrentStatus = 'Buffering...';
+              if (buffering) {
+                _torrentStatus = 'Buffering...';
+              } else {
+                // Playback recovered — cancel seek recovery timer
+                _seekRecoveryTimer?.cancel();
+              }
             }
           });
         }
@@ -318,6 +405,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     // Auto-advance when playback completes
     _completedSub = _player.stream.completed.listen((completed) {
       if (completed && mounted && !_autoPlaying) {
+        // For torrent streams, ignore spurious completed events caused by
+        // seeking into unbuffered regions — only advance if near the end.
+        if (widget.torrentStream != null) {
+          final pos = _player.state.position.inSeconds;
+          final dur = _player.state.duration.inSeconds;
+          if (dur > 0 && pos < dur - 10) {
+            debugPrint('[VideoPlayer] Ignoring spurious completed event '
+                '(pos=$pos, dur=$dur)');
+            _player.play();
+            return;
+          }
+        }
         final hasNext = _currentEpIndex < _effectiveEpisodeCount - 1;
         if (hasNext) {
           _playNextEpisode();
@@ -497,10 +596,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void dispose() {
     try {
       _cancelAutoplay();
+      _seekRecoveryTimer?.cancel();
       _bufferingSub?.cancel();
       _positionSub?.cancel();
       _statsTimer?.cancel();
       _audioTracksSub?.cancel();
+      _streamInfoSub?.cancel();
     } catch (e) {
       debugPrint('[VideoPlayer] Error cancelling subscriptions: $e');
     }
@@ -533,6 +634,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _bufferingSub?.cancel();
     _positionSub?.cancel();
     _audioTracksSub?.cancel();
+    _streamInfoSub?.cancel();
 
     // Capture player state before disposal
     final position = _player.state.position;
@@ -823,6 +925,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildBufferingOverlay() {
+    final bufferInfo = _streamBufferInfo;
+    final bufferPct = bufferInfo != null
+        ? ((bufferInfo['bufferPct'] as double? ?? 0) * 100).round()
+        : 0;
+    final bufferSecs = bufferInfo != null
+        ? (bufferInfo['bufferSeconds'] as double? ?? 0).toStringAsFixed(1)
+        : '0.0';
+
     return IgnorePointer(
       child: Container(
         color: Colors.black87,
@@ -830,15 +940,41 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(
-                width: 48,
-                height: 48,
-                child: CircularProgressIndicator(
-                  color: AppTheme.accent,
-                  strokeWidth: 3,
+              // Progress ring when buffer info is available, indeterminate spinner otherwise
+              if (bufferPct > 0)
+                SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircularProgressIndicator(
+                        value: bufferPct / 100,
+                        color: AppTheme.accent,
+                        backgroundColor: Colors.white12,
+                        strokeWidth: 4,
+                      ),
+                      Text(
+                        '$bufferPct%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                const SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(
+                    color: AppTheme.accent,
+                    strokeWidth: 3,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Text(
                 _torrentStatus.isNotEmpty ? _torrentStatus : 'Loading...',
                 style: const TextStyle(
@@ -847,10 +983,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              if (_torrentStats != null) ...[
-                const SizedBox(height: 12),
+              if (bufferInfo != null) ...[
+                const SizedBox(height: 8),
                 Text(
-                  '${_torrentStats!['numPeers'] ?? 0} peers connected',
+                  '${bufferSecs}s buffered',
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+              if (_torrentStats != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '${_formatBytes(_torrentStats!['downloadRate'] ?? 0)}/s  '
+                  '·  ${_torrentStats!['numPeers'] ?? 0} peers',
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
@@ -926,6 +1073,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               _statRow('Peers', '${stats['numPeers'] ?? 0}'),
               const SizedBox(height: 8),
               _statRow('Seeds', '${stats['numSeeds'] ?? 0}'),
+              if (_streamBufferInfo != null) ...[
+                const SizedBox(height: 8),
+                _statRow('Buffer',
+                    '${(_streamBufferInfo!['bufferSeconds'] as double? ?? 0).toStringAsFixed(1)}s '
+                    '(${_streamBufferInfo!['bufferPieces'] ?? 0}/${_streamBufferInfo!['readaheadWindow'] ?? 0} pieces)',
+                    color: (_streamBufferInfo!['bufferPct'] as double? ?? 0) >= 0.5
+                        ? Colors.green
+                        : Colors.orange),
+              ],
               const SizedBox(height: 8),
               _statRow('Progress',
                   '${((stats['progress'] as double? ?? 0) * 100).toStringAsFixed(1)}%'),
@@ -1244,9 +1400,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           onChangeEnd: (v) {
                             _isSeeking = false;
                             if (dur != Duration.zero) {
-                              _player.seek(Duration(
+                              final target = Duration(
                                   milliseconds:
-                                      (v * dur.inMilliseconds).round()));
+                                      (v * dur.inMilliseconds).round());
+                              _player.seek(target);
+                              _startSeekRecovery(target);
                             }
                             setState(() {});
                           },

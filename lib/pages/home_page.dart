@@ -313,6 +313,7 @@ class _HomePageState extends State<HomePage> {
                         builder: (_) => CategoryPage(
                           title: 'Movies',
                           fetchFunction: (p) => _api.fetchMovies(page: p),
+                          initialItems: _trendingMovies,
                         ),
                       ),
                     ),
@@ -333,6 +334,7 @@ class _HomePageState extends State<HomePage> {
                         builder: (_) => CategoryPage(
                           title: 'Series',
                           fetchFunction: (p) => _api.fetchTVSeries(page: p),
+                          initialItems: _trendingSeries,
                         ),
                       ),
                     ),
@@ -354,6 +356,7 @@ class _HomePageState extends State<HomePage> {
                           title: 'Chinese Series',
                           fetchFunction: (p) =>
                               _api.fetchChineseDramas(page: p),
+                          initialItems: _chineseDramas,
                         ),
                       ),
                     ),
@@ -374,6 +377,7 @@ class _HomePageState extends State<HomePage> {
                         builder: (_) => CategoryPage(
                           title: 'Chinese Animation',
                           fetchFunction: (p) => _api.fetchAnimation(page: p),
+                          initialItems: _chineseAnimation,
                         ),
                       ),
                     ),
@@ -394,6 +398,7 @@ class _HomePageState extends State<HomePage> {
                         builder: (_) => CategoryPage(
                           title: 'Korean Series',
                           fetchFunction: (p) => _api.fetchKoreanDramas(page: p),
+                          initialItems: _koreanDramas,
                         ),
                       ),
                     ),
@@ -415,6 +420,7 @@ class _HomePageState extends State<HomePage> {
                           title: 'Western Series',
                           fetchFunction: (p) =>
                               _api.fetchWesternSeries(page: p),
+                          initialItems: _westernSeries,
                         ),
                       ),
                     ),
@@ -436,6 +442,7 @@ class _HomePageState extends State<HomePage> {
                           title: 'Hong Kong Series',
                           fetchFunction: (p) =>
                               _api.fetchHongKongSeries(page: p),
+                          initialItems: _hongKongSeries,
                         ),
                       ),
                     ),

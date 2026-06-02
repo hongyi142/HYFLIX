@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/torrent_stream.dart';
 
@@ -15,8 +17,10 @@ class TorrentService {
 
   bool _initialized = false;
   int? _activeTorrentId;
+  int? _activeStreamId;
   TorrentInfo? _lastTorrentInfo;
   StreamSubscription<Map<int, TorrentInfo>>? _infoSub;
+  String? _torrentCacheDir;
 
   Future<void> _ensureInit() async {
     if (_initialized) return;
@@ -48,6 +52,28 @@ class TorrentService {
     } catch (e, st) {
       debugPrint('[TorrentService] Init failed: $e\n$st');
     }
+  }
+
+  /// Ensure the persistent torrent cache directory exists.
+  Future<String> _ensureCacheDir() async {
+    if (_torrentCacheDir != null) return _torrentCacheDir!;
+    final appDir = await getApplicationSupportDirectory();
+    final cacheDir = Directory('${appDir.path}${Platform.pathSeparator}torrent_cache');
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    _torrentCacheDir = cacheDir.path;
+    return _torrentCacheDir!;
+  }
+
+  /// Get a per-torrent save path for resume data caching.
+  Future<String> _savePathForTorrent(String infoHash) async {
+    final base = await _ensureCacheDir();
+    final dir = Directory('$base${Platform.pathSeparator}$infoHash');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir.path;
   }
 
   /// All Stremio addon base URLs to query for streams.
@@ -168,8 +194,8 @@ class TorrentService {
     return baseUrl;
   }
 
-  /// Start streaming a torrent. Returns the local HTTP URL for playback.
-  Future<String?> startStream(TorrentStream stream) async {
+  /// Start streaming a torrent. Returns the local HTTP URL and stream ID.
+  Future<(String url, int streamId)?> startStream(TorrentStream stream) async {
     await _ensureInit();
     if (!_initialized) return null;
 
@@ -183,7 +209,9 @@ class TorrentService {
       debugPrint('[TorrentService] Adding magnet: hash=$truncatedHash '
           'quality=${stream.quality} fileIdx=${stream.fileIdx}');
 
-      final torrentId = engine.addMagnet(stream.magnetUri, null, true);
+      // Use persistent save path so libtorrent can load resume data on repeat plays
+      final savePath = await _savePathForTorrent(stream.infoHash);
+      final torrentId = engine.addMagnet(stream.magnetUri, savePath, true);
       _activeTorrentId = torrentId;
       debugPrint('[TorrentService] Torrent added, id=$torrentId. Waiting for metadata...');
 
@@ -195,6 +223,7 @@ class TorrentService {
       });
 
       // Wait for metadata to be available (timeout after 60s)
+      // With resume data, this completes almost instantly (~200ms)
       await engine.torrentUpdates
           .where((map) => map[torrentId]?.hasMetadata == true)
           .first
@@ -223,21 +252,76 @@ class TorrentService {
         fileIndex: stream.fileIdx,
         maxCacheBytes: 256 * 1024 * 1024, // 256MB piece cache
       );
+      _activeStreamId = streamInfo.id;
+
+      // Tune per-stream cache for aggressive preloading
+      engine.setCacheSettings(
+        streamInfo.id,
+        capacity: 256 * 1024 * 1024,
+        readAheadPct: 90,
+        connectionsLimit: 120,
+      );
+
+      // Preload 32MB head+tail (doubled from 16MB for 4K streams)
+      engine.preloadStream(streamInfo.id, preloadBytes: 32 * 1024 * 1024);
+
       final url = streamInfo.url;
-
-      // Preload head+tail of the file so the player has data to start.
-      // The library preloads ~8MB head + ~8MB tail by default.
-      engine.preloadStream(streamInfo.id, preloadBytes: 16 * 1024 * 1024);
-
-      debugPrint('[TorrentService] Stream started: $url');
-      return url.isNotEmpty ? url : null;
+      debugPrint('[TorrentService] Stream started: $url (streamId=${streamInfo.id})');
+      return url.isNotEmpty ? (url, streamInfo.id) : null;
     } catch (e, st) {
       debugPrint('[TorrentService] startStream error: $e\n$st');
       return null;
     }
   }
 
-  /// Stop the active stream and remove the torrent.
+  /// Wait until the stream has buffered enough data for smooth playback.
+  /// Returns true if the target buffer was reached, false on timeout.
+  Future<bool> waitForBuffer(
+    int streamId, {
+    double targetBufferSeconds = 10.0,
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    final engine = LibtorrentFlutter.instance;
+
+    // Fast-path: check if buffer is already sufficient
+    final current = engine.getStreamInfo(streamId);
+    if (current != null && current.bufferSeconds >= targetBufferSeconds) {
+      debugPrint('[TorrentService] Buffer already at '
+          '${current.bufferSeconds.toStringAsFixed(1)}s, skipping wait');
+      return true;
+    }
+
+    final completer = Completer<bool>();
+    StreamSubscription<Map<int, StreamInfo>>? sub;
+    Timer? timeoutTimer;
+
+    sub = engine.streamUpdates.listen((streams) {
+      final info = streams[streamId];
+      if (info == null) return;
+
+      debugPrint('[TorrentService] Buffer: ${info.bufferSeconds.toStringAsFixed(1)}s '
+          '(${info.bufferPieces}/${info.readaheadWindow} pieces, '
+          '${info.downloadRate ~/ 1024} KB/s)');
+
+      if (info.bufferSeconds >= targetBufferSeconds) {
+        timeoutTimer?.cancel();
+        sub?.cancel();
+        if (!completer.isCompleted) completer.complete(true);
+      }
+    });
+
+    timeoutTimer = Timer(timeout, () {
+      sub?.cancel();
+      if (!completer.isCompleted) {
+        debugPrint('[TorrentService] Buffer timeout after ${timeout.inSeconds}s, starting anyway');
+        completer.complete(false);
+      }
+    });
+
+    return completer.future;
+  }
+
+  /// Stop the active stream and remove the torrent (preserves resume data).
   Future<void> stopStream() async {
     if (!_initialized) return;
     try {
@@ -247,7 +331,13 @@ class TorrentService {
         _infoSub = null;
         _lastTorrentInfo = null;
         final engine = LibtorrentFlutter.instance;
-        engine.disposeTorrent(_activeTorrentId!);
+        // Stop the HTTP streaming server first
+        if (_activeStreamId != null) {
+          engine.stopStream(_activeStreamId!);
+          _activeStreamId = null;
+        }
+        // Remove torrent but keep files + resume data for faster replay
+        engine.removeTorrent(_activeTorrentId!, deleteFiles: false);
         _activeTorrentId = null;
       }
     } catch (e, st) {
@@ -344,8 +434,20 @@ class TorrentService {
   }
 
   Future<void> dispose() async {
-    await stopStream();
     if (_initialized) {
+      // Final cleanup: stop stream and delete all cached data
+      if (_activeTorrentId != null) {
+        _infoSub?.cancel();
+        _infoSub = null;
+        _lastTorrentInfo = null;
+        final engine = LibtorrentFlutter.instance;
+        if (_activeStreamId != null) {
+          engine.stopStream(_activeStreamId!);
+          _activeStreamId = null;
+        }
+        engine.removeTorrent(_activeTorrentId!, deleteFiles: true);
+        _activeTorrentId = null;
+      }
       await LibtorrentFlutter.instance.dispose();
       _initialized = false;
       debugPrint('[TorrentService] Disposed');
