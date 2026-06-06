@@ -17,6 +17,10 @@ class VideoCard extends StatefulWidget {
   final VoidCallback? onWatchHistoryChanged;
   final double width;
   final EdgeInsetsGeometry margin;
+  /// Custom resume handler for Continue Watching cards.
+  /// When set, tapping a card with resume data calls this instead of the
+  /// default built-in resume logic. Arguments: episodeIndex, seekToSeconds.
+  final Future<void> Function(int episodeIndex, int seekToSeconds)? onResumeTap;
 
   const VideoCard({
     super.key,
@@ -24,6 +28,7 @@ class VideoCard extends StatefulWidget {
     this.onWatchHistoryChanged,
     this.width = 280,
     this.margin = const EdgeInsets.only(right: AppTheme.spacing24),
+    this.onResumeTap,
   });
 
   @override
@@ -271,7 +276,12 @@ class _VideoCardState extends State<VideoCard> {
     final hasResume = widget.content.resumeEpisodeIndex != null;
     final playableUrl = _isPlayableUrl(widget.content.m3u8Url);
 
-    if (hasResume && playableUrl) {
+    if (hasResume && widget.onResumeTap != null) {
+      widget.onResumeTap!(
+        widget.content.resumeEpisodeIndex!,
+        widget.content.resumePositionSeconds ?? 0,
+      ).then((_) => widget.onWatchHistoryChanged?.call());
+    } else if (hasResume && playableUrl) {
       // VOD content with valid URL — resume directly in player
       final epIndex = widget.content.resumeEpisodeIndex!;
       final videoUrl =

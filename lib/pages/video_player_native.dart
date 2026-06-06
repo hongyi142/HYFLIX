@@ -706,7 +706,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final currentEp = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
     if (currentEp != null || widget.videoUrl.isNotEmpty || widget.torrentStream != null) {
       await UserService.saveWatchHistory(
-        contentId: widget.tmdbId ?? widget.title,
+        contentId: widget.tmdbId ?? (widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title),
         title: widget.title,
         posterUrl: widget.posterUrl,
         progress: progress,

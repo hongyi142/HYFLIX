@@ -1,6 +1,8 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../core/proxy_url.dart';
 import '../core/responsive.dart';
 import '../main.dart' show routeObserver;
 import '../core/theme.dart';
@@ -17,7 +19,7 @@ import '../services/user_service.dart';
 import '../widgets/hero_card.dart';
 import '../widgets/movie_card.dart';
 import '../widgets/navbar.dart';
-import '../widgets/video_card.dart';
+import 'video_player_screen.dart';
 import '../widgets/horizontal_scroll_wrapper.dart';
 import '../widgets/buttons.dart';
 
@@ -174,6 +176,57 @@ class _HomePageState extends State<HomePage> with RouteAware {
     await _loadContent();
   }
 
+  /// Resume a Continue Watching item with a fresh TMDB + provider match.
+  /// Mirrors the profile page's _resumeWatching logic.
+  Future<void> _resumeFromHistory(ContentModel item, int epIdx, int posSec) async {
+    if (!mounted) return;
+    final title = item.title;
+
+    showDialog(context: context, barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2)));
+
+    try {
+      final tmdb = await TmdbService.search(title, year: item.year);
+      final content = await ApiService().matchTmdbToProvider(
+        tmdb ?? TmdbResult(englishTitle: title, overview: '', posterUrl: '', backdropUrl: ''),
+      );
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss loading
+
+      if (content == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Content not found')));
+        return;
+      }
+
+      final videoUrl = content.episodes.isNotEmpty && epIdx < content.episodes.length
+          ? content.episodes[epIdx].url
+          : content.m3u8Url;
+      final epName = content.episodes.isNotEmpty && epIdx < content.episodes.length
+          ? content.episodes[epIdx].name
+          : '';
+      final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+          ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+
+      Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+        videoUrl: videoUrl,
+        title: content.title,
+        originalTitle: title,
+        episodes: content.episodes,
+        initialEpisodeIndex: epIdx,
+        tmdbId: tmdb?.id?.toString(),
+        isTvShow: content.episodes.length > 1,
+        seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
+        posterUrl: content.thumbnailUrl,
+        seekToSeconds: posSec,
+      )));
+    } catch (_) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load')));
+      }
+    }
+  }
+
   @override
   void dispose() {
     routeObserver.unsubscribe(this);
@@ -256,10 +309,15 @@ class _HomePageState extends State<HomePage> with RouteAware {
         match ??= allContent.where((c) => c.title == title).firstOrNull;
       }
 
-      // Deduplicate by tmdbId or title
-      final dedupeKey = tmdbId.isNotEmpty ? tmdbId : (originalTitle.isNotEmpty ? originalTitle : title);
-      if (seenIds.contains(dedupeKey)) continue;
-      seenIds.add(dedupeKey);
+      // Deduplicate using all available keys so the same show can't appear twice
+      // even if different saves used different identifiers (tmdbId vs title).
+      final dedupeKeys = <String>[
+        if (tmdbId.isNotEmpty) tmdbId,
+        if (originalTitle.isNotEmpty) originalTitle,
+        if (title.isNotEmpty) title,
+      ];
+      if (dedupeKeys.any(seenIds.contains)) continue;
+      seenIds.addAll(dedupeKeys);
 
       final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
       final positionSeconds =
@@ -337,13 +395,14 @@ class _HomePageState extends State<HomePage> with RouteAware {
                     title: 'Continue Watching',
                     height: layout.landscapeCardWidth * 0.565 + 84,
                     count: watchingItems.length,
-                    builder: (i) => VideoCard(
+                    builder: (i) => _ContinueWatchingCard(
                       content: watchingItems[i],
-                      width: layout.landscapeCardWidth,
+                      cardWidth: layout.landscapeCardWidth,
                       margin: EdgeInsets.only(
                         right: layout.isPhone ? 16 : AppTheme.spacing24,
                       ),
-                      onWatchHistoryChanged: _refreshWatchHistory,
+                      onResume: (epIdx, posSec) =>
+                          _resumeFromHistory(watchingItems[i], epIdx, posSec),
                     ),
                   ),
                 if (_trendingMovies.isNotEmpty)
@@ -646,15 +705,234 @@ class _HomePageState extends State<HomePage> with RouteAware {
             break;
         }
       },
-      destinations: const [
-        NavigationDestination(icon: Icon(LucideIcons.home), label: 'Home'),
-        NavigationDestination(icon: Icon(LucideIcons.compass), label: 'Browse'),
+      destinations: [
+        NavigationDestination(icon: const Icon(LucideIcons.home), label: TmdbService.currentLanguage == 'zh-CN' ? '首页' : 'Home'),
+        NavigationDestination(icon: const Icon(LucideIcons.compass), label: TmdbService.currentLanguage == 'zh-CN' ? '浏览' : 'Browse'),
         NavigationDestination(
-          icon: Icon(LucideIcons.listVideo),
-          label: 'My List',
+          icon: const Icon(LucideIcons.listVideo),
+          label: TmdbService.currentLanguage == 'zh-CN' ? '我的' : 'My List',
         ),
-        NavigationDestination(icon: Icon(LucideIcons.user), label: 'Profile'),
+        NavigationDestination(icon: const Icon(LucideIcons.user), label: TmdbService.currentLanguage == 'zh-CN' ? '个人' : 'Profile'),
       ],
+    );
+  }
+}
+
+// ── Continue Watching Card (profile-page design) ──────────────────
+
+class _ContinueWatchingCard extends StatefulWidget {
+  final ContentModel content;
+  final double cardWidth;
+  final EdgeInsetsGeometry margin;
+  final Future<void> Function(int episodeIndex, int seekToSeconds) onResume;
+
+  const _ContinueWatchingCard({
+    required this.content,
+    required this.cardWidth,
+    required this.onResume,
+    this.margin = EdgeInsets.zero,
+  });
+
+  @override
+  State<_ContinueWatchingCard> createState() => _ContinueWatchingCardState();
+}
+
+class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  static String _fmtTime(int s) {
+    final h = s ~/ 3600, m = (s % 3600) ~/ 60;
+    return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.content.title;
+    final poster = widget.content.thumbnailUrl;
+    final progress = widget.content.progress;
+    final epIdx = widget.content.resumeEpisodeIndex ?? 0;
+    final posSec = widget.content.resumePositionSeconds ?? 0;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() { _hovered = false; _pressed = false; }),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTap: () => widget.onResume(epIdx, posSec),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          transform: _pressed
+              ? (Matrix4.identity()..scale(0.97))
+              : _hovered
+                  ? (Matrix4.identity()..scale(1.03))
+                  : Matrix4.identity(),
+          transformAlignment: Alignment.center,
+          margin: widget.margin,
+          width: widget.cardWidth,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _doubleBezel(
+                  borderRadius: 20,
+                  outerPadding: 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(17),
+                    child: Stack(fit: StackFit.expand, children: [
+                      Image.network(
+                        proxyImageUrl(poster),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: const Color(0xFF111114),
+                          child: Center(
+                            child: Icon(LucideIcons.film,
+                                color: Colors.white.withOpacity(0.15), size: 24),
+                          ),
+                        ),
+                      ),
+                      // Gradient scrim
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: 80,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Play button — glass morphed (visible on hover)
+                      if (_hovered)
+                        Center(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.15), width: 1),
+                                ),
+                                child: const Icon(LucideIcons.play,
+                                    color: Colors.white, size: 22),
+                              ),
+                            ),
+                          ),
+                        ),
+                      // Badges
+                      Positioned(top: 10, left: 10, child: _glassBadge('E${epIdx + 1}')),
+                      Positioned(top: 10, right: 10, child: _glassBadge(_fmtTime(posSec))),
+                      // Progress bar
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: SizedBox(
+                          height: 3,
+                          child: LinearProgressIndicator(
+                            value: progress.clamp(0.0, 1.0),
+                            backgroundColor: Colors.white.withOpacity(0.06),
+                            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                '${(progress * 100).round()}% watched',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.3),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _doubleBezel({
+    required double borderRadius,
+    required double outerPadding,
+    required Widget child,
+  }) {
+    return Container(
+      padding: EdgeInsets.all(outerPadding),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(borderRadius + outerPadding),
+        color: Colors.white.withOpacity(0.06),
+        border: Border.all(color: Colors.white.withOpacity(0.08), width: 1),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(borderRadius),
+          color: const Color(0xFF0C0C0F),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.4),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _glassBadge(String text) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.45),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white.withOpacity(0.12), width: 1),
+          ),
+          child: Text(
+            text,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.85),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

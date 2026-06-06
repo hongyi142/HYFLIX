@@ -6,12 +6,16 @@ import '../core/theme.dart';
 import '../pages/search_page.dart';
 import '../pages/profile_page.dart';
 import '../services/auth_service.dart';
+import '../services/tmdb_service.dart';
 import '../pages/browse_page.dart';
 import '../pages/my_list_page.dart';
 
 class Navbar extends StatelessWidget {
   final bool isScrolled;
   const Navbar({super.key, this.isScrolled = false});
+
+  static bool get _isZh => TmdbService.currentLanguage == 'zh-CN';
+  static String _label(String en, String zh) => _isZh ? zh : en;
 
   @override
   Widget build(BuildContext context) {
@@ -79,11 +83,11 @@ class Navbar extends StatelessWidget {
         ),
         Row(
           children: [
-            _NavLink(title: 'Home', isActive: true),
-            _NavLink(title: 'Movies', onTap: () => _openMovies(context)),
-            _NavLink(title: 'TV Shows', onTap: () => _openTvShows(context)),
-            _NavLink(title: 'Animation', onTap: () => _openAnimation(context)),
-            _NavLink(title: 'My List', onTap: () => _openMyList(context)),
+            _NavLink(title: _label('Home', '首页'), isActive: true),
+            _NavLink(title: _label('Movies', '电影'), onTap: () => _openMovies(context)),
+            _NavLink(title: _label('TV Shows', '电视剧'), onTap: () => _openTvShows(context)),
+            _NavLink(title: _label('Animation', '动漫'), onTap: () => _openAnimation(context)),
+            _NavLink(title: _label('My List', '我的'), onTap: () => _openMyList(context)),
           ],
         ),
         Row(
@@ -150,12 +154,12 @@ class Navbar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _MobileMenuItem(
-                  label: 'Home',
+                  label: _label('Home', '首页'),
                   icon: LucideIcons.home,
                   onTap: () => Navigator.pop(context),
                 ),
                 _MobileMenuItem(
-                  label: 'Movies',
+                  label: _label('Movies', '电影'),
                   icon: LucideIcons.clapperboard,
                   onTap: () {
                     Navigator.pop(context);
@@ -163,7 +167,7 @@ class Navbar extends StatelessWidget {
                   },
                 ),
                 _MobileMenuItem(
-                  label: 'TV Shows',
+                  label: _label('TV Shows', '电视剧'),
                   icon: LucideIcons.tv,
                   onTap: () {
                     Navigator.pop(context);
@@ -171,7 +175,7 @@ class Navbar extends StatelessWidget {
                   },
                 ),
                 _MobileMenuItem(
-                  label: 'Animation',
+                  label: _label('Animation', '动漫'),
                   icon: LucideIcons.sparkles,
                   onTap: () {
                     Navigator.pop(context);
@@ -179,7 +183,7 @@ class Navbar extends StatelessWidget {
                   },
                 ),
                 _MobileMenuItem(
-                  label: 'My List',
+                  label: _label('My List', '我的'),
                   icon: LucideIcons.listVideo,
                   onTap: () {
                     Navigator.pop(context);

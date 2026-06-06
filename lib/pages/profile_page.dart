@@ -490,22 +490,26 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             final tileW = (constraints.maxWidth - gap) / 2;
             return Column(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _statCard(tileW, 'WATCH TIME', _fmtTime(_profile?.watchTimeSeconds ?? 0), LucideIcons.clock),
-                    SizedBox(width: gap),
-                    _statCard(tileW, 'COMPLETION', '$rate%', LucideIcons.pieChart),
-                  ],
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _statCard(tileW, 'WATCH TIME', _fmtTime(_profile?.watchTimeSeconds ?? 0), LucideIcons.clock),
+                      SizedBox(width: gap),
+                      _statCard(tileW, 'COMPLETION', '$rate%', LucideIcons.pieChart),
+                    ],
+                  ),
                 ),
                 SizedBox(height: gap),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _statCard(tileW, 'SHOWS', '$_totalShowsWatched', LucideIcons.clapperboard),
-                    SizedBox(width: gap),
-                    _streakCard(tileW, days, todayWd),
-                  ],
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _statCard(tileW, 'SHOWS', '$_totalShowsWatched', LucideIcons.clapperboard),
+                      SizedBox(width: gap),
+                      _streakCard(tileW, days, todayWd),
+                    ],
+                  ),
                 ),
               ],
             );
@@ -515,17 +519,19 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           final col2 = (constraints.maxWidth - gap * 3) * 0.2;
           final col3 = (constraints.maxWidth - gap * 3) * 0.2;
           final col4 = (constraints.maxWidth - gap * 3) * 0.3;
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _statCard(col1, 'WATCH TIME', _fmtTime(_profile?.watchTimeSeconds ?? 0), LucideIcons.clock),
-              SizedBox(width: gap),
-              _statCard(col2, 'COMPLETION', '$rate%', LucideIcons.pieChart),
-              SizedBox(width: gap),
-              _statCard(col3, 'SHOWS', '$_totalShowsWatched', LucideIcons.clapperboard),
-              SizedBox(width: gap),
-              _streakCard(col4, days, todayWd),
-            ],
+          return IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _statCard(col1, 'WATCH TIME', _fmtTime(_profile?.watchTimeSeconds ?? 0), LucideIcons.clock),
+                SizedBox(width: gap),
+                _statCard(col2, 'COMPLETION', '$rate%', LucideIcons.pieChart),
+                SizedBox(width: gap),
+                _statCard(col3, 'SHOWS', '$_totalShowsWatched', LucideIcons.clapperboard),
+                SizedBox(width: gap),
+                _streakCard(col4, days, todayWd),
+              ],
+            ),
           );
         },
       ),
@@ -1333,7 +1339,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 }
 
-// ── Magnetic Button — Spring Hover + Press ─────────────────────────
+// ── Magnetic Button — Hover + Press ────────────────────────────────
 
 class _MagneticBtn extends StatefulWidget {
   final Widget child;
@@ -1344,55 +1350,29 @@ class _MagneticBtn extends StatefulWidget {
   State<_MagneticBtn> createState() => _MagneticBtnState();
 }
 
-class _MagneticBtnState extends State<_MagneticBtn> with SingleTickerProviderStateMixin {
+class _MagneticBtnState extends State<_MagneticBtn> {
   bool _hovered = false;
   bool _pressed = false;
-  late final AnimationController _spring;
-  late Animation<double> _scaleAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _spring = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _scaleAnim = Tween<double>(begin: 1.0, end: 1.0).animate(
-      CurvedAnimation(parent: _spring, curve: const Cubic(0.32, 0.72, 0, 1)),
-    );
-  }
-
-  void _updateScale() {
-    final target = _pressed ? 0.97 : (_hovered ? 1.03 : 1.0);
-    _scaleAnim = Tween<double>(
-      begin: _scaleAnim.value,
-      end: target,
-    ).animate(CurvedAnimation(parent: _spring, curve: const Cubic(0.32, 0.72, 0, 1)));
-    _spring.forward(from: 0);
-  }
-
-  @override
-  void dispose() {
-    _spring.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      onEnter: (_) => setState(() { _hovered = true; _updateScale(); }),
-      onExit: (_) => setState(() { _hovered = false; _pressed = false; _updateScale(); }),
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() { _hovered = false; _pressed = false; }),
       child: GestureDetector(
-        onTapDown: (_) => setState(() { _pressed = true; _updateScale(); }),
-        onTapUp: (_) => setState(() { _pressed = false; _updateScale(); }),
-        onTapCancel: () => setState(() { _pressed = false; _updateScale(); }),
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
         onTap: widget.onTap,
-        child: AnimatedBuilder(
-          animation: _spring,
-          builder: (context, child) => Transform.scale(
-            scale: _scaleAnim.value,
-            child: child,
-          ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          transform: _pressed
+              ? (Matrix4.identity()..scale(0.97))
+              : _hovered
+                  ? (Matrix4.identity()..scale(1.03))
+                  : Matrix4.identity(),
+          transformAlignment: Alignment.center,
           child: widget.child,
         ),
       ),

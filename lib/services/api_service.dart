@@ -222,6 +222,13 @@ class ApiService {
     }
   }
 
+  static int? _parseIntField(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
   Future<List<Map<String, dynamic>>> _fetchRaw(Uri uri) async {
     try {
       final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
@@ -301,8 +308,8 @@ class ApiService {
     final englishNormalized = _normalizeText(tmdb.englishTitle);
     final originalNormalized = _normalizeText(tmdb.originalTitle);
     final providerYear = (raw['vod_year'] as String? ?? '').trim();
-    final typeId = (raw['type_id'] as num?)?.toInt();
-    final typeId1 = (raw['type_id_1'] as num?)?.toInt();
+    final typeId = _parseIntField(raw['type_id']);
+    final typeId1 = _parseIntField(raw['type_id_1']);
     final genreClass = (raw['vod_class'] as String? ?? '').toLowerCase();
 
     var score = 0;

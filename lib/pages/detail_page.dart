@@ -59,7 +59,7 @@ class _DetailPageState extends State<DetailPage> {
   final _downloadService = DownloadService();
   bool _isListed = false;
 
-  VideoSource _selectedSource = ApiService.sources.first;
+  VideoSource _selectedSource = ApiService.defaultSource ?? ApiService.sources.first;
   List<Episode>? _sourceEpisodes;
   bool _isLoadingEpisodes = false;
   List<String> _cast = [];
