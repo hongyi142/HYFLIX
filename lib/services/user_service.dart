@@ -18,10 +18,13 @@ class UserService {
     required String posterUrl,
     required double progress,
     String originalTitle = '',
+    String tmdbId = '',
     int episodeIndex = 0,
     int positionSeconds = 0,
     String m3u8Url = '',
     List<Map<String, dynamic>> episodes = const [],
+    int episodeCount = 0,
+    int seasonNumber = 1,
   }) async {
     await FirestoreService.saveWatchHistory(
       contentId: contentId,
@@ -29,10 +32,13 @@ class UserService {
       posterUrl: posterUrl,
       progress: progress,
       originalTitle: originalTitle,
+      tmdbId: tmdbId,
       episodeIndex: episodeIndex,
       positionSeconds: positionSeconds,
       m3u8Url: m3u8Url,
       episodes: episodes,
+      episodeCount: episodeCount,
+      seasonNumber: seasonNumber,
     );
   }
 
@@ -100,5 +106,27 @@ class UserService {
 
   static Future<String> getDefaultSource() async {
     return await FirestoreService.getDefaultSource();
+  }
+
+  // ── Watchlists ───────────────────────────────────────────────────────
+
+  static Future<void> saveWatchlist(String listName, List<Map<String, dynamic>> items) async {
+    await FirestoreService.saveWatchlist(listName, items);
+  }
+
+  static Future<void> addToList(String listName, Map<String, dynamic> item) async {
+    await FirestoreService.addToList(listName, item);
+  }
+
+  static Future<void> removeFromList(String listName, String title) async {
+    await FirestoreService.removeFromList(listName, title);
+  }
+
+  static Future<void> deleteWatchlist(String listName) async {
+    await FirestoreService.deleteWatchlist(listName);
+  }
+
+  static Future<Map<String, List<Map<String, dynamic>>>> getWatchlists() async {
+    return await FirestoreService.getWatchlists();
   }
 }

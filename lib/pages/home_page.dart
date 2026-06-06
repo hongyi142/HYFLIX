@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../core/responsive.dart';
+import '../main.dart' show routeObserver;
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
@@ -52,7 +53,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with RouteAware {
   static _HomePageState? _instance;
   final ApiService _api = ApiService();
   List<ContentModel> _trendingMovies = [];
@@ -95,6 +96,17 @@ class _HomePageState extends State<HomePage> {
         setState(() => _isScrolled = isScrolled);
       }
     });
+
+    // Subscribe to route observer to refresh watch history when returning
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      routeObserver.subscribe(this, ModalRoute.of(context)!);
+    });
+  }
+
+  @override
+  void didPopNext() {
+    // Refresh watch history when returning to this page
+    _refreshWatchHistory();
   }
 
   Future<void> _loadContent() async {
@@ -157,8 +169,14 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// Pull-to-refresh: reload all content and watch history.
+  Future<void> _refreshAll() async {
+    await _loadContent();
+  }
+
   @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     _instance = null;
     _scrollController.dispose();
     super.dispose();
@@ -205,49 +223,75 @@ class _HomePageState extends State<HomePage> {
       ..._providerContent,
     ];
     final watchingItems = <ContentModel>[];
-    final seenTitles = <String>{};
+    final seenIds = <String>{};
     for (final history in _watchHistory) {
       if (watchingItems.length >= 8) break;
 
       final title = history['title'] as String? ?? '';
       final originalTitle = history['originalTitle'] as String? ?? '';
+      final tmdbId = history['tmdbId'] as String? ?? '';
       final posterUrl = history['posterUrl'] as String? ?? '';
       final progress = (history['progress'] as num?)?.toDouble() ?? 0.0;
+      final savedM3u8Url = history['m3u8Url'] as String? ?? '';
+      final savedEpisodesRaw = history['episodes'] as List<dynamic>?;
+      final isTorrentContent = savedM3u8Url.isEmpty && (savedEpisodesRaw == null || savedEpisodesRaw.isEmpty);
 
+      // Match by tmdbId first (most reliable), then by title
+      // Skip matching for torrent content — use fallback path for _resumeTorrentPlayback
       ContentModel? match;
-      if (originalTitle.isNotEmpty) {
+      if (!isTorrentContent && tmdbId.isNotEmpty) {
+        final tmdbResult = _trendingTmdb.values
+            .where((t) => t.id?.toString() == tmdbId)
+            .firstOrNull;
+        if (tmdbResult != null) {
+          match = allContent
+              .where((c) => c.title == tmdbResult.englishTitle)
+              .firstOrNull;
+        }
+      }
+      if (!isTorrentContent && match == null && originalTitle.isNotEmpty) {
         match = allContent.where((c) => c.title == originalTitle).firstOrNull;
       }
-      match ??= allContent.where((c) => c.title == title).firstOrNull;
+      if (!isTorrentContent) {
+        match ??= allContent.where((c) => c.title == title).firstOrNull;
+      }
 
-      final finalTitle =
-          match?.title ?? (originalTitle.isNotEmpty ? originalTitle : title);
-      if (seenTitles.contains(finalTitle)) continue;
-      seenTitles.add(finalTitle);
+      // Deduplicate by tmdbId or title
+      final dedupeKey = tmdbId.isNotEmpty ? tmdbId : (originalTitle.isNotEmpty ? originalTitle : title);
+      if (seenIds.contains(dedupeKey)) continue;
+      seenIds.add(dedupeKey);
+
+      final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
+      final positionSeconds =
+          (history['positionSeconds'] as num?)?.toInt() ?? 0;
 
       if (match != null) {
-        final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
-        final positionSeconds =
-            (history['positionSeconds'] as num?)?.toInt() ?? 0;
         watchingItems.add(
           match.copyWith(
+            title: title.isNotEmpty ? title : match.title,
+            thumbnailUrl: posterUrl.isNotEmpty ? posterUrl : match.thumbnailUrl,
+            bannerUrl: posterUrl.isNotEmpty ? posterUrl : match.bannerUrl,
             progress: progress,
             resumeEpisodeIndex: episodeIndex,
             resumePositionSeconds: positionSeconds,
           ),
         );
-      } else if (title.isNotEmpty) {
-        final savedM3u8Url = history['m3u8Url'] as String? ?? '';
-        final episodeIndex = (history['episodeIndex'] as num?)?.toInt() ?? 0;
-        final positionSeconds =
-            (history['positionSeconds'] as num?)?.toInt() ?? 0;
-        final savedEpisodes = (history['episodes'] as List<dynamic>?)
+      } else if (title.isNotEmpty || originalTitle.isNotEmpty) {
+        final savedEpisodes = savedEpisodesRaw
                 ?.map((e) => Episode.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [];
+        // For torrent content with no saved episodes, create placeholder episodes
+        // so the resume flow can detect it as a multi-episode show
+        final episodeCount = (history['episodeCount'] as num?)?.toInt() ?? 0;
+        final effectiveEpisodes = savedEpisodes.isNotEmpty
+            ? savedEpisodes
+            : (episodeCount > 1
+                ? List.generate(episodeCount, (i) => Episode(name: 'Episode ${i + 1}', url: ''))
+                : const <Episode>[]);
         watchingItems.add(
           ContentModel(
-            title: finalTitle,
+            title: originalTitle.isNotEmpty ? originalTitle : title,
             subtitle: '',
             description: '',
             thumbnailUrl: posterUrl,
@@ -255,7 +299,7 @@ class _HomePageState extends State<HomePage> {
             m3u8Url: savedM3u8Url,
             year: '',
             rating: 0,
-            episodes: savedEpisodes,
+            episodes: effectiveEpisodes,
             progress: progress,
             resumeEpisodeIndex: episodeIndex,
             resumePositionSeconds: positionSeconds,
@@ -271,12 +315,17 @@ class _HomePageState extends State<HomePage> {
       body: Stack(
         children: [
           Container(color: AppTheme.background),
-          SingleChildScrollView(
-            controller: _scrollController,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(height: layout.topSafeSpacing),
+          RefreshIndicator(
+            color: AppTheme.accent,
+            backgroundColor: const Color(0xFF1A1F2E),
+            onRefresh: _refreshAll,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(height: layout.topSafeSpacing),
                 if (heroItems.isNotEmpty)
                   HeroSection(
                     featuredContent: heroItems,
@@ -451,6 +500,7 @@ class _HomePageState extends State<HomePage> {
                   height: layout.usesBottomNav ? 104 : AppTheme.spacing64,
                 ),
               ],
+            ),
             ),
           ),
           Positioned(

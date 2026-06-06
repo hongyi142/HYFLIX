@@ -11,6 +11,8 @@ import 'services/download_service.dart';
 import 'services/api_service.dart';
 import 'services/watchlist_service.dart';
 
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -60,6 +62,7 @@ class _HyflixAppState extends State<HyflixApp> {
       title: 'HYFLIX',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
+      navigatorObservers: [routeObserver],
       home: _isLoggedIn ? const SplashPage() : const AuthPage(),
     );
   }

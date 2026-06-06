@@ -224,7 +224,7 @@ class _MyListPageState extends State<MyListPage> {
                                       listName != 'My Downloads') ...[
                                     const SizedBox(width: 8),
                                     GestureDetector(
-                                      onTap: () => _watchlistService.deleteList(
+                                      onTap: () async => await _watchlistService.deleteList(
                                         listName,
                                       ),
                                       child: const Icon(
@@ -646,7 +646,7 @@ class _MyListPageState extends State<MyListPage> {
                 top: 8,
                 right: 8,
                 child: GestureDetector(
-                  onTap: () => _watchlistService.removeFromList(
+                  onTap: () async => await _watchlistService.removeFromList(
                     _selectedList,
                     item.title,
                   ),

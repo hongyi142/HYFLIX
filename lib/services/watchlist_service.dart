@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/content_model.dart';
+import 'auth_service.dart';
+import 'user_service.dart';
 
 class WatchlistService extends ChangeNotifier {
   static final WatchlistService _instance = WatchlistService._internal();
@@ -23,6 +25,37 @@ class WatchlistService extends ChangeNotifier {
     } else {
       _prefs?.setStringList(_listsKey, _listNames);
     }
+    // Sync from Firebase if logged in
+    if (AuthService.isLoggedIn) {
+      await syncFromCloud();
+    }
+  }
+
+  /// Pull watchlists from Firebase and merge with local data.
+  Future<void> syncFromCloud() async {
+    try {
+      final cloudLists = await UserService.getWatchlists();
+      if (cloudLists.isEmpty) return;
+
+      // Merge cloud lists into local
+      for (final entry in cloudLists.entries) {
+        final listName = entry.key;
+        final cloudItems = entry.value;
+
+        if (!_listNames.contains(listName)) {
+          _listNames.add(listName);
+        }
+
+        // Cloud items take precedence — replace local list
+        _prefs?.setString('$_listPrefix$listName', json.encode(cloudItems));
+      }
+
+      // Save updated list names locally
+      _prefs?.setStringList(_listsKey, _listNames);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[WatchlistService] syncFromCloud error: $e');
+    }
   }
 
   List<String> get listNames => List.unmodifiable(_listNames);
@@ -32,14 +65,23 @@ class WatchlistService extends ChangeNotifier {
     _listNames.add(name.trim());
     _prefs?.setStringList(_listsKey, _listNames);
     notifyListeners();
+    // No need to push to Firebase — empty lists are created implicitly when items are added
   }
 
-  void deleteList(String name) {
+  Future<void> deleteList(String name) async {
     if (name == 'My List') return; // Cannot delete default
     _listNames.remove(name);
     _prefs?.setStringList(_listsKey, _listNames);
     _prefs?.remove('$_listPrefix$name');
     notifyListeners();
+    // Delete from Firebase
+    if (AuthService.isLoggedIn) {
+      try {
+        await UserService.deleteWatchlist(name);
+      } catch (e) {
+        debugPrint('[WatchlistService] deleteList cloud error: $e');
+      }
+    }
   }
 
   List<ContentModel> getListItems(String listName) {
@@ -58,17 +100,33 @@ class WatchlistService extends ChangeNotifier {
     return items.any((item) => item.title == title);
   }
 
-  void addToList(String listName, ContentModel content) {
+  Future<void> addToList(String listName, ContentModel content) async {
     final items = getListItems(listName);
     if (items.any((item) => item.title == content.title)) return; // Already exists
     items.insert(0, content); // Add to top
     _saveList(listName, items);
+    // Push to Firebase
+    if (AuthService.isLoggedIn) {
+      try {
+        await UserService.addToList(listName, content.toJson());
+      } catch (e) {
+        debugPrint('[WatchlistService] addToList cloud error: $e');
+      }
+    }
   }
 
-  void removeFromList(String listName, String title) {
+  Future<void> removeFromList(String listName, String title) async {
     final items = getListItems(listName);
     items.removeWhere((item) => item.title == title);
     _saveList(listName, items);
+    // Remove from Firebase
+    if (AuthService.isLoggedIn) {
+      try {
+        await UserService.removeFromList(listName, title);
+      } catch (e) {
+        debugPrint('[WatchlistService] removeFromList cloud error: $e');
+      }
+    }
   }
 
   void _saveList(String listName, List<ContentModel> items) {

@@ -40,21 +40,27 @@ class FirestoreService {
     required String posterUrl,
     required double progress,
     String originalTitle = '',
+    String tmdbId = '',
     int episodeIndex = 0,
     int positionSeconds = 0,
     String m3u8Url = '',
     List<Map<String, dynamic>> episodes = const [],
+    int episodeCount = 0,
+    int seasonNumber = 1,
   }) async {
     final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
     await _put('$_usersPath/watchHistory/$safeId.json', {
       'title': title,
       'originalTitle': originalTitle,
+      'tmdbId': tmdbId,
       'posterUrl': posterUrl,
       'progress': progress,
       'episodeIndex': episodeIndex,
       'positionSeconds': positionSeconds,
       'm3u8Url': m3u8Url,
       'episodes': episodes,
+      'episodeCount': episodeCount,
+      'seasonNumber': seasonNumber,
       'lastWatched': DateTime.now().toUtc().toIso8601String(),
     });
   }
@@ -154,6 +160,67 @@ class FirestoreService {
     return favsMap.keys.toList();
   }
 
+  // ── Watchlists ───────────────────────────────────────────────────────
+
+  static String _encodeListName(String name) =>
+      name.replaceAll(RegExp(r'[.\#\$\[\]/]'), '_');
+
+  /// Save an entire list's items to Firebase (replaces existing).
+  static Future<void> saveWatchlist(String listName, List<Map<String, dynamic>> items) async {
+    final safeName = _encodeListName(listName);
+    final itemsMap = <String, dynamic>{};
+    for (final item in items) {
+      final title = (item['title'] as String?) ?? '';
+      if (title.isEmpty) continue;
+      final safeTitle = title.replaceAll(RegExp(r'[.\#\$\[\]/]'), '_');
+      itemsMap[safeTitle] = item;
+    }
+    await _put('$_usersPath/watchlists/$safeName/items.json', itemsMap);
+  }
+
+  /// Add a single item to a list in Firebase.
+  static Future<void> addToList(String listName, Map<String, dynamic> item) async {
+    final safeName = _encodeListName(listName);
+    final title = (item['title'] as String?) ?? '';
+    if (title.isEmpty) return;
+    final safeTitle = title.replaceAll(RegExp(r'[.\#\$\[\]/]'), '_');
+    await _put('$_usersPath/watchlists/$safeName/items/$safeTitle.json', item);
+  }
+
+  /// Remove a single item from a list in Firebase (by title).
+  static Future<void> removeFromList(String listName, String title) async {
+    final safeName = _encodeListName(listName);
+    final safeTitle = title.replaceAll(RegExp(r'[.\#\$\[\]/]'), '_');
+    await _put('$_usersPath/watchlists/$safeName/items/$safeTitle.json', null);
+  }
+
+  /// Delete an entire list from Firebase.
+  static Future<void> deleteWatchlist(String listName) async {
+    final safeName = _encodeListName(listName);
+    await _put('$_usersPath/watchlists/$safeName.json', null);
+  }
+
+  /// Get all watchlists from Firebase. Returns {listName: [items]}.
+  static Future<Map<String, List<Map<String, dynamic>>>> getWatchlists() async {
+    final data = await _get('$_usersPath/watchlists.json');
+    if (data == null) return {};
+
+    final result = <String, List<Map<String, dynamic>>>{};
+    for (final entry in data.entries) {
+      final listName = entry.key;
+      final listData = entry.value;
+      if (listData is Map<String, dynamic>) {
+        final itemsRaw = listData['items'];
+        if (itemsRaw is Map<String, dynamic>) {
+          result[listName] = itemsRaw.values
+              .whereType<Map<String, dynamic>>()
+              .toList();
+        }
+      }
+    }
+    return result;
+  }
+
   // ── Language Preference ──────────────────────────────────────────────
 
   static Future<void> saveLanguage(String lang) async {
@@ -179,54 +246,31 @@ class FirestoreService {
   // ── Low-level REST helpers ───────────────────────────────────────────
 
   static Future<Map<String, dynamic>?> _get(String url) async {
-    if (!await AuthService.ensureValidToken()) {
-      print('RTDB GET: no valid token');
-      return null;
-    }
+    if (!await AuthService.ensureValidToken()) return null;
     try {
       final uri = Uri.parse('$url?auth=${AuthService.idToken}');
       final res = await http.get(uri, headers: _headers);
       if (res.statusCode == 200) {
         final body = json.decode(res.body);
         if (body is Map<String, dynamic>) return body;
-        return null;
       }
-      print('RTDB GET failed: ${res.statusCode} ${res.body}');
-    } catch (e) {
-      print('RTDB GET error: $e');
-    }
+    } catch (_) {}
     return null;
   }
 
-  static Future<void> _put(String url, Map<String, dynamic> data) async {
-    if (!await AuthService.ensureValidToken()) {
-      print('RTDB PUT: no valid token');
-      return;
-    }
+  static Future<void> _put(String url, Map<String, dynamic>? data) async {
+    if (!await AuthService.ensureValidToken()) return;
     try {
       final uri = Uri.parse('$url?auth=${AuthService.idToken}');
-      final res = await http.put(uri, headers: _headers, body: json.encode(data));
-      if (res.statusCode != 200) {
-        print('RTDB PUT failed: ${res.statusCode} ${res.body}');
-      }
-    } catch (e) {
-      print('RTDB PUT error: $e');
-    }
+      await http.put(uri, headers: _headers, body: json.encode(data));
+    } catch (_) {}
   }
 
   static Future<void> _patch(String url, Map<String, dynamic> data) async {
-    if (!await AuthService.ensureValidToken()) {
-      print('RTDB PATCH: no valid token');
-      return;
-    }
+    if (!await AuthService.ensureValidToken()) return;
     try {
       final uri = Uri.parse('$url?auth=${AuthService.idToken}');
-      final res = await http.patch(uri, headers: _headers, body: json.encode(data));
-      if (res.statusCode != 200) {
-        print('RTDB PATCH failed: ${res.statusCode} ${res.body}');
-      }
-    } catch (e) {
-      print('RTDB PATCH error: $e');
-    }
+      await http.patch(uri, headers: _headers, body: json.encode(data));
+    } catch (_) {}
   }
 }

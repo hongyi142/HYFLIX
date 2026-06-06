@@ -104,6 +104,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   // Seek recovery for torrent streams
   Timer? _seekRecoveryTimer;
 
+  // Periodic save during playback (crash protection)
+  Timer? _periodicSaveTimer;
+
   /// Effective episode count: uses episodes list length if available,
   /// otherwise falls back to episodeCount param (for torrent content).
   int get _effectiveEpisodeCount =>
@@ -132,6 +135,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _setupAutoplay();
     _listenAudioTracks();
     _scheduleHideControls();
+
+    // Save watch progress every 30 seconds as crash protection
+    _periodicSaveTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _periodicSave(),
+    );
   }
 
   /// Start torrent playback — show buffering overlay while metadata downloads.
@@ -274,6 +283,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     try {
       debugPrint('[VideoPlayer] Opening media: $url');
       _bufferingSub?.cancel();
+
+      // Configure mpv cache/timeout for VOD streams (torrent streams are
+      // already configured in _configureMpvForTorrent). Chinese VOD CDNs
+      // can be slow — mpv's default 5s timeout causes frequent rebuffering.
+      if (widget.torrentStream == null) {
+        final native = _player.platform as NativePlayer;
+        await native.setProperty('network-timeout', '30');
+        await native.setProperty('cache-secs', '30');
+        await native.setProperty('demuxer-readahead-secs', '30');
+      }
+
       await _player.open(Media(url));
       debugPrint('[VideoPlayer] Media opened successfully');
 
@@ -596,6 +616,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void dispose() {
     try {
       _cancelAutoplay();
+      _periodicSaveTimer?.cancel();
       _seekRecoveryTimer?.cancel();
       _bufferingSub?.cancel();
       _positionSub?.cancel();
@@ -609,13 +630,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     // and torrent before Navigator.pop triggers this dispose. In that case
     // we just need to release the native player object.
     if (!_isExiting) {
-      // Framework-driven dispose (e.g. parent route removed) — stop
-      // playback before tearing down so the player releases HTTP connections.
+      // Framework-driven dispose (e.g. parent route removed) — capture
+      // position before stopping so we can save watch progress.
+      final position = _player.state.position;
+      final duration = _player.state.duration;
       try {
         _player.stop();
       } catch (_) {}
       TorrentService().stopStream().catchError((e) {
         debugPrint('[VideoPlayer] Error stopping torrent in dispose: $e');
+      });
+      // Fire-and-forget save so progress isn't lost on force-close
+      _saveWatchData(position, duration).catchError((e) {
+        debugPrint('[VideoPlayer] Error saving watch data in dispose: $e');
       });
     }
     try {
@@ -630,6 +657,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (_isExiting) return;
     _isExiting = true;
     _cancelAutoplay();
+    _periodicSaveTimer?.cancel();
     _statsTimer?.cancel();
     _bufferingSub?.cancel();
     _positionSub?.cancel();
@@ -683,11 +711,28 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         posterUrl: widget.posterUrl,
         progress: progress,
         originalTitle: widget.originalTitle,
+        tmdbId: widget.tmdbId ?? '',
         episodeIndex: _currentEpIndex,
         positionSeconds: position.inSeconds,
         m3u8Url: widget.videoUrl,
         episodes: widget.episodes.map((e) => e.toJson()).toList(),
+        episodeCount: _effectiveEpisodeCount,
+        seasonNumber: widget.seasonNumber ?? 1,
       );
+    }
+  }
+
+  /// Periodically save watch progress during playback (crash protection).
+  Future<void> _periodicSave() async {
+    if (_isExiting) return;
+    try {
+      final position = _player.state.position;
+      final duration = _player.state.duration;
+      if (duration.inSeconds > 0) {
+        await _saveWatchData(position, duration);
+      }
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error in periodic save: $e');
     }
   }
 

@@ -588,14 +588,14 @@ class _DetailPageState extends State<DetailPage> {
                               LucideIcons.circle,
                               color: Colors.white54,
                             ),
-                      onTap: () {
+                      onTap: () async {
                         if (isListed) {
-                          _watchlistService.removeFromList(
+                          await _watchlistService.removeFromList(
                             listName,
                             widget.content.title,
                           );
                         } else {
-                          _watchlistService.addToList(listName, widget.content);
+                          await _watchlistService.addToList(listName, widget.content);
                         }
                         setModalState(() {});
                       },
