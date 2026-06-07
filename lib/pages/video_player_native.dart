@@ -23,6 +23,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final String? tmdbId;
   final bool isTvShow;
   final int? seasonNumber;
+  final int? episodeNumber;
   final String posterUrl;
   final int seekToSeconds;
   final TorrentStream? torrentStream;
@@ -39,6 +40,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.tmdbId,
     this.isTvShow = false,
     this.seasonNumber,
+    this.episodeNumber,
     this.posterUrl = '',
     this.seekToSeconds = 0,
     this.torrentStream,
@@ -507,14 +509,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  int? _episodeNumberInSeason(int globalIndex) {
+    final eps = widget.episodes;
+    if (eps.isEmpty) return null;
+    final seasonMap = <int, List<Episode>>{};
+    for (final ep in eps) {
+      final m = RegExp(r'第(\d+)季').firstMatch(ep.name);
+      final s = m != null ? int.tryParse(m.group(1)!) ?? 1 : 1;
+      seasonMap.putIfAbsent(s, () => []).add(ep);
+    }
+    final seasonEps = seasonMap[widget.seasonNumber] ?? eps;
+    final ep = eps[globalIndex];
+    final pos = seasonEps.indexOf(ep);
+    return pos >= 0 ? pos + 1 : globalIndex + 1;
+  }
+
   Future<void> _fetchSubtitles() async {
     if (mounted) setState(() => _loadingSubs = true);
     try {
       final currentEpisode = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
+      final epNum = widget.episodeNumber ?? _episodeNumberInSeason(_currentEpIndex);
       final subs = await SubtitleService.searchSubtitles(
         _currentTitle ?? '',
         tmdbId: widget.tmdbId,
         seasonNumber: widget.seasonNumber,
+        episodeNumber: epNum,
         episodeName: currentEpisode?.name,
         isTvShow: widget.isTvShow,
       );
@@ -537,7 +556,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       });
     }
 
-    final srtContent = await SubtitleService.fetchSubtitleContent(item);
+    String? srtContent;
+    final epNum = widget.episodeNumber ?? _episodeNumberInSeason(_currentEpIndex);
+    if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null) {
+      srtContent = await SubtitleService.fetchAndExtractEpisode(
+        item,
+        episodeNumber: epNum,
+      );
+    } else {
+      srtContent = await SubtitleService.fetchSubtitleContent(item);
+    }
 
     if (srtContent != null && srtContent.trim().isNotEmpty && mounted) {
       await _player.setSubtitleTrack(SubtitleTrack.data(
@@ -1535,6 +1563,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                         child: _panelTile(
                           i == 0 ? 'Off' : '${_availableSubs[i - 1].language.toUpperCase()} - ${_availableSubs[i - 1].fileName}',
                           i == 0 ? (_selectedSub == null) : (_selectedSub?.id == _availableSubs[i - 1].id),
+                          subtitle: i == 0 ? null : _availableSubs[i - 1].matchType.label,
                         ),
                       ),
                     );
@@ -1613,7 +1642,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return parts.isNotEmpty ? parts.join(' - ') : 'Track ${track.id}';
   }
 
-  Widget _panelTile(String title, bool isActive) {
+  Widget _panelTile(String title, bool isActive, {String? subtitle}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1631,15 +1660,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               size: 16),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                color: isActive ? Colors.white : AppTheme.textSecondary,
-                fontSize: 13,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: isActive ? Colors.white : AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isActive ? AppTheme.accent : AppTheme.textSecondary.withOpacity(0.6),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

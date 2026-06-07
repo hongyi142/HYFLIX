@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
 import '../core/proxy_url.dart';
@@ -28,6 +30,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   List<String> _favouriteIds = [];
   List<TmdbResult?> _favouriteTmdb = [];
   bool _loading = true;
+  bool _uploadingPhoto = false;
 
   int _watchStreak = 0;
   double _completionRate = 0;
@@ -124,6 +127,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       _computeStats();
       _loading = false;
     });
+    if (_profile?.photoBase64 != null && _profile!.photoBase64!.isNotEmpty) {
+      AuthService.setPhotoBase64(_profile!.photoBase64);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _onScroll();
@@ -359,31 +365,74 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           _doubleBezel(
             borderRadius: 28,
             outerPadding: 4,
-            child: Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppTheme.accent.withOpacity(0.15),
-                    AppTheme.accent.withOpacity(0.05),
-                  ],
+            child: Stack(
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppTheme.accent.withOpacity(0.15),
+                        AppTheme.accent.withOpacity(0.05),
+                      ],
+                    ),
+                  ),
+                  child: _profile?.photoBase64 != null && _profile!.photoBase64!.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(24),
+                          child: Image.memory(
+                            base64Decode(_profile!.photoBase64!),
+                            fit: BoxFit.cover,
+                            width: 72,
+                            height: 72,
+                          ),
+                        )
+                      : Center(
+                          child: Text(
+                            initial,
+                            style: TextStyle(
+                              color: AppTheme.accent,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ),
                 ),
-              ),
-              child: Center(
-                child: Text(
-                  initial,
-                  style: TextStyle(
-                    color: AppTheme.accent,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: _pickAndUploadPhoto,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0C0C0F),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withOpacity(0.15), width: 1.5),
+                      ),
+                      child: _uploadingPhoto
+                          ? Padding(
+                              padding: const EdgeInsets.all(5),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.accent,
+                              ),
+                            )
+                          : Icon(
+                              LucideIcons.camera,
+                              color: Colors.white.withOpacity(0.7),
+                              size: 12,
+                            ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
           const SizedBox(height: 28),
@@ -866,6 +915,159 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.accent),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickAndUploadPhoto() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF111114),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              if (_profile?.photoBase64 != null && _profile!.photoBase64!.isNotEmpty)
+                ListTile(
+                  leading: Icon(LucideIcons.trash2, color: AppTheme.accent, size: 20),
+                  title: const Text('Remove Photo', style: TextStyle(color: Colors.white)),
+                  onTap: () => Navigator.pop(ctx, 'remove'),
+                ),
+              ListTile(
+                leading: Icon(LucideIcons.camera, color: Colors.white70, size: 20),
+                title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(ctx, 'camera'),
+              ),
+              ListTile(
+                leading: Icon(LucideIcons.image, color: Colors.white70, size: 20),
+                title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+
+    if (action == 'remove') {
+      await _removePhoto();
+      return;
+    }
+
+    final source = action == 'camera' ? ImageSource.camera : ImageSource.gallery;
+
+    try {
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: source,
+        maxWidth: 256,
+        maxHeight: 256,
+        imageQuality: 60,
+      );
+      if (image == null || !mounted) return;
+
+      setState(() => _uploadingPhoto = true);
+
+      final bytes = await image.readAsBytes();
+      final base64Str = base64Encode(bytes);
+
+      await UserService.updatePhotoBase64(base64Str);
+      await AuthService.setPhotoBase64(base64Str);
+
+      if (mounted) {
+        setState(() {
+          _profile = UserProfile(
+            uid: _profile!.uid,
+            email: _profile!.email,
+            displayName: _profile!.displayName,
+            watchTimeSeconds: _profile!.watchTimeSeconds,
+            createdAt: _profile!.createdAt,
+            photoBase64: base64Str,
+          );
+          _uploadingPhoto = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Profile photo updated'),
+            backgroundColor: const Color(0xFF111114),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: Colors.white.withOpacity(0.08)),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploadingPhoto = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to upload photo: $e'),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    try {
+      setState(() => _uploadingPhoto = true);
+      await UserService.updatePhotoBase64(null);
+      await AuthService.setPhotoBase64(null);
+
+      if (mounted) {
+        setState(() {
+          _profile = UserProfile(
+            uid: _profile!.uid,
+            email: _profile!.email,
+            displayName: _profile!.displayName,
+            watchTimeSeconds: _profile!.watchTimeSeconds,
+            createdAt: _profile!.createdAt,
+            photoBase64: null,
+          );
+          _uploadingPhoto = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Profile photo removed'),
+            backgroundColor: const Color(0xFF111114),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: Colors.white.withOpacity(0.08)),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploadingPhoto = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to remove photo: $e'),
+            backgroundColor: AppTheme.accent,
+          ),
         );
       }
     }

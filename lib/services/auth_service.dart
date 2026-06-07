@@ -12,6 +12,7 @@ class AuthService {
   static String? _uid;
   static String? _email;
   static String? _displayName;
+  static String? _photoBase64;
 
   // ── Getters ──────────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ class AuthService {
   static String? get email => _email;
   static String? get displayName => _displayName;
   static String? get idToken => _idToken;
+  static String? get photoBase64 => _photoBase64;
   static bool get isLoggedIn => _uid != null && _idToken != null;
 
   // ── Init ─────────────────────────────────────────────────────────────
@@ -30,6 +32,7 @@ class AuthService {
     _uid = prefs.getString('fb_uid');
     _email = prefs.getString('fb_email');
     _displayName = prefs.getString('fb_displayName');
+    _photoBase64 = prefs.getString('fb_photoBase64');
 
     // Try to refresh token if it exists
     if (_refreshToken != null) {
@@ -44,6 +47,7 @@ class AuthService {
     if (_uid != null) prefs.setString('fb_uid', _uid!);
     if (_email != null) prefs.setString('fb_email', _email!);
     if (_displayName != null) prefs.setString('fb_displayName', _displayName!);
+    if (_photoBase64 != null) prefs.setString('fb_photoBase64', _photoBase64!);
   }
 
   static Future<void> _clearPrefs() async {
@@ -53,6 +57,17 @@ class AuthService {
     await prefs.remove('fb_uid');
     await prefs.remove('fb_email');
     await prefs.remove('fb_displayName');
+    await prefs.remove('fb_photoBase64');
+  }
+
+  static Future<void> setPhotoBase64(String? base64) async {
+    _photoBase64 = (base64 != null && base64.isEmpty) ? null : base64;
+    final prefs = await SharedPreferences.getInstance();
+    if (_photoBase64 != null) {
+      await prefs.setString('fb_photoBase64', _photoBase64!);
+    } else {
+      await prefs.remove('fb_photoBase64');
+    }
   }
 
   // ── Auth State ───────────────────────────────────────────────────────
@@ -216,6 +231,7 @@ class AuthService {
         _uid = null;
         _email = null;
         _displayName = null;
+        _photoBase64 = null;
       }
     } catch (_) {
       // Network error, keep existing token
@@ -367,6 +383,7 @@ class AuthService {
     _uid = null;
     _email = null;
     _displayName = null;
+    _photoBase64 = null;
     await _clearPrefs();
     _notifyListeners();
   }

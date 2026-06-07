@@ -4,6 +4,7 @@ class UserProfile {
   final String displayName;
   final int watchTimeSeconds;
   final DateTime? createdAt;
+  final String? photoBase64;
 
   const UserProfile({
     required this.uid,
@@ -11,6 +12,7 @@ class UserProfile {
     required this.displayName,
     this.watchTimeSeconds = 0,
     this.createdAt,
+    this.photoBase64,
   });
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> data) {
@@ -20,12 +22,15 @@ class UserProfile {
       try { parsedCreatedAt = DateTime.parse(raw); } catch (_) {}
     }
 
+    final photoRaw = (data['photoBase64'] as String?) ?? '';
+
     return UserProfile(
       uid: uid,
       email: (data['email'] as String?) ?? '',
       displayName: (data['displayName'] as String?) ?? '',
       watchTimeSeconds: (data['watchTimeSeconds'] as int?) ?? 0,
       createdAt: parsedCreatedAt,
+      photoBase64: photoRaw.isEmpty ? null : photoRaw,
     );
   }
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -305,6 +306,7 @@ class _ProfileAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final photo = AuthService.photoBase64;
     return FocusableActionDetector(
       onShowFocusHighlight: (hasFocus) { /* Optional: add focus ring */ },
       actions: {
@@ -325,18 +327,27 @@ class _ProfileAvatar extends StatelessWidget {
             color: AppTheme.accent,
             border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
           ),
-          child: Center(
-            child: Text(
-              (AuthService.displayName?.isNotEmpty == true
-                      ? AuthService.displayName![0]
-                      : 'U')
-                  .toUpperCase(),
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: size * 0.4,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+          child: ClipOval(
+            child: photo != null && photo.isNotEmpty
+                ? Image.memory(
+                    base64Decode(photo),
+                    fit: BoxFit.cover,
+                    width: size,
+                    height: size,
+                  )
+                : Center(
+                    child: Text(
+                      (AuthService.displayName?.isNotEmpty == true
+                              ? AuthService.displayName![0]
+                              : 'U')
+                          .toUpperCase(),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: size * 0.4,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
           ),
         ),
       ),

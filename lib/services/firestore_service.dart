@@ -25,6 +25,7 @@ class FirestoreService {
       'watchTimeSeconds': 0,
       'favourites': {},
       'createdAt': DateTime.now().toUtc().toIso8601String(),
+      'photoBase64': '',
     });
   }
 
@@ -93,6 +94,14 @@ class FirestoreService {
 
   static Future<void> updateEmail(String email) async {
     await _patch('$_usersPath.json', {'email': email});
+  }
+
+  static Future<void> updatePhotoBase64(String? base64) async {
+    if (base64 != null && base64.isNotEmpty) {
+      await _patch('$_usersPath.json', {'photoBase64': base64});
+    } else {
+      await _patch('$_usersPath.json', {'photoBase64': null});
+    }
   }
 
   // ── Intro Timestamps ───────────────────────────────────────────────

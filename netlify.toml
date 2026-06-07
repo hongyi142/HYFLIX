@@ -1,4 +1,9 @@
 [[redirects]]
+  from = "/download"
+  to = "/download.html"
+  status = 200
+
+[[redirects]]
   from = "/api/proxy"
   to = "/.netlify/functions/proxy"
   status = 200

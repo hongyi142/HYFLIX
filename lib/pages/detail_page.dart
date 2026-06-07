@@ -485,6 +485,8 @@ class _DetailPageState extends State<DetailPage> {
           }
         }
         await applyEpisodes(allEps.isNotEmpty ? allEps : null);
+      }).catchError((_) {
+        applyEpisodes(null);
       });
     } else {
       api
@@ -495,6 +497,8 @@ class _DetailPageState extends State<DetailPage> {
           allEps.addAll(r.episodes);
         }
         await applyEpisodes(allEps.isNotEmpty ? allEps : null);
+      }).catchError((_) {
+        applyEpisodes(null);
       });
     }
   }
@@ -633,6 +637,20 @@ class _DetailPageState extends State<DetailPage> {
     return null;
   }
 
+  /// Returns the 1-based episode number within the current season.
+  int _episodeNumberInSeason(int globalIndex, List<Episode> episodes) {
+    final seasonMap = <int, List<Episode>>{};
+    for (final ep in episodes) {
+      final m = RegExp(r'第(\d+)季').firstMatch(ep.name);
+      final s = m != null ? int.tryParse(m.group(1)!) ?? 1 : 1;
+      seasonMap.putIfAbsent(s, () => []).add(ep);
+    }
+    final seasonEps = seasonMap[_selectedSeason] ?? episodes;
+    final ep = episodes[globalIndex];
+    final pos = seasonEps.indexOf(ep);
+    return pos >= 0 ? pos + 1 : globalIndex + 1;
+  }
+
   void _play(int episodeIndex) {
     // Route to torrent for non-Chinese content (unless torrent already failed or on web)
     if (!kIsWeb && !_isChineseContent(_tmdb) && !_torrentFailed) {
@@ -677,7 +695,8 @@ class _DetailPageState extends State<DetailPage> {
           initialEpisodeIndex: episodeIndex,
           tmdbId: _tmdb?.id?.toString(),
           isTvShow: isTvShow,
-          seasonNumber: _extractSeasonNumber() ?? 1,
+          seasonNumber: _selectedSeason,
+          episodeNumber: _episodeNumberInSeason(episodeIndex, episodes),
           posterUrl: poster,
         ),
       ),
@@ -793,8 +812,8 @@ class _DetailPageState extends State<DetailPage> {
                     // Torrent content: show quality filter + play/episode cards
                     SizedBox(height: layout.isPhone ? 28 : 36),
                     _buildTorrentEpisodesSection(layout),
-                  ] else if (isMultiEpisode) ...[
-                    // VOD content: show episode list
+                  ] else ...[
+                    // VOD content: show episode list (includes source picker)
                     SizedBox(height: layout.isPhone ? 28 : 36),
                     _buildEpisodesSection(episodes, layout),
                   ],

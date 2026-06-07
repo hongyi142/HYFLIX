@@ -74,6 +74,10 @@ class UserService {
     await FirestoreService.updateEmail(email);
   }
 
+  static Future<void> updatePhotoBase64(String? base64) async {
+    await FirestoreService.updatePhotoBase64(base64);
+  }
+
   static Future<void> clearWatchHistory() async {
     await FirestoreService.clearWatchHistory();
   }

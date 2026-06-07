@@ -3,12 +3,25 @@ import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
 import '../config/app_config.dart';
 
+enum SubtitleMatchType {
+  exactEpisode,   // Filename explicitly matches the target episode
+  seasonFallback, // No episode info in filename — season-level subtitle
+}
+
+extension SubtitleMatchTypeLabel on SubtitleMatchType {
+  String get label => switch (this) {
+    SubtitleMatchType.exactEpisode => 'Episode',
+    SubtitleMatchType.seasonFallback => 'Full Season',
+  };
+}
+
 class SubtitleItem {
   final String id;
   final String fileName;
   final String language;
   final String? downloadUrl;
   final String source; // 'subdl' or 'opensubtitles'
+  final SubtitleMatchType matchType;
 
   SubtitleItem({
     required this.id,
@@ -16,6 +29,7 @@ class SubtitleItem {
     required this.language,
     this.downloadUrl,
     this.source = 'subdl',
+    this.matchType = SubtitleMatchType.exactEpisode,
   });
 }
 
@@ -39,7 +53,7 @@ class SubtitleService {
     return null;
   }
 
-  // ─── SubDL search ───────────────────────────────────────────────
+  // ─── SubDL search (with pagination) ────────────────────────────
   static Future<List<SubtitleItem>> _searchSubDL({
     required String query,
     String? tmdbId,
@@ -50,64 +64,118 @@ class SubtitleService {
     if (subdlApiKey.isEmpty) return [];
 
     try {
-      final queryParams = {
-        'api_key': subdlApiKey,
-        'languages': 'EN',
-        'subs_per_page': '30',
-      };
+      final allItems = <SubtitleItem>[];
+      var page = 1;
+      var totalPages = 1;
 
-      if (tmdbId != null) {
-        queryParams['tmdb_id'] = tmdbId;
-      } else {
-        queryParams['film_name'] = query;
-      }
+      while (page <= totalPages) {
+        final queryParams = {
+          'api_key': subdlApiKey,
+          'languages': 'EN',
+          'subs_per_page': '30',
+          'page': page.toString(),
+        };
 
-      if (isTvShow) {
-        queryParams['type'] = 'tv';
-        if (effectiveSeason != null) {
-          queryParams['season_number'] = effectiveSeason.toString();
+        if (tmdbId != null) {
+          queryParams['tmdb_id'] = tmdbId;
+        } else {
+          queryParams['film_name'] = query;
         }
-        if (episodeNum != null) {
-          queryParams['episode_number'] = episodeNum;
+
+        if (isTvShow) {
+          queryParams['type'] = 'tv';
+          if (effectiveSeason != null) {
+            queryParams['season_number'] = effectiveSeason.toString();
+          }
+          if (episodeNum != null) {
+            queryParams['episode_number'] = episodeNum;
+          }
+        } else {
+          queryParams['type'] = 'movie';
         }
-      } else {
-        queryParams['type'] = 'movie';
+
+        final searchUri = Uri.https('api.subdl.com', '/api/v1/subtitles', queryParams);
+        final res = await http.get(searchUri).timeout(const Duration(seconds: 10));
+
+        if (res.statusCode != 200) break;
+
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        if (body['status'] == false) break;
+
+        totalPages = (body['totalPages'] as num?)?.toInt() ?? 1;
+        final data = body['subtitles'] as List<dynamic>? ?? [];
+
+        for (final item in data) {
+          final url = (item['url'] as String?) ?? '';
+          final downloadUrl = url.isNotEmpty ? 'https://dl.subdl.com$url' : null;
+          final releaseName = (item['release_name'] as String?) ?? '';
+          final name = (item['name'] as String?) ?? '';
+          final fileName = releaseName.isNotEmpty ? releaseName : (name.isNotEmpty ? name : 'Subtitle');
+          final language = (item['language'] as String?) ?? (item['lang'] as String?) ?? 'EN';
+
+          // Use API's structured fields for accurate match classification
+          final apiSeason = (item['season'] as num?)?.toInt();
+          final apiEpisode = (item['episode'] as num?)?.toInt();
+          final apiFullSeason = item['full_season'] == true;
+          final apiEpFrom = (item['episode_from'] as num?)?.toInt();
+          final apiEpEnd = (item['episode_end'] as num?)?.toInt();
+
+          allItems.add(SubtitleItem(
+            id: 'sdl_${url.hashCode}',
+            fileName: fileName,
+            language: language,
+            downloadUrl: downloadUrl,
+            source: 'subdl',
+            matchType: _classifyFromApiFields(
+              apiSeason: apiSeason,
+              apiEpisode: apiEpisode,
+              apiFullSeason: apiFullSeason,
+              apiEpFrom: apiEpFrom,
+              apiEpEnd: apiEpEnd,
+              targetSeason: effectiveSeason,
+              targetEpisode: episodeNum != null ? int.tryParse(episodeNum) : null,
+            ),
+          ));
+        }
+
+        page++;
       }
-
-      final searchUri = Uri.https('api.subdl.com', '/api/v1/subtitles', queryParams);
-      print('SubDL search: $searchUri');
-
-      final res = await http.get(searchUri).timeout(const Duration(seconds: 10));
-
-      if (res.statusCode != 200) {
-        print('SubDL search failed: ${res.statusCode}');
-        return [];
-      }
-
-      final body = json.decode(res.body) as Map<String, dynamic>;
-      if (body['status'] == false) return [];
-
-      final data = body['subtitles'] as List<dynamic>? ?? [];
-      return data.take(15).map((item) {
-        final url = (item['url'] as String?) ?? '';
-        final downloadUrl = url.isNotEmpty ? 'https://dl.subdl.com$url' : null;
-        final releaseName = (item['release_name'] as String?) ?? '';
-        final name = (item['name'] as String?) ?? '';
-        final fileName = releaseName.isNotEmpty ? releaseName : (name.isNotEmpty ? name : 'Subtitle');
-        final language = (item['language'] as String?) ?? (item['lang'] as String?) ?? 'EN';
-
-        return SubtitleItem(
-          id: 'sdl_${url.hashCode}',
-          fileName: fileName,
-          language: language,
-          downloadUrl: downloadUrl,
-          source: 'subdl',
-        );
-      }).toList();
+      return allItems;
     } catch (e) {
       print('SubDL search error: $e');
       return [];
     }
+  }
+
+  /// Classify subtitle match type using API's structured metadata.
+  static SubtitleMatchType _classifyFromApiFields({
+    int? apiSeason,
+    int? apiEpisode,
+    bool apiFullSeason = false,
+    int? apiEpFrom,
+    int? apiEpEnd,
+    int? targetSeason,
+    int? targetEpisode,
+  }) {
+    // Full season subtitle — no specific episode
+    if (apiFullSeason) return SubtitleMatchType.seasonFallback;
+
+    // Has explicit episode info from API
+    if (apiEpisode != null && targetEpisode != null) {
+      if (apiEpisode == targetEpisode) return SubtitleMatchType.exactEpisode;
+      return SubtitleMatchType.seasonFallback; // different episode
+    }
+
+    // Episode range (e.g., episodes 1-10)
+    if (apiEpFrom != null && apiEpEnd != null && targetEpisode != null) {
+      if (targetEpisode >= apiEpFrom && targetEpisode <= apiEpEnd) {
+        return SubtitleMatchType.exactEpisode;
+      }
+      return SubtitleMatchType.seasonFallback;
+    }
+
+    // No episode info from API — season-level fallback
+    return SubtitleMatchType.seasonFallback;
   }
 
   // ─── OpenSubtitles search ───────────────────────────────────────
@@ -197,6 +265,12 @@ class SubtitleService {
   /// Returns true if the filename has no episode info (keep it) or if it matches.
   /// Returns false only if the filename explicitly references a different episode.
   static bool _matchesEpisode(String fileName, int? season, int? episode) {
+    return _classifyMatch(fileName, season, episode) != null;
+  }
+
+  /// Returns [SubtitleMatchType] if the subtitle matches, or null if it
+  /// explicitly references a different episode and should be excluded.
+  static SubtitleMatchType? _classifyMatch(String fileName, int? season, int? episode) {
     final lower = fileName.toLowerCase();
 
     // Try to extract S##E## pattern
@@ -204,12 +278,11 @@ class SubtitleService {
     if (seMatch != null) {
       final fileSeason = int.tryParse(seMatch.group(1)!);
       final fileEp = int.tryParse(seMatch.group(2)!);
-      // If we can parse both, check against target
       if (fileEp != null) {
-        if (episode != null && fileEp != episode) return false;
-        if (season != null && fileSeason != null && fileSeason != season) return false;
+        if (episode != null && fileEp != episode) return null;
+        if (season != null && fileSeason != null && fileSeason != season) return null;
       }
-      return true;
+      return SubtitleMatchType.exactEpisode;
     }
 
     // Try 1x04 pattern (season x episode)
@@ -218,30 +291,30 @@ class SubtitleService {
       final fileSeason = int.tryParse(xMatch.group(1)!);
       final fileEp = int.tryParse(xMatch.group(2)!);
       if (fileEp != null) {
-        if (episode != null && fileEp != episode) return false;
-        if (season != null && fileSeason != null && fileSeason != season) return false;
+        if (episode != null && fileEp != episode) return null;
+        if (season != null && fileSeason != null && fileSeason != season) return null;
       }
-      return true;
+      return SubtitleMatchType.exactEpisode;
     }
 
     // Try E## or EP## pattern (episode only, no season)
     final eMatch = RegExp(r'(?:^|[^a-z])(?:ep?)(\d{1,3})(?:[^a-z0-9]|$)').firstMatch(lower);
     if (eMatch != null) {
       final fileEp = int.tryParse(eMatch.group(1)!);
-      if (fileEp != null && episode != null && fileEp != episode) return false;
-      return true;
+      if (fileEp != null && episode != null && fileEp != episode) return null;
+      return SubtitleMatchType.exactEpisode;
     }
 
     // Try 第X季第Y集 pattern (Chinese)
     final cnMatch = RegExp(r'第\d+季第(\d+)集').firstMatch(fileName);
     if (cnMatch != null) {
       final fileEp = int.tryParse(cnMatch.group(1)!);
-      if (fileEp != null && episode != null && fileEp != episode) return false;
-      return true;
+      if (fileEp != null && episode != null && fileEp != episode) return null;
+      return SubtitleMatchType.exactEpisode;
     }
 
-    // No episode info found in filename — keep it (might be a general subtitle)
-    return true;
+    // No episode info found in filename — keep as season fallback
+    return SubtitleMatchType.seasonFallback;
   }
 
   // ─── Public API ─────────────────────────────────────────────────
@@ -250,29 +323,73 @@ class SubtitleService {
     String query, {
     String? tmdbId,
     int? seasonNumber,
+    int? episodeNumber,
     String? episodeName,
     bool isTvShow = false,
   }) async {
     final effectiveSeason = seasonNumber ??
         (episodeName != null ? _extractSeasonFromEpisodeName(episodeName) : null);
-    final episodeNum = episodeName != null ? _extractEpisodeNumber(episodeName) : null;
-    final cacheKey = '${tmdbId ?? query}_s${effectiveSeason ?? ''}_e${episodeNum ?? ''}';
+    final episodeNum = episodeNumber?.toString() ??
+        (episodeName != null ? _extractEpisodeNumber(episodeName) : null);
+    final cacheKey = '${tmdbId ?? query}_s${effectiveSeason ?? ''}';
     if (_cache.containsKey(cacheKey)) return _cache[cacheKey]!;
 
-    // Search both sources in parallel
+    // Always search by season only — most subtitle APIs don't reliably filter
+    // by episode number, so we fetch all season subtitles and tag/sort client-side.
+    final results = await _doSearch(
+      query,
+      tmdbId: tmdbId,
+      effectiveSeason: effectiveSeason,
+      episodeNum: episodeNum, // used for client-side tagging only
+      isTvShow: isTvShow,
+      sendEpisodeToApi: false,
+    );
+
+    // Fallback: no season filter if we got nothing
+    if (results.isEmpty && effectiveSeason != null) {
+      final fallbackKey = '${tmdbId ?? query}_';
+      if (!_cache.containsKey(fallbackKey)) {
+        final fallback = await _doSearch(
+          query,
+          tmdbId: tmdbId,
+          effectiveSeason: null,
+          episodeNum: episodeNum,
+          isTvShow: isTvShow,
+          sendEpisodeToApi: false,
+        );
+        _cache[fallbackKey] = fallback;
+      }
+      final fallbackResult = _cache[fallbackKey]!;
+      _cache[cacheKey] = fallbackResult;
+      return fallbackResult;
+    }
+
+    _cache[cacheKey] = results;
+    return results;
+  }
+
+  static Future<List<SubtitleItem>> _doSearch(
+    String query, {
+    String? tmdbId,
+    int? effectiveSeason,
+    String? episodeNum,
+    required bool isTvShow,
+    bool sendEpisodeToApi = true,
+  }) async {
+    final apiEpisodeNum = sendEpisodeToApi ? episodeNum : null;
     final results = await Future.wait([
       _searchSubDL(
         query: query,
         tmdbId: tmdbId,
         effectiveSeason: effectiveSeason,
-        episodeNum: episodeNum,
+        episodeNum: apiEpisodeNum,
         isTvShow: isTvShow,
       ),
       _searchOpenSubtitles(
         query: query,
         tmdbId: tmdbId,
         effectiveSeason: effectiveSeason,
-        episodeNum: episodeNum,
+        episodeNum: apiEpisodeNum,
         isTvShow: isTvShow,
       ),
     ]);
@@ -290,17 +407,34 @@ class SubtitleService {
       }
     }
 
-    // Filter by episode: keep subtitles that match the current episode or have no episode info
-    final filtered = effectiveSeason != null || episodeNum != null
-        ? merged.where((s) => _matchesEpisode(s.fileName, effectiveSeason, episodeNum != null ? int.tryParse(episodeNum) : null)).toList()
-        : merged;
-
-    if (filtered.isEmpty) {
-      print('No subtitles found for $cacheKey');
+    // Tag all subtitles with match quality — never exclude, let the user choose
+    if (effectiveSeason != null || episodeNum != null) {
+      final epInt = episodeNum != null ? int.tryParse(episodeNum) : null;
+      final tagged = <SubtitleItem>[];
+      for (final s in merged) {
+        // SubDL items already have API-based classification — keep it.
+        // OpenSubtitles items need filename-based classification.
+        SubtitleMatchType matchType;
+        if (s.source == 'subdl') {
+          matchType = s.matchType;
+        } else {
+          matchType = _classifyMatch(s.fileName, effectiveSeason, epInt)
+              ?? SubtitleMatchType.seasonFallback;
+        }
+        tagged.add(SubtitleItem(
+          id: s.id,
+          fileName: s.fileName,
+          language: s.language,
+          downloadUrl: s.downloadUrl,
+          source: s.source,
+          matchType: matchType,
+        ));
+      }
+      // Sort: exact episode matches first, then season fallbacks
+      tagged.sort((a, b) => a.matchType.index.compareTo(b.matchType.index));
+      return tagged;
     }
-
-    _cache[cacheKey] = filtered;
-    return filtered;
+    return merged;
   }
 
   static Future<String?> fetchSubtitleContent(SubtitleItem item) async {
@@ -366,5 +500,90 @@ class SubtitleService {
       print('Subtitle download error: $e');
     }
     return null;
+  }
+
+  /// Download a season-level subtitle and extract the portion for [episodeNumber].
+  /// Returns the extracted SRT string, or the full SRT if extraction isn't possible.
+  static Future<String?> fetchAndExtractEpisode(
+    SubtitleItem item, {
+    required int episodeNumber,
+  }) async {
+    final fullSrt = await fetchSubtitleContent(item);
+    if (fullSrt == null || fullSrt.trim().isEmpty) return fullSrt;
+
+    final entries = _parseSrt(fullSrt);
+    if (entries.isEmpty) return fullSrt;
+
+    // Check if the file spans multiple episodes (last timestamp > 100 minutes)
+    final lastEndMs = entries.last.$2;
+    if (lastEndMs <= 100 * 60 * 1000) {
+      // Single-episode file — use as-is
+      return fullSrt;
+    }
+
+    // Estimate episode duration from total file length
+    final totalEpisodes = episodeNumber > 1
+        ? (lastEndMs / ((episodeNumber - 1) * 60 * 1000)).ceil().clamp(episodeNumber, 30)
+        : 1;
+    final episodeDurationMs = (lastEndMs / totalEpisodes).round();
+
+    final startMs = (episodeNumber - 1) * episodeDurationMs;
+    final endMs = episodeNumber * episodeDurationMs;
+
+    // Extract entries that overlap with the target episode window
+    final extracted = entries
+        .where((e) => e.$2 >= startMs && e.$1 <= endMs)
+        .toList();
+
+    if (extracted.isEmpty) return fullSrt; // Fallback if extraction yields nothing
+
+    // Re-index and shift timestamps to start from 0
+    final buf = StringBuffer();
+    for (var i = 0; i < extracted.length; i++) {
+      final (start, end, text) = extracted[i];
+      buf.writeln(i + 1);
+      buf.writeln('${_fmtSrt(start - startMs)} --> ${_fmtSrt(end - startMs)}');
+      buf.writeln(text);
+      buf.writeln();
+    }
+    return buf.toString();
+  }
+
+  static String _fmtSrt(int ms) {
+    final h = ms ~/ 3600000;
+    final m = (ms % 3600000) ~/ 60000;
+    final s = (ms % 60000) ~/ 1000;
+    final rest = ms % 1000;
+    return '${h.toString().padLeft(2, '0')}:'
+           '${m.toString().padLeft(2, '0')}:'
+           '${s.toString().padLeft(2, '0')},'
+           '${rest.toString().padLeft(3, '0')}';
+  }
+
+  /// Parse SRT content into (startMs, endMs, text) tuples.
+  static List<(int, int, String)> _parseSrt(String srt) {
+    final entries = <(int, int, String)>[];
+    final blocks = srt.split(RegExp(r'\r?\n\r?\n'));
+    for (final block in blocks) {
+      final lines = block.trim().split('\n');
+      if (lines.length < 3) continue;
+      final timeMatch = RegExp(
+        r'(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})',
+      ).firstMatch(lines[1]);
+      if (timeMatch == null) continue;
+      final start = _parseSrtTime(timeMatch.group(1)!);
+      final end = _parseSrtTime(timeMatch.group(2)!);
+      final text = lines.sublist(2).join('\n');
+      entries.add((start, end, text));
+    }
+    return entries;
+  }
+
+  static int _parseSrtTime(String t) {
+    final p = t.split(RegExp(r'[:,\.]'));
+    return int.parse(p[0]) * 3600000 +
+           int.parse(p[1]) * 60000 +
+           int.parse(p[2]) * 1000 +
+           int.parse(p[3]);
   }
 }
