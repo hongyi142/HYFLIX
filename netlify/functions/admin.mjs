@@ -1,22 +1,26 @@
-import { getStore as getBlobStore } from '@netlify/blobs';
-
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = '123';
 const TOKEN_MAX_AGE = 24 * 60 * 60 * 1000;
 
 const DEFAULT_CONFIG = {
   platforms: {
-    android: { enabled: false },
-    windows: { enabled: false },
-    macos: { enabled: false },
-    ios: { enabled: false },
-    'android-tv': { enabled: false },
-    'apple-tv': { enabled: false },
+    android: { enabled: false, fileName: '', fileSize: 0, url: '' },
+    windows: { enabled: false, fileName: '', fileSize: 0, url: '' },
+    macos: { enabled: false, fileName: '', fileSize: 0, url: '' },
+    ios: { enabled: false, fileName: '', fileSize: 0, url: '' },
+    'android-tv': { enabled: false, fileName: '', fileSize: 0, url: '' },
+    'apple-tv': { enabled: false, fileName: '', fileSize: 0, url: '' },
   },
 };
 
-function store() {
-  return getBlobStore('hyflix');
+function getConfig() {
+  const raw = process.env.HYFLIX_CONFIG;
+  if (!raw) return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  }
 }
 
 function json(data, status = 200) {
@@ -42,11 +46,6 @@ function checkAuth(request) {
   }
 }
 
-async function getConfig() {
-  const data = await store().get('config.json', { type: 'json' });
-  return data || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-}
-
 export default async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, {
@@ -62,7 +61,6 @@ export default async (request) => {
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
 
-  // Login doesn't need the blob store
   if (action === 'login') {
     try {
       const { user, pass } = await request.json();
@@ -78,68 +76,14 @@ export default async (request) => {
 
   try {
     if (action === 'get-config') {
-      const config = await getConfig();
-      return json(config);
+      return json(getConfig());
     }
 
-    if (action === 'upload') {
+    if (action === 'save') {
       if (!checkAuth(request)) return json({ error: 'Unauthorized' }, 401);
-      const { platform, fileName, fileSize, data } = await request.json();
-      if (!platform || !fileName || !data) {
-        return json({ error: 'Missing platform, fileName, or data' }, 400);
-      }
-      const blobKey = `files/${platform}/${fileName}`;
-      const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-      await store().set(blobKey, buffer, { contentType: 'application/octet-stream' });
-      const config = await getConfig();
-      config.platforms[platform] = {
-        enabled: true,
-        fileName,
-        fileSize: fileSize || buffer.length,
-        blobKey,
-        uploadedAt: new Date().toISOString(),
-      };
-      await store().set('config.json', JSON.stringify(config), { contentType: 'application/json' });
-      return json({ ok: true });
-    }
-
-    if (action === 'delete') {
-      if (!checkAuth(request)) return json({ error: 'Unauthorized' }, 401);
-      const { platform } = await request.json();
-      const config = await getConfig();
-      const p = config.platforms[platform];
-      if (p?.blobKey) {
-        await store().delete(p.blobKey);
-      }
-      config.platforms[platform] = { enabled: false };
-      await store().set('config.json', JSON.stringify(config), { contentType: 'application/json' });
-      return json({ ok: true });
-    }
-
-    if (action === 'toggle') {
-      if (!checkAuth(request)) return json({ error: 'Unauthorized' }, 401);
-      const { platform, enabled } = await request.json();
-      const config = await getConfig();
-      if (config.platforms[platform]) {
-        config.platforms[platform].enabled = enabled;
-      }
-      await store().set('config.json', JSON.stringify(config), { contentType: 'application/json' });
-      return json({ ok: true });
-    }
-
-    if (action === 'download') {
-      const file = url.searchParams.get('file');
-      if (!file) return json({ error: 'Missing file parameter' }, 400);
-      const data = await store().get(file);
-      if (!data) return json({ error: 'File not found' }, 404);
-      const fileName = file.split('/').pop();
-      return new Response(data, {
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Content-Disposition': `attachment; filename="${fileName}"`,
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
+      const { config } = await request.json();
+      if (!config) return json({ error: 'Missing config' }, 400);
+      return json({ ok: true, config, message: 'Config received. Set HYFLIX_CONFIG env var in Netlify dashboard with this JSON.' });
     }
 
     return json({ error: 'Unknown action' }, 400);

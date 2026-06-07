@@ -574,7 +574,7 @@
         const state = config.platforms[p.id];
         const fileName = state.fileName || '';
         const fileSize = formatSize(state.fileSize);
-        const url = state.blobKey ? `/api/admin?action=download&file=${encodeURIComponent(state.blobKey)}` : '#';
+        const url = state.url || '#';
 
         html += `
           <div class="card">
@@ -583,7 +583,7 @@
             <div class="card-platform">${p.name}</div>
             <div class="card-file">${fileName}</div>
             <div class="card-size">${fileSize || '&nbsp;'}</div>
-            <a class="btn" href="${url}" download>
+            <a class="btn" href="${url}" ${url !== '#' ? 'target="_blank" rel="noopener"' : ''}>
               ${downloadSvg}
               Download
             </a>
