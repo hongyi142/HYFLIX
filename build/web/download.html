@@ -518,24 +518,29 @@
 
     const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    const REPO = 'hongyi142/HYFLIX';
-    const CACHE_KEY = 'hyflix_release_cache';
-    const CACHE_TTL = 60 * 60 * 1000;
-
     const PLATFORMS = [
       {
-        name: 'Android',
-        ext: ['.apk'],
+        id: 'android', name: 'Android',
         icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 3.26 6 5.01 6 7h12c0-1.99-.97-3.75-2.47-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z"/></svg>',
       },
       {
-        name: 'Windows',
-        ext: ['.exe', '.msi'],
+        id: 'windows', name: 'Windows',
         icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>',
       },
       {
-        name: 'macOS',
-        ext: ['.dmg'],
+        id: 'macos', name: 'macOS',
+        icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>',
+      },
+      {
+        id: 'ios', name: 'iPhone / iPad',
+        icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 1h-8C6.12 1 5 2.12 5 3.5v17C5 21.88 6.12 23 7.5 23h8c1.38 0 2.5-1.12 2.5-2.5v-17C18 2.12 16.88 1 15.5 1zm-4 21c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5-4H7V4h9v14z"/></svg>',
+      },
+      {
+        id: 'android-tv', name: 'Android TV',
+        icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>',
+      },
+      {
+        id: 'apple-tv', name: 'Apple TV',
         icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>',
       },
     ];
@@ -549,51 +554,27 @@
       return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
-    function getCached() {
-      try {
-        const raw = localStorage.getItem(CACHE_KEY);
-        if (!raw) return null;
-        const data = JSON.parse(raw);
-        if (Date.now() - data.ts > CACHE_TTL) return null;
-        return data.release;
-      } catch { return null; }
+    async function fetchConfig() {
+      const res = await fetch('/api/admin?action=get-config');
+      if (!res.ok) throw new Error('Failed to load configuration');
+      return await res.json();
     }
 
-    function setCache(release) {
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), release })); } catch {}
-    }
-
-    async function fetchRelease() {
-      const cached = getCached();
-      if (cached) return cached;
-      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
-      const release = await res.json();
-      setCache(release);
-      return release;
-    }
-
-    function findAsset(assets, extensions) {
-      return assets.find(a => extensions.some(ext => a.name.toLowerCase().endsWith(ext)));
-    }
-
-    function renderCards(release) {
+    function renderCards(config) {
       const container = document.getElementById('content');
+      const enabledPlatforms = PLATFORMS.filter(p => config.platforms[p.id]?.enabled);
 
-      if (release.tag_name) {
-        const badge = document.getElementById('versionBadge');
-        document.getElementById('versionText').textContent = release.tag_name;
-        badge.style.display = 'inline-flex';
+      if (enabledPlatforms.length === 0) {
+        renderError('No downloads available yet. Check back soon.');
+        return;
       }
 
       let html = '<div class="platforms-grid">';
-      PLATFORMS.forEach(p => {
-        const asset = findAsset(release.assets || [], p.ext);
-        const fileName = asset ? asset.name : `hyflix.${p.ext[0].replace('.', '')}`;
-        const fileSize = asset ? formatSize(asset.size) : '';
-        const url = asset ? asset.browser_download_url : '#';
-        const disabled = !asset;
+      enabledPlatforms.forEach(p => {
+        const state = config.platforms[p.id];
+        const fileName = state.fileName || '';
+        const fileSize = formatSize(state.fileSize);
+        const url = state.blobKey ? `/api/admin?action=download&file=${encodeURIComponent(state.blobKey)}` : '#';
 
         html += `
           <div class="card">
@@ -602,9 +583,9 @@
             <div class="card-platform">${p.name}</div>
             <div class="card-file">${fileName}</div>
             <div class="card-size">${fileSize || '&nbsp;'}</div>
-            <a class="btn" href="${url}" ${disabled ? 'disabled' : ''} ${!disabled ? 'download' : ''}>
+            <a class="btn" href="${url}" download>
               ${downloadSvg}
-              ${disabled ? 'Not available' : 'Download'}
+              Download
             </a>
           </div>`;
       });
@@ -634,7 +615,7 @@
       document.getElementById('content').innerHTML = `
         <div class="error-state">
           <div class="error-icon"><svg viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-          <div class="error-title">Unable to load releases</div>
+          <div class="error-title">Unable to load downloads</div>
           <div class="error-msg">${msg}</div>
           <button class="retry-btn" onclick="init()">Retry</button>
         </div>`;
@@ -666,12 +647,8 @@
     async function init() {
       animateHero();
       try {
-        const release = await fetchRelease();
-        if (!release) {
-          renderError('No releases available yet. Check back soon.');
-          return;
-        }
-        renderCards(release);
+        const config = await fetchConfig();
+        renderCards(config);
       } catch (e) {
         renderError(e.message || 'Something went wrong');
       }

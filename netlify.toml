@@ -7,6 +7,16 @@
   status = 200
 
 [[redirects]]
+  from = "/admin"
+  to = "/admin/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin"
+  to = "/.netlify/functions/admin"
+  status = 200
+
+[[redirects]]
   from = "/api/proxy"
   to = "/.netlify/functions/proxy"
   status = 200
