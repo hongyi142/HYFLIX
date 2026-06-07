@@ -555,14 +555,15 @@
     }
 
     async function fetchConfig() {
-      const res = await fetch('/api/admin?action=get-config');
+      const RTDB_URL = 'https://hyflix-56557-default-rtdb.asia-southeast1.firebasedatabase.app';
+      const res = await fetch(`${RTDB_URL}/download-config/platforms.json`);
       if (!res.ok) throw new Error('Failed to load configuration');
       return await res.json();
     }
 
-    function renderCards(config) {
+    function renderCards(platforms) {
       const container = document.getElementById('content');
-      const enabledPlatforms = PLATFORMS.filter(p => config.platforms[p.id]?.enabled);
+      const enabledPlatforms = PLATFORMS.filter(p => platforms[p.id]?.enabled);
 
       if (enabledPlatforms.length === 0) {
         renderError('No downloads available yet. Check back soon.');
@@ -571,10 +572,10 @@
 
       let html = '<div class="platforms-grid">';
       enabledPlatforms.forEach(p => {
-        const state = config.platforms[p.id];
+        const state = platforms[p.id];
         const fileName = state.fileName || '';
         const fileSize = formatSize(state.fileSize);
-        const url = state.url || '#';
+        const url = state.downloadUrl || '#';
 
         html += `
           <div class="card">
@@ -583,7 +584,7 @@
             <div class="card-platform">${p.name}</div>
             <div class="card-file">${fileName}</div>
             <div class="card-size">${fileSize || '&nbsp;'}</div>
-            <a class="btn" href="${url}" ${url !== '#' ? 'target="_blank" rel="noopener"' : ''}>
+            <a class="btn" href="${url}" target="_blank" rel="noopener">
               ${downloadSvg}
               Download
             </a>

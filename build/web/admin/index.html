@@ -71,7 +71,7 @@
       margin-bottom: 6px;
     }
 
-    .field input, .field textarea {
+    .field input {
       width: 100%;
       padding: 12px 14px;
       background: var(--surface);
@@ -83,8 +83,7 @@
       transition: border-color 0.2s;
     }
 
-    .field input:focus, .field textarea:focus { border-color: var(--accent); }
-    .field textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+    .field input:focus { border-color: var(--accent); }
 
     .login-btn {
       width: 100%;
@@ -155,17 +154,13 @@
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
       transition: border-color 0.2s;
     }
 
     .plat-card:hover { border-color: rgba(255,255,255,0.1); }
-
-    .plat-header {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
 
     .plat-icon {
       width: 44px;
@@ -185,9 +180,21 @@
 
     .plat-name { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
 
-    .plat-status { font-size: 12px; color: var(--text-muted); }
+    .plat-file {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'SF Mono', 'Menlo', monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
-    .plat-toggle { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    .plat-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
 
     /* Toggle */
     .toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
@@ -217,6 +224,35 @@
 
     .toggle input:checked ~ .toggle-thumb { transform: translateX(20px); }
 
+    /* Buttons */
+    .upload-btn, .delete-btn {
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .upload-btn {
+      background: rgba(255,255,255,0.06);
+      color: var(--text-primary);
+    }
+
+    .upload-btn:hover { background: rgba(255,255,255,0.1); }
+
+    .delete-btn {
+      background: transparent;
+      color: var(--accent);
+      padding: 8px;
+    }
+
+    .delete-btn:hover { background: rgba(229,9,20,0.1); }
+
+    .delete-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* Status badge */
     .status-badge {
       font-size: 11px;
       font-weight: 600;
@@ -229,56 +265,23 @@
     .status-active { background: rgba(70,211,105,0.1); color: var(--success); }
     .status-inactive { background: rgba(255,255,255,0.04); color: var(--text-muted); }
 
-    /* URL fields */
-    .plat-fields { display: none; }
-    .plat-fields.visible { display: block; }
-
-    .plat-fields .field { margin-bottom: 12px; }
-    .plat-fields .field:last-child { margin-bottom: 0; }
-
-    .field-row { display: flex; gap: 12px; }
-    .field-row .field { flex: 1; }
-
-    /* Action bar */
-    .action-bar {
-      margin-top: 32px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .save-btn {
-      padding: 12px 28px;
-      background: var(--accent);
-      color: #fff;
-      font-size: 14px;
-      font-weight: 600;
-      border: none;
-      border-radius: var(--radius);
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .save-btn:hover { background: var(--accent-hover); }
-
-    .copy-btn {
-      padding: 12px 28px;
+    /* Upload progress */
+    .progress-bar {
+      width: 100%;
+      height: 3px;
       background: rgba(255,255,255,0.06);
-      color: var(--text-primary);
-      font-size: 14px;
-      font-weight: 600;
-      border: none;
-      border-radius: var(--radius);
-      cursor: pointer;
-      transition: background 0.2s;
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+      display: none;
     }
 
-    .copy-btn:hover { background: rgba(255,255,255,0.1); }
-
-    .save-msg {
-      font-size: 13px;
-      color: var(--success);
-      display: none;
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.3s;
     }
 
     /* Toast */
@@ -300,32 +303,10 @@
 
     .toast.show { opacity: 1; transform: translateY(0); }
 
-    /* Env var instructions */
-    .env-instructions {
-      background: rgba(229,9,20,0.06);
-      border: 1px solid rgba(229,9,20,0.15);
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin-top: 24px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.6;
-    }
-
-    .env-instructions code {
-      background: rgba(255,255,255,0.06);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: 'SF Mono', 'Menlo', monospace;
-      font-size: 12px;
-      color: var(--text-primary);
-    }
-
     @media (max-width: 600px) {
       .dash-header { padding: 16px 20px; }
-      .plat-header { flex-wrap: wrap; }
-      .plat-toggle { width: 100%; justify-content: flex-end; }
-      .field-row { flex-direction: column; gap: 0; }
+      .plat-card { flex-wrap: wrap; }
+      .plat-actions { width: 100%; justify-content: flex-end; }
     }
   </style>
 </head>
@@ -363,43 +344,46 @@
     </div>
     <div class="dash-content">
       <div class="dash-heading">Platforms</div>
-      <div class="dash-desc">Toggle platforms and set download URLs. Files should be hosted externally (Google Drive, GitHub Releases, etc.).</div>
+      <div class="dash-desc">Toggle platforms and upload files for download.</div>
       <div class="platform-list" id="platformList"></div>
-      <div class="action-bar">
-        <button class="save-btn" onclick="exportConfig()">Copy Config JSON</button>
-        <span class="save-msg" id="saveMsg">Copied to clipboard</span>
-      </div>
-      <div class="env-instructions">
-        <strong>How to update:</strong> Copy the config JSON above, then go to
-        <a href="https://app.netlify.com/projects/hyflix/configuration/env" target="_blank" style="color:var(--accent)">Netlify Environment Variables</a>
-        and set <code>HYFLIX_CONFIG</code> to the copied JSON. Redeploy the site for changes to take effect.
-      </div>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
+  <input type="file" id="fileInput" style="display:none">
+
+  <!-- Firebase v9 compat SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
   <script>
-    const API = '/api/admin';
-    let token = localStorage.getItem('hyflix_admin_token');
-    let config = { platforms: {} };
+    const firebaseConfig = {
+      apiKey: 'AIzaSyC7MxOV-w0rEejih4KAlxW-W7fnUYuC_aU',
+      authDomain: 'hyflix-56557.firebaseapp.com',
+      databaseURL: 'https://hyflix-56557-default-rtdb.asia-southeast1.firebasedatabase.app',
+      projectId: 'hyflix-56557',
+      storageBucket: 'hyflix-56557.firebasestorage.app',
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const storage = firebase.storage();
+    const db = firebase.database();
 
     const PLATFORMS = [
-      { id: 'android', name: 'Android', icon: '<svg viewBox="0 0 24 24"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 3.26 6 5.01 6 7h12c0-1.99-.97-3.75-2.47-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z"/></svg>' },
-      { id: 'windows', name: 'Windows', icon: '<svg viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>' },
-      { id: 'macos', name: 'macOS', icon: '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>' },
-      { id: 'ios', name: 'iPhone / iPad', icon: '<svg viewBox="0 0 24 24"><path d="M15.5 1h-8C6.12 1 5 2.12 5 3.5v17C5 21.88 6.12 23 7.5 23h8c1.38 0 2.5-1.12 2.5-2.5v-17C18 2.12 16.88 1 15.5 1zm-4 21c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5-4H7V4h9v14z"/></svg>' },
-      { id: 'android-tv', name: 'Android TV', icon: '<svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>' },
-      { id: 'apple-tv', name: 'Apple TV', icon: '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>' },
+      { id: 'android', name: 'Android', accept: '.apk', icon: '<svg viewBox="0 0 24 24"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 3.26 6 5.01 6 7h12c0-1.99-.97-3.75-2.47-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z"/></svg>' },
+      { id: 'windows', name: 'Windows', accept: '.zip,.exe,.msi', icon: '<svg viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>' },
+      { id: 'macos', name: 'macOS', accept: '.dmg,.zip', icon: '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>' },
+      { id: 'ios', name: 'iPhone / iPad', accept: '.ipa', icon: '<svg viewBox="0 0 24 24"><path d="M15.5 1h-8C6.12 1 5 2.12 5 3.5v17C5 21.88 6.12 23 7.5 23h8c1.38 0 2.5-1.12 2.5-2.5v-17C18 2.12 16.88 1 15.5 1zm-4 21c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5-4H7V4h9v14z"/></svg>' },
+      { id: 'android-tv', name: 'Android TV', accept: '.apk', icon: '<svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>' },
+      { id: 'apple-tv', name: 'Apple TV', accept: '.ipa,.dmg', icon: '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>' },
     ];
 
-    async function api(action, body) {
-      const opts = { headers: { 'Content-Type': 'application/json' } };
-      if (token) opts.headers['Authorization'] = `Bearer ${token}`;
-      if (body) { opts.method = 'POST'; opts.body = JSON.stringify(body); }
-      const res = await fetch(`${API}?action=${action}`, opts);
-      return res.json();
-    }
+    const trashSvg = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+
+    let config = {};
 
     function showToast(msg) {
       const t = document.getElementById('toast');
@@ -408,15 +392,19 @@
       setTimeout(() => t.classList.remove('show'), 2500);
     }
 
-    // Login
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    function formatSize(bytes) {
+      if (!bytes) return '';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    // Login (client-side gate)
+    document.getElementById('loginForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const user = document.getElementById('username').value;
       const pass = document.getElementById('password').value;
-      const data = await api('login', { user, pass });
-      if (data.ok) {
-        token = data.token;
-        localStorage.setItem('hyflix_admin_token', token);
+      if (user === 'admin' && pass === '123') {
+        localStorage.setItem('hyflix_admin', '1');
         showDashboard();
       } else {
         document.getElementById('loginError').style.display = 'block';
@@ -424,8 +412,7 @@
     });
 
     function logout() {
-      token = null;
-      localStorage.removeItem('hyflix_admin_token');
+      localStorage.removeItem('hyflix_admin');
       document.getElementById('loginView').classList.add('active');
       document.getElementById('dashView').classList.remove('active');
     }
@@ -434,93 +421,129 @@
     async function showDashboard() {
       document.getElementById('loginView').classList.remove('active');
       document.getElementById('dashView').classList.add('active');
-      const data = await api('get-config');
-      if (data.error) { logout(); return; }
-      config = data;
-      renderPlatforms();
+
+      // Sign in anonymously for Firebase Storage/RTDB access
+      try {
+        await auth.signInAnonymously();
+      } catch (e) {
+        console.error('Firebase auth failed:', e);
+        showToast('Firebase auth error: ' + e.message);
+      }
+
+      // Load config from RTDB
+      db.ref('download-config/platforms').on('value', (snap) => {
+        config = snap.val() || {};
+        renderPlatforms();
+      });
     }
 
     function renderPlatforms() {
       const list = document.getElementById('platformList');
       list.innerHTML = '';
       PLATFORMS.forEach(p => {
-        const state = config.platforms[p.id] || { enabled: false, fileName: '', fileSize: 0, url: '' };
+        const state = config[p.id] || {};
+        const hasFile = !!state.downloadUrl;
         const card = document.createElement('div');
         card.className = 'plat-card';
         card.innerHTML = `
-          <div class="plat-header">
-            <div class="plat-icon">${p.icon}</div>
-            <div class="plat-info">
-              <div class="plat-name">${p.name}</div>
-              <div class="plat-status">${state.url ? state.fileName || 'File linked' : 'No file linked'}</div>
-            </div>
-            <div class="plat-toggle">
-              <span class="status-badge ${state.enabled ? 'status-active' : 'status-inactive'}">${state.enabled ? 'Live' : 'Off'}</span>
-              <label class="toggle">
-                <input type="checkbox" ${state.enabled ? 'checked' : ''} onchange="togglePlatform('${p.id}', this.checked)">
-                <div class="toggle-track"></div>
-                <div class="toggle-thumb"></div>
-              </label>
-            </div>
+          <div class="plat-icon">${p.icon}</div>
+          <div class="plat-info">
+            <div class="plat-name">${p.name}</div>
+            <div class="plat-file">${hasFile ? state.fileName + (state.fileSize ? ' (' + formatSize(state.fileSize) + ')' : '') : 'No file uploaded'}</div>
+            <div class="progress-bar" id="progress-${p.id}"><div class="progress-fill" id="fill-${p.id}"></div></div>
           </div>
-          <div class="plat-fields ${state.enabled ? 'visible' : ''}" id="fields-${p.id}">
-            <div class="field">
-              <label>Download URL</label>
-              <input type="url" value="${state.url || ''}" placeholder="https://drive.google.com/..." onchange="updateField('${p.id}', 'url', this.value)">
-            </div>
-            <div class="field-row">
-              <div class="field">
-                <label>File Name</label>
-                <input type="text" value="${state.fileName || ''}" placeholder="hyflix.apk" onchange="updateField('${p.id}', 'fileName', this.value)">
-              </div>
-              <div class="field">
-                <label>File Size (bytes)</label>
-                <input type="number" value="${state.fileSize || ''}" placeholder="134000000" onchange="updateField('${p.id}', 'fileSize', parseInt(this.value) || 0)">
-              </div>
-            </div>
+          <div class="plat-actions">
+            <span class="status-badge ${state.enabled ? 'status-active' : 'status-inactive'}">${state.enabled ? 'Live' : 'Off'}</span>
+            <label class="toggle">
+              <input type="checkbox" ${state.enabled ? 'checked' : ''} onchange="togglePlatform('${p.id}', this.checked)">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+            <button class="upload-btn" onclick="triggerUpload('${p.id}', '${p.accept}')">Upload</button>
+            ${hasFile ? `<button class="delete-btn" onclick="deleteFile('${p.id}')" title="Remove file">${trashSvg}</button>` : ''}
           </div>`;
         list.appendChild(card);
       });
     }
 
-    function togglePlatform(id, enabled) {
-      if (!config.platforms[id]) config.platforms[id] = {};
-      config.platforms[id].enabled = enabled;
-      const fields = document.getElementById(`fields-${id}`);
-      if (fields) fields.classList.toggle('visible', enabled);
-      const badge = fields?.parentElement.querySelector('.status-badge');
-      if (badge) {
-        badge.className = `status-badge ${enabled ? 'status-active' : 'status-inactive'}`;
-        badge.textContent = enabled ? 'Live' : 'Off';
+    async function togglePlatform(id, enabled) {
+      await db.ref(`download-config/platforms/${id}/enabled`).set(enabled);
+      showToast(`${id} ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    let currentUploadPlatform = '';
+    let currentUploadAccept = '';
+
+    function triggerUpload(platformId, accept) {
+      currentUploadPlatform = platformId;
+      currentUploadAccept = accept;
+      const input = document.getElementById('fileInput');
+      input.accept = accept;
+      input.value = '';
+      input.click();
+    }
+
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const platform = currentUploadPlatform;
+      const progressBar = document.getElementById(`progress-${platform}`);
+      const progressFill = document.getElementById(`fill-${platform}`);
+      progressBar.style.display = 'block';
+      progressFill.style.width = '0%';
+
+      try {
+        const storageRef = storage.ref(`downloads/${platform}/${file.name}`);
+        const uploadTask = storageRef.put(file);
+
+        uploadTask.on('state_changed',
+          (snapshot) => {
+            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+            progressFill.style.width = pct + '%';
+          },
+          (error) => {
+            console.error('Upload error:', error);
+            showToast('Upload failed: ' + error.message);
+            progressBar.style.display = 'none';
+          },
+          async () => {
+            const downloadUrl = await uploadTask.snapshot.ref.getDownloadURL();
+            await db.ref(`download-config/platforms/${platform}`).set({
+              enabled: true,
+              fileName: file.name,
+              fileSize: file.size,
+              downloadUrl,
+              uploadedAt: new Date().toISOString(),
+            });
+            progressFill.style.width = '100%';
+            showToast(`${file.name} uploaded`);
+            setTimeout(() => progressBar.style.display = 'none', 2000);
+          }
+        );
+      } catch (e) {
+        console.error('Upload error:', e);
+        showToast('Upload failed: ' + e.message);
+        progressBar.style.display = 'none';
       }
-    }
+    });
 
-    function updateField(id, field, value) {
-      if (!config.platforms[id]) config.platforms[id] = {};
-      config.platforms[id][field] = value;
-    }
-
-    function exportConfig() {
-      const json = JSON.stringify(config, null, 2);
-      navigator.clipboard.writeText(json).then(() => {
-        const msg = document.getElementById('saveMsg');
-        msg.style.display = 'inline';
-        setTimeout(() => msg.style.display = 'none', 3000);
-        showToast('Config JSON copied to clipboard');
-      }).catch(() => {
-        // Fallback: show in a textarea
-        const ta = document.createElement('textarea');
-        ta.value = json;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showToast('Config JSON copied');
-      });
+    async function deleteFile(platform) {
+      if (!confirm(`Remove file for ${platform}?`)) return;
+      const state = config[platform];
+      if (state?.downloadUrl) {
+        try {
+          const ref = storage.refFromURL(state.downloadUrl);
+          await ref.delete();
+        } catch (e) {
+          console.warn('Could not delete from storage:', e);
+        }
+      }
+      await db.ref(`download-config/platforms/${platform}`).set({ enabled: false });
+      showToast('File removed');
     }
 
     // Init
-    if (token) showDashboard();
+    if (localStorage.getItem('hyflix_admin')) showDashboard();
   </script>
 </body>
 </html>
