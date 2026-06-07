@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HYFLIX - Admin</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-hover: #1a1a1a;
+      --border: rgba(255,255,255,0.06);
+      --text-primary: #fff;
+      --text-secondary: #808080;
+      --text-muted: #555;
+      --accent: #E50914;
+      --accent-hover: #b2070f;
+      --success: #46d369;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* Login */
+    .login-wrap {
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .login-box {
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .login-logo {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .login-logo span { color: var(--accent); }
+
+    .login-sub {
+      text-align: center;
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .field input {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-primary);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .field input:focus {
+      border-color: var(--accent);
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 8px;
+    }
+
+    .login-btn:hover { background: var(--accent-hover); }
+
+    .login-error {
+      color: var(--accent);
+      font-size: 13px;
+      text-align: center;
+      margin-top: 12px;
+      display: none;
+    }
+
+    /* Dashboard */
+    .dash-header {
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dash-logo {
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .dash-logo span { color: var(--accent); }
+
+    .dash-title {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .logout-btn {
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .logout-btn:hover {
+      color: var(--text-primary);
+      border-color: var(--text-muted);
+    }
+
+    .dash-content {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+
+    .dash-heading {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .dash-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+    }
+
+    /* Platform cards */
+    .platform-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .plat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      transition: border-color 0.2s;
+    }
+
+    .plat-card:hover {
+      border-color: rgba(255,255,255,0.1);
+    }
+
+    .plat-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .plat-icon svg {
+      width: 22px;
+      height: 22px;
+      fill: var(--text-primary);
+    }
+
+    .plat-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .plat-name {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .plat-file {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'SF Mono', 'Menlo', monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .plat-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    /* Toggle */
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      cursor: pointer;
+    }
+
+    .toggle input { display: none; }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      transition: background 0.2s;
+    }
+
+    .toggle input:checked + .toggle-track {
+      background: var(--accent);
+    }
+
+    .toggle-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      pointer-events: none;
+    }
+
+    .toggle input:checked ~ .toggle-thumb {
+      transform: translateX(20px);
+    }
+
+    /* Buttons */
+    .upload-btn, .delete-btn {
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .upload-btn {
+      background: rgba(255,255,255,0.06);
+      color: var(--text-primary);
+    }
+
+    .upload-btn:hover {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .delete-btn {
+      background: transparent;
+      color: var(--accent);
+      padding: 8px;
+    }
+
+    .delete-btn:hover {
+      background: rgba(229,9,20,0.1);
+    }
+
+    .delete-btn svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    /* Status badge */
+    .status-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-active {
+      background: rgba(70,211,105,0.1);
+      color: var(--success);
+    }
+
+    .status-inactive {
+      background: rgba(255,255,255,0.04);
+      color: var(--text-muted);
+    }
+
+    /* Upload progress */
+    .progress-bar {
+      width: 100%;
+      height: 3px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-size: 13px;
+      color: var(--text-primary);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.3s, transform 0.3s;
+      z-index: 1000;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 600px) {
+      .dash-header { padding: 16px 20px; }
+      .plat-card { flex-wrap: wrap; }
+      .plat-actions { width: 100%; justify-content: flex-end; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Login View -->
+  <div id="loginView" class="view active">
+    <div class="login-wrap">
+      <div class="login-box">
+        <div class="login-logo">HY<span>FLIX</span></div>
+        <div class="login-sub">Admin Panel</div>
+        <form id="loginForm">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" id="username" autocomplete="username" required>
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="login-btn">Sign in</button>
+          <div class="login-error" id="loginError">Invalid credentials</div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard View -->
+  <div id="dashView" class="view">
+    <div class="dash-header">
+      <div>
+        <div class="dash-logo">HY<span>FLIX</span></div>
+      </div>
+      <div class="dash-title">Download Manager</div>
+      <button class="logout-btn" onclick="logout()">Sign out</button>
+    </div>
+    <div class="dash-content">
+      <div class="dash-heading">Platforms</div>
+      <div class="dash-desc">Toggle platforms and upload files for download.</div>
+      <div class="platform-list" id="platformList"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <input type="file" id="fileInput" style="display:none">
+
+  <script>
+    const API = '/api/admin';
+    let token = localStorage.getItem('hyflix_admin_token');
+    let config = { platforms: {} };
+
+    const PLATFORMS = [
+      { id: 'android', name: 'Android', accept: '.apk', icon: '<svg viewBox="0 0 24 24"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 3.26 6 5.01 6 7h12c0-1.99-.97-3.75-2.47-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z"/></svg>' },
+      { id: 'windows', name: 'Windows', accept: '.exe,.msi', icon: '<svg viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>' },
+      { id: 'macos', name: 'macOS', accept: '.dmg,.app', icon: '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>' },
+      { id: 'ios', name: 'iPhone / iPad', accept: '.ipa', icon: '<svg viewBox="0 0 24 24"><path d="M15.5 1h-8C6.12 1 5 2.12 5 3.5v17C5 21.88 6.12 23 7.5 23h8c1.38 0 2.5-1.12 2.5-2.5v-17C18 2.12 16.88 1 15.5 1zm-4 21c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5-4H7V4h9v14z"/></svg>' },
+      { id: 'android-tv', name: 'Android TV', accept: '.apk', icon: '<svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>' },
+      { id: 'apple-tv', name: 'Apple TV', accept: '.ipa,.dmg', icon: '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>' },
+    ];
+
+    const trashSvg = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+
+    async function api(action, body) {
+      const opts = { headers: { 'Content-Type': 'application/json' } };
+      if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+      if (body) { opts.method = 'POST'; opts.body = JSON.stringify(body); }
+      const res = await fetch(`${API}?action=${action}`, opts);
+      return res.json();
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    // Login
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const user = document.getElementById('username').value;
+      const pass = document.getElementById('password').value;
+      const data = await api('login', { user, pass });
+      if (data.ok) {
+        token = data.token;
+        localStorage.setItem('hyflix_admin_token', token);
+        showDashboard();
+      } else {
+        document.getElementById('loginError').style.display = 'block';
+      }
+    });
+
+    function logout() {
+      token = null;
+      localStorage.removeItem('hyflix_admin_token');
+      document.getElementById('loginView').classList.add('active');
+      document.getElementById('dashView').classList.remove('active');
+    }
+
+    // Dashboard
+    async function showDashboard() {
+      document.getElementById('loginView').classList.remove('active');
+      document.getElementById('dashView').classList.add('active');
+      const data = await api('get-config');
+      if (data.error) { logout(); return; }
+      config = data;
+      renderPlatforms();
+    }
+
+    function formatSize(bytes) {
+      if (!bytes) return '';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function renderPlatforms() {
+      const list = document.getElementById('platformList');
+      list.innerHTML = '';
+      PLATFORMS.forEach(p => {
+        const state = config.platforms[p.id] || {};
+        const hasFile = !!state.fileName;
+        const card = document.createElement('div');
+        card.className = 'plat-card';
+        card.innerHTML = `
+          <div class="plat-icon">${p.icon}</div>
+          <div class="plat-info">
+            <div class="plat-name">${p.name}</div>
+            <div class="plat-file">${hasFile ? state.fileName + (state.fileSize ? ' (' + formatSize(state.fileSize) + ')' : '') : 'No file uploaded'}</div>
+            <div class="progress-bar" id="progress-${p.id}"><div class="progress-fill" id="fill-${p.id}"></div></div>
+          </div>
+          <div class="plat-actions">
+            <span class="status-badge ${state.enabled ? 'status-active' : 'status-inactive'}">${state.enabled ? 'Live' : 'Off'}</span>
+            <label class="toggle">
+              <input type="checkbox" ${state.enabled ? 'checked' : ''} onchange="togglePlatform('${p.id}', this.checked)">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+            <button class="upload-btn" onclick="triggerUpload('${p.id}', '${p.accept}')">Upload</button>
+            ${hasFile ? `<button class="delete-btn" onclick="deleteFile('${p.id}')" title="Remove file">${trashSvg}</button>` : ''}
+          </div>`;
+        list.appendChild(card);
+      });
+    }
+
+    async function togglePlatform(id, enabled) {
+      await api('toggle', { platform: id, enabled });
+      config.platforms[id].enabled = enabled;
+      renderPlatforms();
+      showToast(`${id} ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    let currentUploadPlatform = '';
+    let currentUploadAccept = '';
+
+    function triggerUpload(platformId, accept) {
+      currentUploadPlatform = platformId;
+      currentUploadAccept = accept;
+      const input = document.getElementById('fileInput');
+      input.accept = accept;
+      input.value = '';
+      input.click();
+    }
+
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const platform = currentUploadPlatform;
+      const progressBar = document.getElementById(`progress-${platform}`);
+      const progressFill = document.getElementById(`fill-${platform}`);
+      progressBar.style.display = 'block';
+      progressFill.style.width = '0%';
+
+      const reader = new FileReader();
+      reader.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          progressFill.style.width = Math.round((evt.loaded / evt.total) * 50) + '%';
+        }
+      };
+      reader.onload = async () => {
+        progressFill.style.width = '60%';
+        const base64 = reader.result.split(',')[1];
+        progressFill.style.width = '80%';
+        await api('upload', {
+          platform,
+          fileName: file.name,
+          fileSize: file.size,
+          data: base64,
+        });
+        progressFill.style.width = '100%';
+        config.platforms[platform] = {
+          enabled: true,
+          fileName: file.name,
+          fileSize: file.size,
+        };
+        renderPlatforms();
+        showToast(`${file.name} uploaded`);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    async function deleteFile(platform) {
+      if (!confirm(`Remove file for ${platform}?`)) return;
+      await api('delete', { platform });
+      config.platforms[platform] = { enabled: false };
+      renderPlatforms();
+      showToast('File removed');
+    }
+
+    // Init
+    if (token) showDashboard();
+  </script>
+</body>
+</html>
