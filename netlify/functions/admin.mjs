@@ -1,7 +1,5 @@
 import { BlobStore } from '@netlify/blobs';
 
-const SITE_ID = process.env.SITE_ID || process.env.NETLIFY_SITE_ID;
-const TOKEN = process.env.NETLIFY_AUTH_TOKEN;
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = '123';
 const TOKEN_MAX_AGE = 24 * 60 * 60 * 1000;
@@ -18,7 +16,7 @@ const DEFAULT_CONFIG = {
 };
 
 function getStore() {
-  return new BlobStore({ siteID: SITE_ID, token: TOKEN });
+  return new BlobStore();
 }
 
 function json(data, status = 200) {
@@ -46,7 +44,7 @@ function checkAuth(request) {
 
 async function getConfig(store) {
   const data = await store.get('config.json', { type: 'json' });
-  return data || structuredClone(DEFAULT_CONFIG);
+  return data || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 }
 
 export default async (request) => {
