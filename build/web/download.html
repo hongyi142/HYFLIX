@@ -474,13 +474,13 @@
 
   <nav class="nav">
     <a href="/" class="nav-logo">HY<span>FLIX</span></a>
-    <a href="https://github.com/hongyi142/HYFLIX" target="_blank" class="nav-link">GitHub</a>
+    <span class="nav-link" style="cursor:default"></span>
   </nav>
 
   <section class="hero">
     <div class="hero-eyebrow">Available for all platforms</div>
     <h1 class="hero-title">Watch <span>anywhere.</span></h1>
-    <p class="hero-sub">Stream your favorite content on any device. Free, open source, and built for you.</p>
+    <p class="hero-sub">Stream your favorite content on any device. Free and built for you.</p>
     <a href="#download" class="hero-cta">
       <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
       Download HYFLIX
@@ -510,7 +510,7 @@
   </section>
 
   <footer class="footer">
-    <p>Open source &middot; <a href="https://github.com/hongyi142/HYFLIX" target="_blank">View on GitHub</a></p>
+    <p>&copy; 2026 HYFLIX</p>
   </footer>
 
   <script>
@@ -567,6 +567,7 @@
       const cached = getCached();
       if (cached) return cached;
       const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+      if (res.status === 404) return null;
       if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
       const release = await res.json();
       setCache(release);
@@ -666,6 +667,10 @@
       animateHero();
       try {
         const release = await fetchRelease();
+        if (!release) {
+          renderError('No releases available yet. Check back soon.');
+          return;
+        }
         renderCards(release);
       } catch (e) {
         renderError(e.message || 'Something went wrong');

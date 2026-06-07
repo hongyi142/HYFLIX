@@ -1,6 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
+import 'desktop_init.dart';
 import 'services/media_init.dart';
 import 'core/theme.dart';
 import 'pages/splash_page.dart';
@@ -16,11 +15,7 @@ final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<v
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize window_manager for desktop fullscreen support
-  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-    await WindowManager.instance.ensureInitialized();
-    await WindowManager.instance.waitUntilReadyToShow();
-  }
+  await initDesktopWindow();
 
   ensureMediaKitInitialized();
   await ApiService.init();
