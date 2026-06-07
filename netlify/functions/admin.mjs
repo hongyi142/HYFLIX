@@ -1,4 +1,4 @@
-import { BlobStore } from '@netlify/blobs';
+import { getStore as getBlobStore } from '@netlify/blobs';
 
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = '123';
@@ -15,13 +15,8 @@ const DEFAULT_CONFIG = {
   },
 };
 
-function getStore() {
-  const siteID = process.env.SITE_ID || process.env.NETLIFY_SITE_ID;
-  const token = process.env.NETLIFY_AUTH_TOKEN;
-  if (!siteID || !token) {
-    throw new Error('Missing SITE_ID or NETLIFY_AUTH_TOKEN environment variables');
-  }
-  return new BlobStore({ siteID, token });
+function store() {
+  return getBlobStore('hyflix');
 }
 
 function json(data, status = 200) {
@@ -47,8 +42,8 @@ function checkAuth(request) {
   }
 }
 
-async function getConfig(store) {
-  const data = await store.get('config.json', { type: 'json' });
+async function getConfig() {
+  const data = await store().get('config.json', { type: 'json' });
   return data || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 }
 
@@ -67,17 +62,6 @@ export default async (request) => {
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
 
-  // Diagnostic: check blob context
-  if (action === 'diag') {
-    return json({
-      hasBlobsContext: !!process.env.NETLIFY_BLOBS_CONTEXT,
-      hasSiteId: !!process.env.SITE_ID,
-      hasNetlifySiteId: !!process.env.NETLIFY_SITE_ID,
-      hasGlobalContext: typeof globalThis.netlifyBlobsContext !== 'undefined',
-      envKeys: Object.keys(process.env).filter(k => k.includes('NETLIFY') || k.includes('SITE')).sort(),
-    });
-  }
-
   // Login doesn't need the blob store
   if (action === 'login') {
     try {
@@ -92,17 +76,9 @@ export default async (request) => {
     }
   }
 
-  // All other actions need the blob store
-  let store;
-  try {
-    store = getStore();
-  } catch (e) {
-    return json({ error: e.message }, 500);
-  }
-
   try {
     if (action === 'get-config') {
-      const config = await getConfig(store);
+      const config = await getConfig();
       return json(config);
     }
 
@@ -114,8 +90,8 @@ export default async (request) => {
       }
       const blobKey = `files/${platform}/${fileName}`;
       const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-      await store.set(blobKey, buffer, { contentType: 'application/octet-stream' });
-      const config = await getConfig(store);
+      await store().set(blobKey, buffer, { contentType: 'application/octet-stream' });
+      const config = await getConfig();
       config.platforms[platform] = {
         enabled: true,
         fileName,
@@ -123,38 +99,38 @@ export default async (request) => {
         blobKey,
         uploadedAt: new Date().toISOString(),
       };
-      await store.set('config.json', JSON.stringify(config), { contentType: 'application/json' });
+      await store().set('config.json', JSON.stringify(config), { contentType: 'application/json' });
       return json({ ok: true });
     }
 
     if (action === 'delete') {
       if (!checkAuth(request)) return json({ error: 'Unauthorized' }, 401);
       const { platform } = await request.json();
-      const config = await getConfig(store);
+      const config = await getConfig();
       const p = config.platforms[platform];
       if (p?.blobKey) {
-        await store.delete(p.blobKey);
+        await store().delete(p.blobKey);
       }
       config.platforms[platform] = { enabled: false };
-      await store.set('config.json', JSON.stringify(config), { contentType: 'application/json' });
+      await store().set('config.json', JSON.stringify(config), { contentType: 'application/json' });
       return json({ ok: true });
     }
 
     if (action === 'toggle') {
       if (!checkAuth(request)) return json({ error: 'Unauthorized' }, 401);
       const { platform, enabled } = await request.json();
-      const config = await getConfig(store);
+      const config = await getConfig();
       if (config.platforms[platform]) {
         config.platforms[platform].enabled = enabled;
       }
-      await store.set('config.json', JSON.stringify(config), { contentType: 'application/json' });
+      await store().set('config.json', JSON.stringify(config), { contentType: 'application/json' });
       return json({ ok: true });
     }
 
     if (action === 'download') {
       const file = url.searchParams.get('file');
       if (!file) return json({ error: 'Missing file parameter' }, 400);
-      const data = await store.get(file);
+      const data = await store().get(file);
       if (!data) return json({ error: 'File not found' }, 404);
       const fileName = file.split('/').pop();
       return new Response(data, {
