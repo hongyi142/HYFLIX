@@ -696,8 +696,8 @@ class _DetailPageState extends State<DetailPage> {
           tmdbId: _tmdb?.id?.toString(),
           isTvShow: isTvShow,
           seasonNumber: _selectedSeason,
-          episodeNumber: _episodeNumberInSeason(episodeIndex, episodes),
           posterUrl: poster,
+          episodeNumber: _episodeNumberInSeason(episodeIndex, episodes),
         ),
       ),
     );

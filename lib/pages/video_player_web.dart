@@ -20,6 +20,8 @@ class VideoPlayerScreen extends StatefulWidget {
   final String posterUrl;
   final int seekToSeconds;
   final TorrentStream? torrentStream;
+  final int? episodeNumber;
+  final int episodeCount;
 
   const VideoPlayerScreen({
     super.key,
@@ -34,6 +36,8 @@ class VideoPlayerScreen extends StatefulWidget {
     this.posterUrl = '',
     this.seekToSeconds = 0,
     this.torrentStream,
+    this.episodeNumber,
+    this.episodeCount = 0,
   });
 
   @override
