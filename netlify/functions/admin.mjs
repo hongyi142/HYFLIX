@@ -67,6 +67,17 @@ export default async (request) => {
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
 
+  // Diagnostic: check blob context
+  if (action === 'diag') {
+    return json({
+      hasBlobsContext: !!process.env.NETLIFY_BLOBS_CONTEXT,
+      hasSiteId: !!process.env.SITE_ID,
+      hasNetlifySiteId: !!process.env.NETLIFY_SITE_ID,
+      hasGlobalContext: typeof globalThis.netlifyBlobsContext !== 'undefined',
+      envKeys: Object.keys(process.env).filter(k => k.includes('NETLIFY') || k.includes('SITE')).sort(),
+    });
+  }
+
   // Login doesn't need the blob store
   if (action === 'login') {
     try {
