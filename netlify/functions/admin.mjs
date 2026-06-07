@@ -16,7 +16,12 @@ const DEFAULT_CONFIG = {
 };
 
 function getStore() {
-  return new BlobStore();
+  const siteID = process.env.SITE_ID || process.env.NETLIFY_SITE_ID;
+  const token = process.env.NETLIFY_AUTH_TOKEN;
+  if (!siteID || !token) {
+    throw new Error('Missing SITE_ID or NETLIFY_AUTH_TOKEN environment variables');
+  }
+  return new BlobStore({ siteID, token });
 }
 
 function json(data, status = 200) {
@@ -62,18 +67,29 @@ export default async (request) => {
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
 
-  try {
-    const store = getStore();
-
-    if (action === 'login') {
+  // Login doesn't need the blob store
+  if (action === 'login') {
+    try {
       const { user, pass } = await request.json();
       if (user === ADMIN_USER && pass === ADMIN_PASS) {
         const token = btoa(JSON.stringify({ user: ADMIN_USER, ts: Date.now() }));
         return json({ ok: true, token });
       }
       return json({ ok: false, error: 'Invalid credentials' }, 401);
+    } catch (e) {
+      return json({ error: e.message || 'Login failed' }, 500);
     }
+  }
 
+  // All other actions need the blob store
+  let store;
+  try {
+    store = getStore();
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+
+  try {
     if (action === 'get-config') {
       const config = await getConfig(store);
       return json(config);
