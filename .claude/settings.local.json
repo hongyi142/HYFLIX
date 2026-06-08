@@ -99,7 +99,8 @@
       "WebFetch(domain:rapidapi.com)",
       "WebFetch(domain:www.google.com)",
       "Bash(python -m json.tool)",
-      "Bash(C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe release *)"
+      "Bash(C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe release *)",
+      "Bash(npx netlify *)"
     ]
   }
 }
