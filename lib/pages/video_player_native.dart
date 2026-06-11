@@ -87,8 +87,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   // Next episode autoplay
   bool _showAutoplay = false;
-  int _autoplayCountdown = 180;
+  int _autoplayCountdown = 60;
   bool _autoPlaying = false;
+  bool _autoplayDismissed = false;
   Timer? _autoplayTimer;
   StreamSubscription<bool>? _completedSub;
 
@@ -359,12 +360,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       final sec = pos.inSeconds;
       bool shouldShow = false;
 
-      if (_introTimestamp != null) {
-        final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ??
-                        (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
-        shouldShow = sec < skipDur;
-      } else {
-        shouldShow = sec < 300; // Allow recording within first 5 mins
+      // Hide skip/record intro after the first 3 minutes
+      if (sec < 180) {
+        if (_introTimestamp != null) {
+          final skipDur = (_introTimestamp!['skipDuration'] as num?)?.toInt() ??
+                          (_introTimestamp!['endSeconds'] as num?)?.toInt() ?? 0;
+          shouldShow = sec < skipDur;
+        } else {
+          shouldShow = true;
+        }
       }
 
       if (shouldShow != _showSkipIntro) {
@@ -380,7 +384,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   /// Called from both the periodic timer and the position listener so the
   /// card appears immediately after a seek, not just on the next tick.
   void _checkAutoplay() {
-    if (!mounted || _autoPlaying) return;
+    if (!mounted || _autoPlaying || _autoplayDismissed) return;
     final hasEpisodes = _hasMultipleEpisodes;
     final hasNext = _currentEpIndex < _effectiveEpisodeCount - 1;
     if (!hasEpisodes || !hasNext) return;
@@ -391,18 +395,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     final remaining = dur - pos;
 
-    if (remaining <= 180 && remaining > 0) {
+    if (remaining <= 60 && remaining > 0) {
       if (!_showAutoplay) {
         setState(() {
           _showAutoplay = true;
-          _autoplayCountdown = 180;
+          _autoplayCountdown = 60;
         });
       }
-    } else if (remaining > 180 && _showAutoplay) {
+    } else if (remaining > 60 && _showAutoplay) {
       // User seeked away from the end
       setState(() {
         _showAutoplay = false;
-        _autoplayCountdown = 180;
+        _autoplayCountdown = 60;
       });
     }
   }
@@ -481,7 +485,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (nextIdx >= _effectiveEpisodeCount) return;
     _autoPlaying = true;
     _showAutoplay = false;
-    _autoplayCountdown = 180;
+    _autoplayDismissed = false;
+    _autoplayCountdown = 60;
     // For torrent content (no episode URLs), pop with the next episode index
     if (widget.episodes.isEmpty && widget.torrentStream != null) {
       Navigator.of(context).pop(nextIdx);
@@ -626,7 +631,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showSubtitles = false;
       _showAudioTracks = false;
       _showAutoplay = false;
-      _autoplayCountdown = 180;
+      _autoplayDismissed = false;
+      _autoplayCountdown = 60;
       _autoPlaying = false;
       _selectedSub = null;
       _selectedAudioTrack = null;
@@ -2033,13 +2039,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                 child: Row(
                   children: [
-                    // Skip Later button
+                    // Skip Later button — hide card, auto-skip when video ends
                     Expanded(
                       child: HoverButton(
                         onTap: () {
                           setState(() {
                             _showAutoplay = false;
-                            _autoplayCountdown = 180;
+                            _autoplayDismissed = true;
                           });
                         },
                         backgroundColor: Colors.white12,
