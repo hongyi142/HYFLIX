@@ -504,7 +504,9 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _handleDownload(int episodeIndex) {
-    final ep = widget.content.episodes[episodeIndex];
+    final episodes = _sourceEpisodes ?? widget.content.episodes;
+    if (episodeIndex < 0 || episodeIndex >= episodes.length) return;
+    final ep = episodes[episodeIndex];
     final contentId = _tmdb?.id?.toString() ?? widget.content.title;
     final existing = _downloadService.getDownload(contentId, episodeIndex);
 

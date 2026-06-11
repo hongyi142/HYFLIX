@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:file_picker/file_picker.dart';
 import '../core/theme.dart';
 import '../models/episode.dart';
 import '../services/subtitle_service.dart';
@@ -286,14 +288,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       debugPrint('[VideoPlayer] Opening media: $url');
       _bufferingSub?.cancel();
 
-      // Configure mpv cache/timeout for VOD streams (torrent streams are
-      // already configured in _configureMpvForTorrent). Chinese VOD CDNs
-      // can be slow — mpv's default 5s timeout causes frequent rebuffering.
+      // Configure mpv timeout for VOD streams. Chinese VOD CDNs can be slow
+      // so we raise the network timeout. We do NOT set cache-secs or
+      // demuxer-readahead-secs here — mpv's defaults (120s / 150s) are much
+      // more generous than the 30s we were using, and that was causing
+      // stuttering on Chinese VOD streams.
       if (widget.torrentStream == null) {
         final native = _player.platform as NativePlayer;
-        await native.setProperty('network-timeout', '30');
-        await native.setProperty('cache-secs', '30');
-        await native.setProperty('demuxer-readahead-secs', '30');
+        await native.setProperty('network-timeout', '60');
       }
 
       await _player.open(Media(url));
@@ -537,9 +539,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         episodeName: currentEpisode?.name,
         isTvShow: widget.isTvShow,
       );
+
+      // Load locally stored subtitles (native only)
+      List<SubtitleItem> localSubs = [];
+      if (!kIsWeb && widget.tmdbId != null && widget.seasonNumber != null) {
+        localSubs = await SubtitleService.loadLocalSubtitles(
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+          episodeNumber: epNum,
+        );
+      }
+
       if (mounted) {
         setState(() {
-          _availableSubs = subs;
+          _availableSubs = [...localSubs, ...subs];
           _loadingSubs = false;
         });
       }
@@ -558,7 +571,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     String? srtContent;
     final epNum = widget.episodeNumber ?? _episodeNumberInSeason(_currentEpIndex);
-    if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null) {
+    if (item.source == 'local' && item.localPath != null) {
+      srtContent = await SubtitleService.readLocalSubtitle(
+        item.localPath!,
+        episodeNumber: item.matchType == SubtitleMatchType.seasonFallback ? epNum : null,
+      );
+    } else if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null) {
       srtContent = await SubtitleService.fetchAndExtractEpisode(
         item,
         episodeNumber: epNum,
@@ -1497,7 +1515,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Widget _buildSubtitlePanel() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {}, // absorb taps so they don't close the panel
+      onTap: () {},
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.surface.withOpacity(0.95),
@@ -1506,13 +1524,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 50, 20, 16),
-            child: Text('Subtitles',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 50, 20, 8),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text('Subtitles',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700)),
+                ),
+                if (!kIsWeb)
+                  IconButton(
+                    icon: const Icon(LucideIcons.upload, color: AppTheme.accent, size: 20),
+                    tooltip: 'Import subtitle file',
+                    onPressed: _importSubtitles,
+                  ),
+              ],
+            ),
           ),
           if (_loadingSubs)
             const Expanded(
@@ -1520,10 +1550,24 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   child: CircularProgressIndicator(color: AppTheme.accent)),
             )
           else if (_availableSubs.isEmpty)
-            const Expanded(
+            Expanded(
               child: Center(
-                  child: Text('No subtitles found',
-                      style: TextStyle(color: AppTheme.textSecondary))),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('No subtitles found',
+                        style: TextStyle(color: AppTheme.textSecondary)),
+                    if (!kIsWeb) ...[
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: _importSubtitles,
+                        icon: const Icon(LucideIcons.upload, size: 16),
+                        label: const Text('Import SRT / ZIP'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             )
           else
             Expanded(
@@ -1531,6 +1575,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 itemCount: _availableSubs.length + 1,
                 itemBuilder: (context, i) {
+                    final sub = i > 0 ? _availableSubs[i - 1] : null;
                     return FocusableActionDetector(
                       actions: {
                         ActivateIntent: CallbackAction<ActivateIntent>(
@@ -1560,10 +1605,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             _selectSubtitle(_availableSubs[i - 1]);
                           }
                         },
-                        child: _panelTile(
-                          i == 0 ? 'Off' : '${_availableSubs[i - 1].language.toUpperCase()} - ${_availableSubs[i - 1].fileName}',
-                          i == 0 ? (_selectedSub == null) : (_selectedSub?.id == _availableSubs[i - 1].id),
-                          subtitle: i == 0 ? null : _availableSubs[i - 1].matchType.label,
+                        child: _subtitleTile(
+                          i == 0 ? 'Off' : '${sub!.language.toUpperCase()} - ${sub.fileName}',
+                          i == 0 ? (_selectedSub == null) : (_selectedSub?.id == sub!.id),
+                          subtitle: i == 0 ? null : sub!.matchType.label,
+                          isLocal: sub?.source == 'local',
+                          onDownloadSeason: (i > 0 && sub!.matchType == SubtitleMatchType.seasonFallback && sub.source != 'local' && !kIsWeb)
+                              ? () => _downloadSeasonSubs(sub)
+                              : null,
                         ),
                       ),
                     );
@@ -1690,6 +1739,190 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         ],
       ),
     );
+  }
+
+  Widget _subtitleTile(String title, bool isActive, {
+    String? subtitle,
+    bool isLocal = false,
+    VoidCallback? onDownloadSeason,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isActive ? AppTheme.accent : Colors.white24,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(isActive ? LucideIcons.checkCircle : LucideIcons.circle,
+              color: isActive ? AppTheme.accent : AppTheme.textSecondary,
+              size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: isActive ? Colors.white : AppTheme.textSecondary,
+                          fontSize: 13,
+                          fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isLocal) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('LOCAL',
+                            style: TextStyle(color: AppTheme.accent, fontSize: 9, fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  ],
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isActive ? AppTheme.accent : AppTheme.textSecondary.withOpacity(0.6),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (onDownloadSeason != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onDownloadSeason,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(LucideIcons.download, color: AppTheme.accent, size: 14),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  bool _downloadingSeason = false;
+
+  Future<void> _downloadSeasonSubs(SubtitleItem item) async {
+    if (_downloadingSeason) return;
+    if (widget.tmdbId == null || widget.seasonNumber == null) return;
+
+    setState(() => _downloadingSeason = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Downloading season subtitles...'),
+        duration: Duration(seconds: 3),
+        backgroundColor: AppTheme.accent,
+      ),
+    );
+
+    final saved = await SubtitleService.downloadSeasonSubtitles(
+      item: item,
+      tmdbId: widget.tmdbId!,
+      season: widget.seasonNumber!,
+    );
+
+    if (mounted) {
+      setState(() => _downloadingSeason = false);
+      if (saved.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved ${saved.length} episode subtitle(s)'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+        // Refresh subtitle list to include newly saved local files
+        await _fetchSubtitles();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No SRT files found in the download'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _importSubtitles() async {
+    if (widget.tmdbId == null || widget.seasonNumber == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Subtitles can only be imported for TV show episodes'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['srt', 'zip'],
+      allowMultiple: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+
+    final saved = <SubtitleItem>[];
+    for (final picked in result.files) {
+      if (picked.path == null) continue;
+      final path = picked.path!;
+      final ext = path.split('.').last.toLowerCase();
+
+      if (ext == 'zip') {
+        final batch = await SubtitleService.importLocalSubtitleBatch(
+          zipPath: path,
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+        );
+        saved.addAll(batch);
+      } else if (ext == 'srt') {
+        final item = await SubtitleService.importLocalSubtitle(
+          filePath: path,
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+        );
+        if (item != null) saved.add(item);
+      }
+    }
+
+    if (mounted && saved.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Imported ${saved.length} subtitle(s)'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: AppTheme.accent,
+        ),
+      );
+      await _fetchSubtitles();
+    }
   }
 
   Widget _buildAutoplayCard() {

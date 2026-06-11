@@ -8,7 +8,7 @@ import 'tmdb_service.dart';
 import 'user_service.dart';
 
 const String _baseUrl =
-    'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/';
+    'https://api.1080zyku.com/inc/apijson.php/provide/vod/';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -724,6 +724,10 @@ class ApiService {
 
   static const List<VideoSource> sources = [
     VideoSource(
+      name: '1080ZYK',
+      baseUrl: 'https://api.1080zyku.com/inc/apijson.php/provide/vod/',
+    ),
+    VideoSource(
       name: 'Hong Niu',
       baseUrl: 'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/',
     ),
@@ -738,10 +742,6 @@ class ApiService {
     VideoSource(
       name: 'LZ',
       baseUrl: 'https://cj.lziapi.com/api.php/provide/vod/',
-    ),
-    VideoSource(
-      name: '1080ZYK',
-      baseUrl: 'https://api.1080zyku.com/inc/apijson.php/provide/vod/',
     ),
   ];
 

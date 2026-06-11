@@ -28,7 +28,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _savingPassword = false;
   bool _clearingHistory = false;
   String _language = 'en';
-  String _defaultSource = 'Hong Niu';
+  String _defaultSource = '1080ZYK';
   bool _loadingSource = true;
   String? _expandedSection;
 

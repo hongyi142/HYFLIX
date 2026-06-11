@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
+import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 
 enum SubtitleMatchType {
@@ -20,8 +22,9 @@ class SubtitleItem {
   final String fileName;
   final String language;
   final String? downloadUrl;
-  final String source; // 'subdl' or 'opensubtitles'
+  final String source; // 'subdl', 'opensubtitles', or 'local'
   final SubtitleMatchType matchType;
+  final String? localPath; // Path to locally stored .srt file
 
   SubtitleItem({
     required this.id,
@@ -30,6 +33,7 @@ class SubtitleItem {
     this.downloadUrl,
     this.source = 'subdl',
     this.matchType = SubtitleMatchType.exactEpisode,
+    this.localPath,
   });
 }
 
@@ -585,5 +589,278 @@ class SubtitleService {
            int.parse(p[1]) * 60000 +
            int.parse(p[2]) * 1000 +
            int.parse(p[3]);
+  }
+
+  // ─── Local subtitle storage (native only) ───────────────────────
+
+  static Future<Directory> _localSubsDir(String tmdbId, int season) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final dir = Directory('${appDir.path}/subtitles/${tmdbId}_s$season');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir;
+  }
+
+  /// Download a season-level ZIP, extract all SRT files, save to local storage.
+  /// Returns the list of saved SubtitleItems (one per episode SRT found).
+  static Future<List<SubtitleItem>> downloadSeasonSubtitles({
+    required SubtitleItem item,
+    required String tmdbId,
+    required int season,
+  }) async {
+    if (item.downloadUrl == null) return [];
+
+    try {
+      final res = await http.get(Uri.parse(item.downloadUrl!))
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return [];
+
+      final bytes = res.bodyBytes;
+      if (bytes.length < 4) return [];
+
+      final dir = await _localSubsDir(tmdbId, season);
+      final saved = <SubtitleItem>[];
+
+      // ZIP archive
+      if (bytes[0] == 0x50 && bytes[1] == 0x4B) {
+        final archive = ZipDecoder().decodeBytes(bytes);
+        for (final file in archive) {
+          if (!file.isFile) continue;
+          final name = file.name.toLowerCase();
+          if (!name.endsWith('.srt')) continue;
+
+          final srtContent = utf8.decode(file.content as List<int>, allowMalformed: true);
+          final baseName = file.name.split('/').last.split('\\').last;
+          final localFile = File('${dir.path}/$baseName');
+          await localFile.writeAsString(srtContent);
+
+          final matchType = _classifyMatch(baseName, season, null)
+              ?? SubtitleMatchType.seasonFallback;
+
+          saved.add(SubtitleItem(
+            id: 'local_${baseName.hashCode}',
+            fileName: baseName,
+            language: item.language,
+            source: 'local',
+            matchType: matchType,
+            localPath: localFile.path,
+          ));
+        }
+      }
+      // GZIP — single SRT
+      else if (bytes[0] == 0x1F && bytes[1] == 0x8B) {
+        final srtContent = utf8.decode(GZipDecoder().decodeBytes(bytes), allowMalformed: true);
+        final baseName = '${item.fileName}.srt';
+        final localFile = File('${dir.path}/$baseName');
+        await localFile.writeAsString(srtContent);
+
+        saved.add(SubtitleItem(
+          id: 'local_${baseName.hashCode}',
+          fileName: baseName,
+          language: item.language,
+          source: 'local',
+          matchType: SubtitleMatchType.seasonFallback,
+          localPath: localFile.path,
+        ));
+      }
+      // Plain text — single SRT
+      else {
+        final srtContent = utf8.decode(bytes, allowMalformed: true);
+        final baseName = '${item.fileName}.srt';
+        final localFile = File('${dir.path}/$baseName');
+        await localFile.writeAsString(srtContent);
+
+        saved.add(SubtitleItem(
+          id: 'local_${baseName.hashCode}',
+          fileName: baseName,
+          language: item.language,
+          source: 'local',
+          matchType: SubtitleMatchType.seasonFallback,
+          localPath: localFile.path,
+        ));
+      }
+
+      return saved;
+    } catch (e) {
+      print('Season subtitle download error: $e');
+      return [];
+    }
+  }
+
+  /// Import a single .srt file from disk into local subtitle storage.
+  static Future<SubtitleItem?> importLocalSubtitle({
+    required String filePath,
+    required String tmdbId,
+    required int season,
+  }) async {
+    try {
+      final file = File(filePath);
+      if (!file.existsSync()) return null;
+
+      final baseName = filePath.split(RegExp(r'[/\\]')).last;
+      final dir = await _localSubsDir(tmdbId, season);
+      final destFile = File('${dir.path}/$baseName');
+      await file.copy(destFile.path);
+
+      final matchType = _classifyMatch(baseName, season, null)
+          ?? SubtitleMatchType.seasonFallback;
+
+      return SubtitleItem(
+        id: 'local_${baseName.hashCode}',
+        fileName: baseName,
+        language: 'custom',
+        source: 'local',
+        matchType: matchType,
+        localPath: destFile.path,
+      );
+    } catch (e) {
+      print('Subtitle import error: $e');
+      return null;
+    }
+  }
+
+  /// Load all locally stored subtitles for a given tmdbId + season.
+  static Future<List<SubtitleItem>> loadLocalSubtitles({
+    required String tmdbId,
+    required int season,
+    int? episodeNumber,
+  }) async {
+    try {
+      final dir = await _localSubsDir(tmdbId, season);
+      if (!dir.existsSync()) return [];
+
+      final files = dir.listSync().whereType<File>().where(
+        (f) => f.path.toLowerCase().endsWith('.srt'),
+      );
+
+      final items = <SubtitleItem>[];
+      for (final f in files) {
+        final baseName = f.path.split(RegExp(r'[/\\]')).last;
+        final matchType = _classifyMatch(baseName, season, episodeNumber)
+            ?? SubtitleMatchType.seasonFallback;
+
+        items.add(SubtitleItem(
+          id: 'local_${baseName.hashCode}',
+          fileName: baseName,
+          language: 'local',
+          source: 'local',
+          matchType: matchType,
+          localPath: f.path,
+        ));
+      }
+
+      items.sort((a, b) => a.matchType.index.compareTo(b.matchType.index));
+      return items;
+    } catch (e) {
+      print('Load local subtitles error: $e');
+      return [];
+    }
+  }
+
+  /// Delete all locally stored subtitles for a given tmdbId + season.
+  static Future<void> deleteLocalSubtitles({
+    required String tmdbId,
+    required int season,
+  }) async {
+    try {
+      final dir = await _localSubsDir(tmdbId, season);
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    } catch (e) {
+      print('Delete local subtitles error: $e');
+    }
+  }
+
+  /// Read the content of a locally stored subtitle file.
+  /// If [episodeNumber] is provided and the file spans multiple episodes,
+  /// extracts only the portion for that episode.
+  static Future<String?> readLocalSubtitle(String localPath, {int? episodeNumber}) async {
+    try {
+      final file = File(localPath);
+      if (!file.existsSync()) return null;
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return null;
+
+      if (episodeNumber == null) return content;
+
+      final entries = _parseSrt(content);
+      if (entries.isEmpty) return content;
+
+      final lastEndMs = entries.last.$2;
+      if (lastEndMs <= 100 * 60 * 1000) return content;
+
+      final totalEpisodes = episodeNumber > 1
+          ? (lastEndMs / ((episodeNumber - 1) * 60 * 1000)).ceil().clamp(episodeNumber, 30)
+          : 1;
+      final episodeDurationMs = (lastEndMs / totalEpisodes).round();
+
+      final startMs = (episodeNumber - 1) * episodeDurationMs;
+      final endMs = episodeNumber * episodeDurationMs;
+
+      final extracted = entries
+          .where((e) => e.$2 >= startMs && e.$1 <= endMs)
+          .toList();
+
+      if (extracted.isEmpty) return content;
+
+      final buf = StringBuffer();
+      for (var i = 0; i < extracted.length; i++) {
+        final (start, end, text) = extracted[i];
+        buf.writeln(i + 1);
+        buf.writeln('${_fmtSrt(start - startMs)} --> ${_fmtSrt(end - startMs)}');
+        buf.writeln(text);
+        buf.writeln();
+      }
+      return buf.toString();
+    } catch (e) {
+      print('Read local subtitle error: $e');
+      return null;
+    }
+  }
+
+  /// Import a ZIP file containing multiple SRTs (batch import).
+  static Future<List<SubtitleItem>> importLocalSubtitleBatch({
+    required String zipPath,
+    required String tmdbId,
+    required int season,
+  }) async {
+    try {
+      final file = File(zipPath);
+      if (!file.existsSync()) return [];
+
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 4) return [];
+
+      final dir = await _localSubsDir(tmdbId, season);
+      final saved = <SubtitleItem>[];
+
+      if (bytes[0] == 0x50 && bytes[1] == 0x4B) {
+        final archive = ZipDecoder().decodeBytes(bytes);
+        for (final entry in archive) {
+          if (!entry.isFile) continue;
+          if (!entry.name.toLowerCase().endsWith('.srt')) continue;
+
+          final srtContent = utf8.decode(entry.content as List<int>, allowMalformed: true);
+          final baseName = entry.name.split('/').last.split('\\').last;
+          final localFile = File('${dir.path}/$baseName');
+          await localFile.writeAsString(srtContent);
+
+          final matchType = _classifyMatch(baseName, season, null)
+              ?? SubtitleMatchType.seasonFallback;
+
+          saved.add(SubtitleItem(
+            id: 'local_${baseName.hashCode}',
+            fileName: baseName,
+            language: 'custom',
+            source: 'local',
+            matchType: matchType,
+            localPath: localFile.path,
+          ));
+        }
+      }
+
+      return saved;
+    } catch (e) {
+      print('Batch subtitle import error: $e');
+      return [];
+    }
   }
 }

@@ -249,7 +249,7 @@ class FirestoreService {
 
   static Future<String> getDefaultSource() async {
     final profile = await getProfile();
-    return (profile?['defaultSource'] as String?) ?? 'Hong Niu';
+    return (profile?['defaultSource'] as String?) ?? '1080ZYK';
   }
 
   // ── Low-level REST helpers ───────────────────────────────────────────
