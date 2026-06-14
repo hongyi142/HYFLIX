@@ -121,6 +121,11 @@ class FirestoreService {
     return await _get('$_usersPath/skipIntros/$safeId.json');
   }
 
+  static Future<void> deleteIntroTimestamp(String contentId) async {
+    final safeId = contentId.replaceAll(RegExp(r'[.\#\$\[\]]'), '_');
+    await _put('$_usersPath/skipIntros/$safeId.json', null);
+  }
+
   // ── Watch History Management ────────────────────────────────────────
 
   static Future<void> clearWatchHistory() async {
@@ -249,7 +254,7 @@ class FirestoreService {
 
   static Future<String> getDefaultSource() async {
     final profile = await getProfile();
-    return (profile?['defaultSource'] as String?) ?? '1080ZYK';
+    return (profile?['defaultSource'] as String?) ?? 'HHZY (Luxury)';
   }
 
   // ── Low-level REST helpers ───────────────────────────────────────────

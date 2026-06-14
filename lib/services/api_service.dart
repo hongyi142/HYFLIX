@@ -5,10 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
 import 'tmdb_service.dart';
-import 'user_service.dart';
 
 const String _baseUrl =
-    'https://api.1080zyku.com/inc/apijson.php/provide/vod/';
+    'https://hhzyapi.com/api.php/provide/vod/';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -167,8 +166,7 @@ class ApiService {
     return map.values.toList();
   }
 
-  static bool _containsCjk(String value) =>
-      RegExp(r'[\u4e00-\u9fff]').hasMatch(value);
+
 
   static bool _containsHangul(String value) =>
       RegExp(r'[\uac00-\ud7af]').hasMatch(value);
@@ -724,24 +722,32 @@ class ApiService {
 
   static const List<VideoSource> sources = [
     VideoSource(
+      name: 'HHZY (Luxury)',
+      baseUrl: 'https://hhzyapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
       name: '1080ZYK',
       baseUrl: 'https://api.1080zyku.com/inc/apijson.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'Suoni (Sony)',
+      baseUrl: 'https://suoniapi.com/api.php/provide/vod/',
     ),
     VideoSource(
       name: 'Hong Niu',
       baseUrl: 'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/',
     ),
     VideoSource(
-      name: 'FFZY',
-      baseUrl: 'https://cj.ffzyapi.com/api.php/provide/vod/',
+      name: 'BDZY (Baidu)',
+      baseUrl: 'https://api.apibdzy.com/api.php/provide/vod/',
     ),
     VideoSource(
-      name: 'BFZY',
-      baseUrl: 'https://bfzyapi.com/api.php/provide/vod/',
+      name: 'JYZY (Golden Eagle)',
+      baseUrl: 'https://jyzyapi.com/api.php/provide/vod/',
     ),
     VideoSource(
-      name: 'LZ',
-      baseUrl: 'https://cj.lziapi.com/api.php/provide/vod/',
+      name: 'JSZY (Jisu)',
+      baseUrl: 'https://jszyapi.com/api.php/provide/vod/',
     ),
   ];
 

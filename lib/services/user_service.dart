@@ -96,6 +96,10 @@ class UserService {
     return await FirestoreService.getIntroTimestamp(contentId);
   }
 
+  static Future<void> deleteIntroTimestamp(String contentId) async {
+    await FirestoreService.deleteIntroTimestamp(contentId);
+  }
+
   static Future<void> saveLanguage(String lang) async {
     await FirestoreService.saveLanguage(lang);
   }

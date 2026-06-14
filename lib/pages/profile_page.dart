@@ -15,6 +15,9 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/tmdb_service.dart';
+import '../services/torrent_service.dart';
+import '../models/content_model.dart';
+import '../models/episode.dart';
 import '../widgets/horizontal_scroll_wrapper.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -182,6 +185,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return '${m[d.month]} ${d.year}';
   }
 
+  static bool _isPlayableUrl(String url) {
+    if (url.isEmpty) return false;
+    final lower = url.toLowerCase();
+    if (lower.contains('localhost') || lower.contains('127.0.0.1')) return false;
+    return lower.contains('.m3u8') || lower.contains('.mp4') || lower.contains('http');
+  }
+
   Future<void> _resumeWatching(Map<String, dynamic> item) async {
     final title = item['originalTitle'] as String? ?? item['title'] as String? ?? '';
     final epIdx = (item['episodeIndex'] as num?)?.toInt() ?? 0;
@@ -192,25 +202,144 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2)));
 
     try {
+      final tmdb = await TmdbService.search(title);
       final content = await ApiService().matchTmdbToProvider(
-        await TmdbService.search(title) ?? TmdbResult(englishTitle: title, overview: '', posterUrl: '', backdropUrl: ''),
+        tmdb ?? TmdbResult(englishTitle: title, overview: '', posterUrl: '', backdropUrl: ''),
       );
-      if (!mounted) return;
-      Navigator.pop(context);
-      if (content == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Content not found'))); return; }
 
-      final videoUrl = content.episodes.isNotEmpty && epIdx < content.episodes.length ? content.episodes[epIdx].url : content.m3u8Url;
-      final epName = content.episodes.isNotEmpty && epIdx < content.episodes.length ? content.episodes[epIdx].name : '';
-      final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1) ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+      if (content != null) {
+        if (!mounted) return;
+        Navigator.pop(context);
 
-      Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
-        videoUrl: videoUrl, title: content.title, originalTitle: title, episodes: content.episodes,
-        initialEpisodeIndex: epIdx, tmdbId: null, isTvShow: content.episodes.length > 1,
-        seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
-        posterUrl: content.thumbnailUrl, seekToSeconds: posSec,
-      )));
+        final videoUrl = content.episodes.isNotEmpty && epIdx < content.episodes.length ? content.episodes[epIdx].url : content.m3u8Url;
+        final epName = content.episodes.isNotEmpty && epIdx < content.episodes.length ? content.episodes[epIdx].name : '';
+        final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1) ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+          videoUrl: videoUrl, title: content.title, originalTitle: title, episodes: content.episodes,
+          initialEpisodeIndex: epIdx, tmdbId: tmdb?.id?.toString(), isTvShow: content.episodes.length > 1,
+          seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
+          posterUrl: content.thumbnailUrl, seekToSeconds: posSec,
+        )));
+        _loadData();
+        return;
+      }
+
+      // If matching VOD content fails, check if the history item itself has a playable VOD URL
+      final savedM3u8Url = item['m3u8Url'] as String? ?? '';
+      final episodesRaw = item['episodes'] as List<dynamic>?;
+      final episodes = episodesRaw
+              ?.map((e) => Episode.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const <Episode>[];
+
+      final videoUrl = episodes.isNotEmpty && epIdx < episodes.length
+          ? episodes[epIdx].url
+          : savedM3u8Url;
+
+      if (_isPlayableUrl(videoUrl)) {
+        if (!mounted) return;
+        Navigator.pop(context);
+
+        final epName = episodes.isNotEmpty && epIdx < episodes.length ? episodes[epIdx].name : '';
+        final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1) ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+          videoUrl: videoUrl,
+          title: item['title'] as String? ?? title,
+          originalTitle: title,
+          episodes: episodes,
+          initialEpisodeIndex: epIdx,
+          tmdbId: tmdb?.id?.toString(),
+          isTvShow: episodes.length > 1,
+          seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
+          posterUrl: item['posterUrl'] as String? ?? '',
+          seekToSeconds: posSec,
+        )));
+        _loadData();
+        return;
+      }
+
+      // Torrent fallback
+      if (tmdb != null && tmdb.id != null) {
+        final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
+        if (imdbId != null) {
+          final epName = episodes.isNotEmpty && epIdx < episodes.length ? episodes[epIdx].name : '';
+          final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+              ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1)
+              ?? '1';
+
+          final stream = await TorrentService().fetchBestStream(
+            imdbId,
+            tmdb.mediaType,
+            season: tmdb.mediaType == 'tv' ? int.tryParse(seasonNum) : null,
+            episode: tmdb.mediaType == 'tv' ? epIdx + 1 : null,
+          );
+
+          if (!mounted) return;
+          Navigator.pop(context); // dismiss loading
+
+          if (stream != null) {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => VideoPlayerScreen(
+                  videoUrl: '',
+                  title: item['title'] as String? ?? title,
+                  originalTitle: title,
+                  episodes: episodes,
+                  initialEpisodeIndex: epIdx,
+                  tmdbId: tmdb.id?.toString(),
+                  isTvShow: episodes.length > 1,
+                  seasonNumber: int.tryParse(seasonNum),
+                  posterUrl: item['posterUrl'] as String? ?? '',
+                  seekToSeconds: posSec,
+                  torrentStream: stream,
+                ),
+              ),
+            );
+            _loadData();
+            return;
+          }
+        } else {
+          if (mounted) Navigator.pop(context);
+        }
+      } else {
+        if (mounted) Navigator.pop(context);
+      }
+
+      // If all fails, open DetailPage with fallback ContentModel
+      if (mounted) {
+        final episodeCount = (item['episodeCount'] as num?)?.toInt() ?? 0;
+        final effectiveEpisodes = episodes.isNotEmpty
+            ? episodes
+            : (episodeCount > 1
+                ? List.generate(episodeCount, (i) => Episode(name: 'Episode ${i + 1}', url: ''))
+                : const <Episode>[]);
+
+        final fallbackContent = ContentModel(
+          title: item['title'] as String? ?? title,
+          subtitle: '',
+          description: '',
+          thumbnailUrl: item['posterUrl'] as String? ?? '',
+          bannerUrl: item['posterUrl'] as String? ?? '',
+          m3u8Url: savedM3u8Url,
+          year: '',
+          rating: 0,
+          episodes: effectiveEpisodes,
+          progress: (item['progress'] as num?)?.toDouble() ?? 0.0,
+          resumeEpisodeIndex: epIdx,
+          resumePositionSeconds: posSec,
+        );
+
+        await DetailPage.show(context, fallbackContent, initialTmdb: tmdb);
+        _loadData();
+      }
     } catch (_) {
-      if (mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load'))); }
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load')));
+      }
     }
   }
 

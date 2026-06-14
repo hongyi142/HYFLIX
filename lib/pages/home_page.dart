@@ -20,6 +20,8 @@ import '../widgets/hero_card.dart';
 import '../widgets/movie_card.dart';
 import '../widgets/navbar.dart';
 import 'video_player_screen.dart';
+import 'detail_page.dart';
+import '../services/torrent_service.dart';
 import '../widgets/horizontal_scroll_wrapper.dart';
 import '../widgets/buttons.dart';
 
@@ -178,6 +180,15 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
   /// Resume a Continue Watching item with a fresh TMDB + provider match.
   /// Mirrors the profile page's _resumeWatching logic.
+  static bool _isPlayableUrl(String url) {
+    if (url.isEmpty) return false;
+    final lower = url.toLowerCase();
+    if (lower.contains('localhost') || lower.contains('127.0.0.1')) return false;
+    return lower.contains('.m3u8') || lower.contains('.mp4') || lower.contains('http');
+  }
+
+  /// Resume a Continue Watching item with a fresh TMDB + provider match.
+  /// Mirrors the profile page's _resumeWatching logic.
   Future<void> _resumeFromHistory(ContentModel item, int epIdx, int posSec) async {
     if (!mounted) return;
     final title = item.title;
@@ -190,35 +201,117 @@ class _HomePageState extends State<HomePage> with RouteAware {
       final content = await ApiService().matchTmdbToProvider(
         tmdb ?? TmdbResult(englishTitle: title, overview: '', posterUrl: '', backdropUrl: ''),
       );
-      if (!mounted) return;
-      Navigator.pop(context); // dismiss loading
 
-      if (content == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Content not found')));
+      if (content != null) {
+        if (!mounted) return;
+        Navigator.pop(context); // dismiss loading
+
+        final videoUrl = content.episodes.isNotEmpty && epIdx < content.episodes.length
+            ? content.episodes[epIdx].url
+            : content.m3u8Url;
+        final epName = content.episodes.isNotEmpty && epIdx < content.episodes.length
+            ? content.episodes[epIdx].name
+            : '';
+        final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+            ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+          videoUrl: videoUrl,
+          title: content.title,
+          originalTitle: title,
+          episodes: content.episodes,
+          initialEpisodeIndex: epIdx,
+          tmdbId: tmdb?.id?.toString(),
+          isTvShow: content.episodes.length > 1,
+          seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
+          posterUrl: content.thumbnailUrl,
+          seekToSeconds: posSec,
+        )));
+        _refreshWatchHistory();
         return;
       }
 
-      final videoUrl = content.episodes.isNotEmpty && epIdx < content.episodes.length
-          ? content.episodes[epIdx].url
-          : content.m3u8Url;
-      final epName = content.episodes.isNotEmpty && epIdx < content.episodes.length
-          ? content.episodes[epIdx].name
-          : '';
-      final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
-          ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+      // If content is null, check fallbacks
+      final videoUrl = item.episodes.isNotEmpty && epIdx < item.episodes.length
+          ? item.episodes[epIdx].url
+          : item.m3u8Url;
 
-      Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
-        videoUrl: videoUrl,
-        title: content.title,
-        originalTitle: title,
-        episodes: content.episodes,
-        initialEpisodeIndex: epIdx,
-        tmdbId: tmdb?.id?.toString(),
-        isTvShow: content.episodes.length > 1,
-        seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
-        posterUrl: content.thumbnailUrl,
-        seekToSeconds: posSec,
-      )));
+      if (_isPlayableUrl(videoUrl)) {
+        if (!mounted) return;
+        Navigator.pop(context); // dismiss loading
+
+        final epName = item.episodes.isNotEmpty && epIdx < item.episodes.length
+            ? item.episodes[epIdx].name
+            : '';
+        final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+            ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
+
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+          videoUrl: videoUrl,
+          title: item.title,
+          originalTitle: title,
+          episodes: item.episodes,
+          initialEpisodeIndex: epIdx,
+          tmdbId: tmdb?.id?.toString(),
+          isTvShow: item.episodes.length > 1,
+          seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
+          posterUrl: item.thumbnailUrl,
+          seekToSeconds: posSec,
+        )));
+        _refreshWatchHistory();
+        return;
+      }
+
+      // Torrent fallback
+      if (tmdb != null && tmdb.id != null) {
+        final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
+        if (imdbId != null) {
+          final epName = item.episodes.isNotEmpty && epIdx < item.episodes.length
+              ? item.episodes[epIdx].name
+              : '';
+          final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+              ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1)
+              ?? '1';
+
+          final stream = await TorrentService().fetchBestStream(
+            imdbId,
+            tmdb.mediaType,
+            season: tmdb.mediaType == 'tv' ? int.tryParse(seasonNum) : null,
+            episode: tmdb.mediaType == 'tv' ? epIdx + 1 : null,
+          );
+
+          if (!mounted) return;
+          Navigator.pop(context); // dismiss loading
+
+          if (stream != null) {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+              videoUrl: '',
+              title: item.title,
+              originalTitle: title,
+              episodes: item.episodes,
+              initialEpisodeIndex: epIdx,
+              tmdbId: tmdb.id?.toString(),
+              isTvShow: item.episodes.length > 1,
+              seasonNumber: int.tryParse(seasonNum),
+              posterUrl: item.thumbnailUrl,
+              seekToSeconds: posSec,
+              torrentStream: stream,
+            )));
+            _refreshWatchHistory();
+            return;
+          }
+        } else {
+          if (mounted) Navigator.pop(context);
+        }
+      } else {
+        if (mounted) Navigator.pop(context);
+      }
+
+      // If all fails, open detail page using fallback item
+      if (mounted) {
+        await DetailPage.show(context, item, initialTmdb: tmdb);
+        _refreshWatchHistory();
+      }
     } catch (_) {
       if (mounted) {
         Navigator.pop(context);

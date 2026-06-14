@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme.dart';
 import '../models/episode.dart';
 import '../services/subtitle_service.dart';
@@ -60,7 +61,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _showEpisodes = false;
   bool _showSubtitles = false;
   bool _showStats = false;
+  bool _showSettings = false;
   bool _hasError = false;
+
+  // Subtitle custom styles
+  double _subFontSize = 28.0;
+  Color _subColor = Colors.white;
+  double _subBgOpacity = 0.85;
+  Color _subBgColor = const Color(0xDD000000);
+  double _subPositionOffset = 14.0;
+  double _subHorizontalPadding = 24.0;
+
+  // Subtitle cover mask settings
+  bool _showSubMask = false;
+  double _subMaskWidthPct = 0.8;
+  double _subMaskHeight = 50.0;
+  double _subMaskPosition = 10.0;
+  double _subMaskOpacity = 1.0;
   late int _currentEpIndex;
   String? _currentTitle;
   List<SubtitleItem> _availableSubs = [];
@@ -136,6 +153,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
 
     _loadIntroTimestamp();
+    _loadSubtitleSettings();
     _listenPosition();
     _setupAutoplay();
     _listenAudioTracks();
@@ -516,6 +534,107 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  Future<void> _loadSubtitleSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _subFontSize = prefs.getDouble('subtitles_font_size') ?? 28.0;
+        final colorVal = prefs.getInt('subtitles_color') ?? 0xFFFFFFFF;
+        _subColor = Color(colorVal);
+        _subBgOpacity = prefs.getDouble('subtitles_bg_opacity') ?? 0.85;
+        _subBgColor = Colors.black.withOpacity(_subBgOpacity);
+        _subPositionOffset = prefs.getDouble('subtitles_position') ?? 14.0;
+        _subHorizontalPadding = prefs.getDouble('subtitles_horiz_padding') ?? 24.0;
+
+        _showSubMask = prefs.getBool('sub_mask_enabled') ?? false;
+        _subMaskWidthPct = prefs.getDouble('sub_mask_width_pct') ?? 0.8;
+        _subMaskHeight = prefs.getDouble('sub_mask_height') ?? 50.0;
+        _subMaskPosition = prefs.getDouble('sub_mask_position') ?? 10.0;
+        _subMaskOpacity = prefs.getDouble('sub_mask_opacity') ?? 1.0;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveSubtitleFontSize(double size) async {
+    setState(() => _subFontSize = size);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('subtitles_font_size', size);
+  }
+
+  Future<void> _saveSubtitleColor(Color color) async {
+    setState(() => _subColor = color);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('subtitles_color', color.value);
+  }
+
+  Future<void> _saveSubtitleBgOpacity(double opacity) async {
+    setState(() {
+      _subBgOpacity = opacity;
+      _subBgColor = Colors.black.withOpacity(opacity);
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('subtitles_bg_opacity', opacity);
+  }
+
+  Future<void> _saveSubtitlePosition(double offset) async {
+    setState(() => _subPositionOffset = offset);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('subtitles_position', offset);
+  }
+
+  Future<void> _saveSubtitleHorizontalPadding(double padding) async {
+    setState(() => _subHorizontalPadding = padding);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('subtitles_horiz_padding', padding);
+  }
+
+  Future<void> _saveSubMaskEnabled(bool enabled) async {
+    setState(() => _showSubMask = enabled);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('sub_mask_enabled', enabled);
+  }
+
+  Future<void> _saveSubMaskWidthPct(double widthPct) async {
+    setState(() => _subMaskWidthPct = widthPct);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('sub_mask_width_pct', widthPct);
+  }
+
+  Future<void> _saveSubMaskHeight(double height) async {
+    setState(() => _subMaskHeight = height);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('sub_mask_height', height);
+  }
+
+  Future<void> _saveSubMaskPosition(double position) async {
+    setState(() => _subMaskPosition = position);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('sub_mask_position', position);
+  }
+
+  Future<void> _saveSubMaskOpacity(double opacity) async {
+    setState(() => _subMaskOpacity = opacity);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('sub_mask_opacity', opacity);
+  }
+
+  Future<void> _resetIntro() async {
+    await UserService.deleteIntroTimestamp(_seriesContentId);
+    if (mounted) {
+      setState(() {
+        _introTimestamp = null;
+        _showSkipIntro = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Intro time reset. You can record a new timestamp on the next skip point.'),
+          duration: Duration(seconds: 3),
+          backgroundColor: AppTheme.accent,
+        ),
+      );
+    }
+  }
+
   int? _episodeNumberInSeason(int globalIndex) {
     final eps = widget.episodes;
     if (eps.isEmpty) return null;
@@ -630,6 +749,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showEpisodes = false;
       _showSubtitles = false;
       _showAudioTracks = false;
+      _showSettings = false;
       _showAutoplay = false;
       _autoplayDismissed = false;
       _autoplayCountdown = 60;
@@ -708,6 +828,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _exitPlayer() async {
     if (_isExiting) return;
     _isExiting = true;
+    _showSettings = false;
     _cancelAutoplay();
     _periodicSaveTimer?.cancel();
     _statsTimer?.cancel();
@@ -839,16 +960,51 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   controller: _controller,
                   controls: NoVideoControls,
                   subtitleViewConfiguration: const SubtitleViewConfiguration(
-                    style: TextStyle(
-                      fontSize: 28,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      backgroundColor: Color(0xDD000000),
-                    ),
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    visible: false,
                   ),
                 ),
               ),
+
+              if (_showSubMask)
+                IgnorePointer(
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        bottom: _subMaskPosition,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            width: MediaQuery.of(context).size.width * _subMaskWidthPct,
+                            height: _subMaskHeight,
+                            color: Colors.black.withOpacity(_subMaskOpacity),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Render subtitles one layer above the cover mask
+              IgnorePointer(
+                child: SubtitleView(
+                  key: ValueKey('${_subFontSize}_${_subColor.value}_${_subBgOpacity}_${_subPositionOffset}_${_subHorizontalPadding}'),
+                  controller: _controller,
+                  configuration: SubtitleViewConfiguration(
+                    style: TextStyle(
+                      fontSize: _subFontSize,
+                      color: _subColor,
+                      fontWeight: FontWeight.w600,
+                      backgroundColor: _subBgColor,
+                    ),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _subHorizontalPadding,
+                      vertical: _subPositionOffset,
+                    ),
+                  ),
+                ),
+              ),
+
 
               // Tap catcher — sits behind all overlays so tapping the
               // video area toggles controls, but tapping any overlay
@@ -857,8 +1013,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: () {
-                  if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks) {
-                    setState(() { _showSubtitles = false; _showEpisodes = false; _showStats = false; _showAudioTracks = false; });
+                  if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks || _showSettings) {
+                    setState(() { 
+                      _showSubtitles = false; 
+                      _showEpisodes = false; 
+                      _showStats = false; 
+                      _showAudioTracks = false; 
+                      _showSettings = false; 
+                    });
                   } else {
                     _toggleControls();
                   }
@@ -1013,6 +1175,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 right: 20,
                 width: 280,
                 child: _buildStatsPanel(),
+              ),
+
+              // Settings panel (slides from right)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: 0, bottom: 0,
+                right: _showSettings ? 0 : -300,
+                width: 300,
+                child: _buildSettingsPanel(),
               ),
             ],
           ),
@@ -1281,6 +1453,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     _showSubtitles = false;
                     _showEpisodes = false;
                     _showAudioTracks = false;
+                    _showSettings = false;
                   }),
                   backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
                   child: Padding(
@@ -1291,10 +1464,26 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 const SizedBox(width: 16),
                 HoverButton(
                   onTap: () => setState(() {
+                    _showSettings = !_showSettings;
+                    _showStats = false;
+                    _showSubtitles = false;
+                    _showEpisodes = false;
+                    _showAudioTracks = false;
+                  }),
+                  backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: const Icon(LucideIcons.sliders, color: Colors.white, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                HoverButton(
+                  onTap: () => setState(() {
                     _showSubtitles = !_showSubtitles;
                     _showEpisodes = false;
                     _showStats = false;
                     _showAudioTracks = false;
+                    _showSettings = false;
                   }),
                   backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
                   child: Padding(
@@ -1310,6 +1499,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       _showSubtitles = false;
                       _showEpisodes = false;
                       _showStats = false;
+                      _showSettings = false;
                     }),
                     backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
                     child: Padding(
@@ -1326,6 +1516,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       _showSubtitles = false;
                       _showStats = false;
                       _showAudioTracks = false;
+                      _showSettings = false;
                     }),
                     backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
                     child: Padding(
@@ -1627,6 +1818,268 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
         ],
       ),
+      ),
+    );
+  }
+
+  Widget _buildColorButton(Color color, String name) {
+    final active = _subColor.value == color.value;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: HoverButton(
+          onTap: () => _saveSubtitleColor(color),
+          backgroundColor: active ? AppTheme.accent : Colors.white10,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              name,
+              style: TextStyle(
+                color: active ? Colors.white : Colors.white70,
+                fontSize: 11,
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSliderRow({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+    String Function(double)? valueFormatter,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.0,
+              ),
+            ),
+            Text(
+              valueFormatter != null ? valueFormatter(value) : value.toStringAsFixed(1),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        SliderTheme(
+          data: SliderThemeData(
+            trackHeight: 3,
+            thumbColor: AppTheme.accent,
+            activeTrackColor: AppTheme.accent,
+            inactiveTrackColor: Colors.white12,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+          ),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSettingsPanel() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 50, 20, 8),
+              child: Text(
+                'Player Settings',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                children: [
+                  const SizedBox(height: 10),
+                  const Text(
+                    'INTRO SKIP',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  HoverButton(
+                    onTap: () {
+                      if (_introTimestamp != null) {
+                        _resetIntro();
+                      }
+                    },
+                    backgroundColor: _introTimestamp == null ? Colors.white10 : AppTheme.accent,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _introTimestamp == null ? 'No Intro Recorded' : 'Reset Intro Skip Time',
+                        style: TextStyle(
+                          color: _introTimestamp == null ? Colors.white38 : Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  _buildSliderRow(
+                    label: 'SUBTITLES FONT SIZE',
+                    value: _subFontSize,
+                    min: 12.0,
+                    max: 60.0,
+                    onChanged: _saveSubtitleFontSize,
+                    valueFormatter: (v) => '${v.toInt()} px',
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'SUBTITLES COLOR',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildColorButton(Colors.white, 'White'),
+                      _buildColorButton(Colors.yellow, 'Yellow'),
+                      _buildColorButton(Colors.green, 'Green'),
+                      _buildColorButton(Colors.cyan, 'Cyan'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSliderRow(
+                    label: 'SUBTITLES POSITION (BOTTOM)',
+                    value: _subPositionOffset,
+                    min: 0.0,
+                    max: 300.0,
+                    onChanged: _saveSubtitlePosition,
+                    valueFormatter: (v) => '${v.toInt()} px',
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSliderRow(
+                    label: 'SUBTITLES HORIZ. PADDING',
+                    value: _subHorizontalPadding,
+                    min: 0.0,
+                    max: 400.0,
+                    onChanged: _saveSubtitleHorizontalPadding,
+                    valueFormatter: (v) => '${v.toInt()} px',
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSliderRow(
+                    label: 'SUBTITLES BG OPACITY',
+                    value: _subBgOpacity,
+                    min: 0.0,
+                    max: 1.0,
+                    onChanged: _saveSubtitleBgOpacity,
+                    valueFormatter: (v) => '${(v * 100).round()}%',
+                  ),
+                  const Divider(color: Colors.white12, height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'SUBTITLE COVER MASK',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      Switch(
+                        value: _showSubMask,
+                        activeColor: AppTheme.accent,
+                        onChanged: _saveSubMaskEnabled,
+                      ),
+                    ],
+                  ),
+                  if (_showSubMask) ...[
+                    const SizedBox(height: 16),
+                    _buildSliderRow(
+                      label: 'MASK WIDTH',
+                      value: _subMaskWidthPct,
+                      min: 0.1,
+                      max: 1.0,
+                      onChanged: _saveSubMaskWidthPct,
+                      valueFormatter: (v) => '${(v * 100).round()}%',
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSliderRow(
+                      label: 'MASK HEIGHT',
+                      value: _subMaskHeight,
+                      min: 10.0,
+                      max: 200.0,
+                      onChanged: _saveSubMaskHeight,
+                      valueFormatter: (v) => '${v.toInt()} px',
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSliderRow(
+                      label: 'MASK BOTTOM POSITION',
+                      value: _subMaskPosition,
+                      min: 0.0,
+                      max: 300.0,
+                      onChanged: _saveSubMaskPosition,
+                      valueFormatter: (v) => '${v.toInt()} px',
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSliderRow(
+                      label: 'MASK OPACITY',
+                      value: _subMaskOpacity,
+                      min: 0.0,
+                      max: 1.0,
+                      onChanged: _saveSubMaskOpacity,
+                      valueFormatter: (v) => '${(v * 100).round()}%',
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
