@@ -79,17 +79,8 @@ class _DetailPageState extends State<DetailPage> {
   Map<int, TmdbEpisodeInfo> _tmdbEpisodeDetails = {};
   String? _cachedImdbId;
 
-  /// Whether this content should use Chinese VOD providers as primary source.
-  static bool _isChineseContent(TmdbResult? tmdb) {
-    if (tmdb == null) return false;
-    if (tmdb.originalLanguage == 'zh') return true;
-    if (tmdb.originCountries.any({'HK', 'TW'}.contains)) return true;
-    return false;
-  }
-
-  /// Whether this content is non-Chinese (eligible for torrent streaming).
-  bool get _isNonChineseContent =>
-      !kIsWeb && !_isChineseContent(_tmdb);
+  /// Whether torrent streaming is available (all native content).
+  bool get _isNonChineseContent => !kIsWeb;
 
   @override
   void initState() {
@@ -141,10 +132,10 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     // Default routing when no saved source
-    if (kIsWeb || _isChineseContent(_tmdb)) {
+    if (kIsWeb) {
       _refreshSourceEpisodes();
     } else {
-      // Initialize season from content subtitle if available
+      // Native: always try torrent first for all content
       _selectedSeason = _extractSeasonNumber() ?? 1;
       _selectedSource = _torrentSource;
       _fetchTorrentStreams();
@@ -678,8 +669,8 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _play(int episodeIndex) {
-    // Route to torrent for non-Chinese content (unless torrent already failed or on web)
-    if (!kIsWeb && !_isChineseContent(_tmdb) && !_torrentFailed) {
+    // Route to torrent on native (unless torrent already failed)
+    if (!kIsWeb && !_torrentFailed) {
       _playWithTorrent(episodeIndex);
       return;
     }
@@ -835,7 +826,7 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                   ),
                   // Episodes/streams section
-                  if (!kIsWeb && !_isChineseContent(_tmdb) && !_torrentFailed) ...[
+                  if (!kIsWeb && !_torrentFailed) ...[
                     // Torrent content: show quality filter + play/episode cards
                     SizedBox(height: layout.isPhone ? 28 : 36),
                     _buildTorrentEpisodesSection(layout),
