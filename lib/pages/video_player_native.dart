@@ -15,8 +15,22 @@ import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/torrent_service.dart';
 import '../widgets/buttons.dart';
+import '../services/api_service.dart';
 import 'fullscreen_stub.dart'
     if (dart.library.html) 'fullscreen_web.dart';
+
+/// Represents a playable source returned by the source switcher callback.
+class SourceMedia {
+  final String url;
+  final TorrentStream? torrentStream;
+  final String sourceName;
+
+  const SourceMedia({
+    required this.url,
+    this.torrentStream,
+    required this.sourceName,
+  });
+}
 class VideoPlayerScreen extends StatefulWidget {
   final String videoUrl;
   final String title;
@@ -33,6 +47,8 @@ class VideoPlayerScreen extends StatefulWidget {
   /// Total episode count for torrent TV shows (episodes list is empty for torrents).
   final int episodeCount;
   final String? videoSourceName;
+  final List<VideoSource>? availableSources;
+  final Future<SourceMedia?> Function(int episodeIndex, VideoSource source)? onFetchSource;
 
   const VideoPlayerScreen({
     super.key,
@@ -50,6 +66,8 @@ class VideoPlayerScreen extends StatefulWidget {
     this.torrentStream,
     this.episodeCount = 0,
     this.videoSourceName,
+    this.availableSources,
+    this.onFetchSource,
   });
 
   @override
@@ -114,6 +132,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   // Audio tracks
   bool _showAudioTracks = false;
+
+  // Source switcher
+  bool _showSourceSwitcher = false;
+  bool _isSwitchingSource = false;
   List<AudioTrack> _audioTracks = [];
   AudioTrack? _selectedAudioTrack;
   StreamSubscription<Tracks>? _audioTracksSub;
@@ -124,6 +146,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   // Scrubbing state — prevents seek on every drag pixel
   bool _isSeeking = false;
   double _seekValue = 0.0;
+
+  // Horizontal drag-to-seek state
+  bool _isDragSeeking = false;
+  double _dragStartX = 0;
+  Duration _dragStartPosition = Duration.zero;
+  Duration _dragSeekTarget = Duration.zero;
 
   // Seek recovery for torrent streams
   Timer? _seekRecoveryTimer;
@@ -1016,13 +1044,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: () {
-                  if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks || _showSettings) {
-                    setState(() { 
-                      _showSubtitles = false; 
-                      _showEpisodes = false; 
-                      _showStats = false; 
-                      _showAudioTracks = false; 
-                      _showSettings = false; 
+                  if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks || _showSettings || _showSourceSwitcher) {
+                    setState(() {
+                      _showSubtitles = false;
+                      _showEpisodes = false;
+                      _showStats = false;
+                      _showAudioTracks = false;
+                      _showSettings = false;
+                      _showSourceSwitcher = false;
                     });
                   } else {
                     _toggleControls();
@@ -1039,6 +1068,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     setState(() => _isLongPressSpeed = false);
                     _player.setRate(1.0);
                   }
+                },
+                onHorizontalDragStart: (details) {
+                  _isDragSeeking = true;
+                  _dragStartX = details.globalPosition.dx;
+                  _dragStartPosition = _player.state.position;
+                  _dragSeekTarget = _player.state.position;
+                },
+                onHorizontalDragUpdate: (details) {
+                  if (!_isDragSeeking) return;
+                  final dx = details.globalPosition.dx - _dragStartX;
+                  // Sensitivity: ~0.5 seconds per pixel of drag
+                  final deltaSeconds = (dx * 0.5).round();
+                  final duration = _player.state.duration;
+                  final targetMs = (_dragStartPosition.inMilliseconds + deltaSeconds * 1000)
+                      .clamp(0, duration.inMilliseconds);
+                  setState(() {
+                    _dragSeekTarget = Duration(milliseconds: targetMs);
+                  });
+                },
+                onHorizontalDragEnd: (_) {
+                  if (!_isDragSeeking) return;
+                  _isDragSeeking = false;
+                  _player.seek(_dragSeekTarget);
+                  _startSeekRecovery(_dragSeekTarget);
+                  setState(() {});
                 },
                 child: const SizedBox.expand(),
               ),
@@ -1078,6 +1132,44 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // Drag-to-seek overlay
+              if (_isDragSeeking)
+                Positioned(
+                  top: 0, bottom: 0, left: 0, right: 0,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _dragSeekTarget > _dragStartPosition ? '+${_fmt(_dragSeekTarget - _dragStartPosition)}' : '-${_fmt(_dragStartPosition - _dragSeekTarget)}',
+                              style: TextStyle(
+                                color: _dragSeekTarget >= _dragStartPosition ? Colors.white : AppTheme.accent,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${_fmt(_dragSeekTarget)} / ${_fmt(_player.state.duration)}',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1189,6 +1281,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 width: 300,
                 child: _buildSettingsPanel(),
               ),
+
+              // Source switcher panel (slides from right)
+              if (widget.availableSources != null)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  top: 0, bottom: 0,
+                  right: _showSourceSwitcher ? 0 : -300,
+                  width: 300,
+                  child: _buildSourceSwitcherPanel(),
+                ),
             ],
           ),
         ),
@@ -1457,6 +1560,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     _showEpisodes = false;
                     _showAudioTracks = false;
                     _showSettings = false;
+                    _showSourceSwitcher = false;
                   }),
                   backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
                   child: Padding(
@@ -1472,6 +1576,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     _showSubtitles = false;
                     _showEpisodes = false;
                     _showAudioTracks = false;
+                    _showSourceSwitcher = false;
                   }),
                   backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
                   child: Padding(
@@ -1487,6 +1592,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     _showStats = false;
                     _showAudioTracks = false;
                     _showSettings = false;
+                    _showSourceSwitcher = false;
                   }),
                   backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
                   child: Padding(
@@ -1503,11 +1609,30 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       _showEpisodes = false;
                       _showStats = false;
                       _showSettings = false;
+                      _showSourceSwitcher = false;
                     }),
                     backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
                     child: Padding(
                       padding: const EdgeInsets.all(10),
                       child: const Icon(LucideIcons.volume2, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
+                if (widget.availableSources != null && widget.availableSources!.isNotEmpty) ...[
+                  const SizedBox(width: 16),
+                  HoverButton(
+                    onTap: () => setState(() {
+                      _showSourceSwitcher = !_showSourceSwitcher;
+                      _showSubtitles = false;
+                      _showEpisodes = false;
+                      _showStats = false;
+                      _showAudioTracks = false;
+                      _showSettings = false;
+                    }),
+                    backgroundColor: _showSourceSwitcher ? AppTheme.accent : Colors.black54,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(LucideIcons.monitor, color: Colors.white, size: 20),
                     ),
                   ),
                 ],
@@ -1520,6 +1645,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       _showStats = false;
                       _showAudioTracks = false;
                       _showSettings = false;
+                      _showSourceSwitcher = false;
                     }),
                     backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
                     child: Padding(
@@ -2082,6 +2208,203 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchSource(SourceMedia source) async {
+    if (_isSwitchingSource) return;
+    setState(() {
+      _isSwitchingSource = true;
+      _showSourceSwitcher = false;
+    });
+
+    try {
+      // Save current position before switching
+      final position = _player.state.position;
+
+      if (source.torrentStream != null) {
+        // Switching to torrent — start torrent playback and seek to current position
+        setState(() => _isTorrentBuffering = true);
+        final result = await TorrentService().startStream(source.torrentStream!);
+        if (!mounted || result == null) {
+          setState(() => _isTorrentBuffering = false);
+          return;
+        }
+        final (url, streamId) = result;
+        _torrentUrl = url;
+
+        // Subscribe to stream updates
+        _streamInfoSub?.cancel();
+        _streamInfoSub = TorrentService().streamUpdates?.listen((streams) {
+          if (!mounted) return;
+          final info = streams[streamId];
+          if (info != null) {
+            setState(() {
+              _streamBufferInfo = {
+                'bufferSeconds': info.bufferSeconds,
+                'bufferPieces': info.bufferPieces,
+                'readaheadWindow': info.readaheadWindow,
+                'bufferPct': info.bufferPct,
+                'downloadRate': info.downloadRate,
+              };
+            });
+          }
+        });
+
+        // Wait for buffer
+        await TorrentService().waitForBuffer(streamId, targetBufferSeconds: 10.0);
+        if (!mounted) return;
+
+        final native = _player.platform as NativePlayer;
+        await native.setProperty('network-timeout', '60');
+        await native.setProperty('cache-secs', '120');
+        await native.setProperty('demuxer-readahead-secs', '120');
+        await _player.open(Media(url));
+        _player.play();
+        // Seek to the previous position once playback starts
+        _bufferingSub?.cancel();
+        bool hasSeeked = false;
+        _bufferingSub = _player.stream.buffering.listen((buffering) {
+          if (!buffering && !hasSeeked && mounted) {
+            hasSeeked = true;
+            _player.seek(position);
+            setState(() => _isTorrentBuffering = false);
+            _seekRecoveryTimer?.cancel();
+            _bufferingSub?.cancel();
+          }
+        });
+      } else {
+        // Switching to VOD — open the URL and seek to current position
+        _streamInfoSub?.cancel();
+        _torrentUrl = null;
+        setState(() => _isTorrentBuffering = false);
+        await _openMedia(source.url, seekToSeconds: position.inSeconds);
+        _player.play();
+      }
+    } catch (e) {
+      debugPrint('[VideoPlayer] Source switch error: $e');
+    } finally {
+      if (mounted) setState(() => _isSwitchingSource = false);
+    }
+  }
+
+  Widget _buildSourceSwitcherPanel() {
+    final sources = widget.availableSources ?? [];
+    final currentSourceName = widget.videoSourceName ?? '';
+    final isCurrentTorrent = currentSourceName == 'Torrent';
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xE60B0F14),
+          border: Border(left: BorderSide(color: Colors.white12)),
+        ),
+        child: Column(
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.monitor, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  const Text('Source', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  if (_isSwitchingSource)
+                    const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent)),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white12),
+            // Source list
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  // VOD sources
+                  ...sources.map((source) {
+                    final isActive = !isCurrentTorrent && source.name == currentSourceName;
+                    return _buildSourceTile(
+                      label: source.name,
+                      icon: LucideIcons.film,
+                      isActive: isActive,
+                      onTap: _isSwitchingSource ? null : () async {
+                        final epIdx = _currentEpIndex;
+                        final result = await widget.onFetchSource?.call(epIdx, source);
+                        if (result != null && mounted) {
+                          await _switchSource(result);
+                        }
+                      },
+                    );
+                  }),
+                  // Torrent option (native only)
+                  if (!kIsWeb) ...[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: Divider(height: 1, color: Colors.white12),
+                    ),
+                    _buildSourceTile(
+                      label: 'Torrent',
+                      icon: LucideIcons.download,
+                      isActive: isCurrentTorrent,
+                      onTap: _isSwitchingSource ? null : () async {
+                        final epIdx = _currentEpIndex;
+                        final result = await widget.onFetchSource?.call(epIdx, const VideoSource(name: 'Torrent', baseUrl: ''));
+                        if (result != null && mounted) {
+                          await _switchSource(result);
+                        }
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSourceTile({
+    required String label,
+    required IconData icon,
+    required bool isActive,
+    VoidCallback? onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: Material(
+        color: isActive ? AppTheme.accent.withOpacity(0.15) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, color: isActive ? AppTheme.accent : AppTheme.textSecondary, size: 18),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: isActive ? AppTheme.accent : Colors.white,
+                      fontSize: 14,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ),
+                if (isActive)
+                  Icon(LucideIcons.check, color: AppTheme.accent, size: 16),
+              ],
+            ),
+          ),
         ),
       ),
     );

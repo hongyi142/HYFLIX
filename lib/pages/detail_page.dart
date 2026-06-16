@@ -445,12 +445,39 @@ class _DetailPageState extends State<DetailPage> {
           seekToSeconds: seekToSeconds,
           episodeCount: _torrentEpisodeCount,
           videoSourceName: 'Torrent',
+          availableSources: ApiService.sources,
+          onFetchSource: _fetchSourceForPlayer,
         ),
       ),
     );
     // Handle skip next/prev from video player for torrent content
     if (result != null && mounted) {
       _playWithTorrent(result);
+    }
+  }
+
+  /// Callback for the player's source switcher. Fetches a playable source
+  /// for the given episode index and VOD source (or torrent).
+  Future<SourceMedia?> _fetchSourceForPlayer(int episodeIndex, VideoSource source) async {
+    final tmdb = _tmdb;
+    if (tmdb == null) return null;
+
+    if (source.name == 'Torrent') {
+      // Fetch torrent stream for this episode
+      final episodeNum = _torrentEpisodeCount <= 1 ? 0 : episodeIndex + 1;
+      await _fetchEpisodeStreams(episodeNum);
+      final picked = _getStreamForSelection(episodeNum);
+      if (picked == null) return null;
+      return SourceMedia(url: '', torrentStream: picked, sourceName: 'Torrent');
+    } else {
+      // Fetch VOD episodes from the given source
+      final result = await ApiService().matchTmdbToProviderFromSource(tmdb, source);
+      if (result == null || result.episodes.isEmpty) return null;
+      final url = episodeIndex < result.episodes.length
+          ? result.episodes[episodeIndex].url
+          : result.m3u8Url;
+      if (url.isEmpty) return null;
+      return SourceMedia(url: url, sourceName: source.name);
     }
   }
 
@@ -668,10 +695,10 @@ class _DetailPageState extends State<DetailPage> {
     return pos >= 0 ? pos + 1 : globalIndex + 1;
   }
 
-  void _play(int episodeIndex) {
+  void _play(int episodeIndex, {int seekToSeconds = 0}) {
     // Route to torrent on native (unless torrent already failed)
     if (!kIsWeb && !_torrentFailed) {
-      _playWithTorrent(episodeIndex);
+      _playWithTorrent(episodeIndex, seekToSeconds: seekToSeconds);
       return;
     }
 
@@ -715,7 +742,10 @@ class _DetailPageState extends State<DetailPage> {
           seasonNumber: _selectedSeason,
           posterUrl: poster,
           episodeNumber: _episodeNumberInSeason(episodeIndex, episodes),
+          seekToSeconds: seekToSeconds,
           videoSourceName: _selectedSource.name,
+          availableSources: ApiService.sources,
+          onFetchSource: _fetchSourceForPlayer,
         ),
       ),
     );
@@ -1546,32 +1576,67 @@ class _DetailPageState extends State<DetailPage> {
                     runSpacing: 12,
                     children: [
                       HoverButton(
-                        onTap: () => _play(0),
+                        onTap: () {
+                          final resumeIdx = widget.content.resumeEpisodeIndex;
+                          final resumePos = widget.content.resumePositionSeconds ?? 0;
+                          if (resumeIdx != null && resumePos > 0) {
+                            _play(resumeIdx, seekToSeconds: resumePos);
+                          } else {
+                            _play(resumeIdx ?? 0, seekToSeconds: resumePos);
+                          }
+                        },
                         backgroundColor: Colors.white,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 28,
                             vertical: 12,
                           ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                LucideIcons.play,
-                                color: Colors.black,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Play',
-                                style: TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                  decoration: TextDecoration.none,
-                                ),
-                              ),
-                            ],
+                          child: Builder(
+                            builder: (context) {
+                              final progress = widget.content.progress;
+                              final resumeIdx = widget.content.resumeEpisodeIndex;
+                              final resumePos = widget.content.resumePositionSeconds ?? 0;
+                              final hasProgress = progress > 0 && progress < 1.0;
+                              final isTvShow = widget.content.episodes.length > 1 ||
+                                  (widget.content.resumeEpisodeIndex != null);
+
+                              String label;
+                              if (hasProgress && isTvShow && resumeIdx != null) {
+                                final epNum = resumeIdx + 1;
+                                final mins = resumePos ~/ 60;
+                                label = mins > 0
+                                    ? 'Resume E$epNum at ${mins}min'
+                                    : 'Resume E$epNum';
+                              } else if (hasProgress && resumePos > 0) {
+                                final mins = resumePos ~/ 60;
+                                label = mins > 0
+                                    ? 'Resume at ${mins}min'
+                                    : 'Resume';
+                              } else {
+                                label = 'Play';
+                              }
+
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    hasProgress ? LucideIcons.rotateCcw : LucideIcons.play,
+                                    color: Colors.black,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    label,
+                                    style: const TextStyle(
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                      decoration: TextDecoration.none,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ),
