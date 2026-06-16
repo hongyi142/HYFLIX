@@ -878,6 +878,22 @@ class _DetailPageState extends State<DetailPage> {
                     decoration: TextDecoration.none,
                   ),
                 ),
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: () => setState(() => _reverseEpisodes = !_reverseEpisodes),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: _reverseEpisodes ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    LucideIcons.arrowDownUp,
+                    color: _reverseEpisodes ? AppTheme.accent : AppTheme.textSecondary,
+                    size: 18,
+                  ),
+                ),
+              ),
               // Season dropdown for multi-season TV shows
               if (!isMovie && _torrentSeasonCount > 1) ...[
                 const SizedBox(width: 8),
@@ -1150,10 +1166,10 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Widget _buildTorrentEpisodeList(ResponsiveLayout layout) {
+    final indices = List.generate(_torrentEpisodeCount, (i) => i);
+    final ordered = _reverseEpisodes ? indices.reversed.toList() : indices;
     return Column(
-      children: List.generate(_torrentEpisodeCount, (i) {
-        return _buildTorrentEpisodeTile(i, layout);
-      }),
+      children: ordered.map((i) => _buildTorrentEpisodeTile(i, layout)).toList(),
     );
   }
 
