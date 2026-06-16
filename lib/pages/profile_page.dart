@@ -196,6 +196,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final title = item['originalTitle'] as String? ?? item['title'] as String? ?? '';
     final epIdx = (item['episodeIndex'] as num?)?.toInt() ?? 0;
     final posSec = (item['positionSeconds'] as num?)?.toInt() ?? 0;
+    final savedSource = item['videoSourceName'] as String? ?? '';
     if (!mounted) return;
 
     showDialog(context: context, barrierDismissible: false,
@@ -203,7 +204,68 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
     try {
       final tmdb = await TmdbService.search(title);
-      final content = await ApiService().matchTmdbToProvider(
+
+      // If saved source is Torrent, go straight to torrent resolution
+      if (savedSource == 'Torrent') {
+        if (tmdb != null && tmdb.id != null) {
+          final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
+          if (imdbId != null) {
+            final savedEpisodesRaw = item['episodes'] as List<dynamic>?;
+            final episodes = savedEpisodesRaw
+                    ?.map((e) => Episode.fromJson(e as Map<String, dynamic>))
+                    .toList() ??
+                const <Episode>[];
+            final epName = episodes.isNotEmpty && epIdx < episodes.length ? episodes[epIdx].name : '';
+            final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+                ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1)
+                ?? '1';
+
+            final stream = await TorrentService().fetchBestStream(
+              imdbId,
+              tmdb.mediaType,
+              season: tmdb.mediaType == 'tv' ? int.tryParse(seasonNum) : null,
+              episode: tmdb.mediaType == 'tv' ? epIdx + 1 : null,
+            );
+
+            if (!mounted) return;
+            Navigator.pop(context);
+
+            if (stream != null) {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+                videoUrl: '',
+                title: item['title'] as String? ?? title,
+                originalTitle: title,
+                episodes: episodes,
+                initialEpisodeIndex: epIdx,
+                tmdbId: tmdb.id?.toString(),
+                isTvShow: episodes.length > 1,
+                seasonNumber: int.tryParse(seasonNum),
+                posterUrl: item['posterUrl'] as String? ?? '',
+                seekToSeconds: posSec,
+                torrentStream: stream,
+                videoSourceName: 'Torrent',
+              )));
+              _loadData();
+              return;
+            }
+          }
+        }
+        // Torrent failed — fall through to default VOD matching
+        if (mounted) Navigator.pop(context);
+        showDialog(context: context, barrierDismissible: false,
+          builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2)));
+      }
+
+      // Try matching on the specific saved VOD source first
+      ContentModel? content;
+      if (savedSource.isNotEmpty && savedSource != 'Torrent') {
+        final savedSrc = ApiService.sources.where((s) => s.name == savedSource).firstOrNull;
+        if (savedSrc != null && tmdb != null) {
+          content = await ApiService().matchTmdbToProviderFromSource(tmdb, savedSrc);
+        }
+      }
+      // Fallback to default source matching
+      content ??= await ApiService().matchTmdbToProvider(
         tmdb ?? TmdbResult(englishTitle: title, overview: '', posterUrl: '', backdropUrl: ''),
       );
 
@@ -216,10 +278,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1) ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1);
 
         await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
-          videoUrl: videoUrl, title: content.title, originalTitle: title, episodes: content.episodes,
+          videoUrl: videoUrl, title: content!.title, originalTitle: title, episodes: content.episodes,
           initialEpisodeIndex: epIdx, tmdbId: tmdb?.id?.toString(), isTvShow: content.episodes.length > 1,
           seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
           posterUrl: content.thumbnailUrl, seekToSeconds: posSec,
+          videoSourceName: savedSource.isNotEmpty ? savedSource : null,
         )));
         _loadData();
         return;
@@ -255,13 +318,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
           posterUrl: item['posterUrl'] as String? ?? '',
           seekToSeconds: posSec,
+          videoSourceName: savedSource.isNotEmpty ? savedSource : null,
         )));
         _loadData();
         return;
       }
 
-      // Torrent fallback
-      if (tmdb != null && tmdb.id != null) {
+      // Torrent fallback (for items without a saved source)
+      if (savedSource != 'Torrent' && tmdb != null && tmdb.id != null) {
         final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
         if (imdbId != null) {
           final epName = episodes.isNotEmpty && epIdx < episodes.length ? episodes[epIdx].name : '';
@@ -295,6 +359,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   posterUrl: item['posterUrl'] as String? ?? '',
                   seekToSeconds: posSec,
                   torrentStream: stream,
+                  videoSourceName: 'Torrent',
                 ),
               ),
             );
@@ -330,6 +395,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           progress: (item['progress'] as num?)?.toDouble() ?? 0.0,
           resumeEpisodeIndex: epIdx,
           resumePositionSeconds: posSec,
+          videoSourceName: savedSource.isNotEmpty ? savedSource : null,
         );
 
         await DetailPage.show(context, fallbackContent, initialTmdb: tmdb);

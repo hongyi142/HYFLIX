@@ -117,7 +117,30 @@ class _DetailPageState extends State<DetailPage> {
   /// Route to the appropriate content source based on content type.
   /// Chinese content → VOD providers directly.
   /// Western/Korean content → Torrentio first, VOD fallback.
+  /// If the user previously watched from a specific source, resume on that source.
   void _routeContentSource() {
+    final savedSource = widget.content.videoSourceName;
+
+    if (savedSource != null && savedSource.isNotEmpty) {
+      if (savedSource == 'Torrent') {
+        if (!kIsWeb) {
+          _selectedSeason = _extractSeasonNumber() ?? 1;
+          _selectedSource = _torrentSource;
+          _fetchTorrentStreams();
+          return;
+        }
+      } else {
+        // Try to find the matching VOD source
+        final match = ApiService.sources.where((s) => s.name == savedSource).firstOrNull;
+        if (match != null) {
+          _selectedSource = match;
+          _refreshSourceEpisodes();
+          return;
+        }
+      }
+    }
+
+    // Default routing when no saved source
     if (kIsWeb || _isChineseContent(_tmdb)) {
       _refreshSourceEpisodes();
     } else {
@@ -430,6 +453,7 @@ class _DetailPageState extends State<DetailPage> {
           torrentStream: picked,
           seekToSeconds: seekToSeconds,
           episodeCount: _torrentEpisodeCount,
+          videoSourceName: 'Torrent',
         ),
       ),
     );
@@ -700,6 +724,7 @@ class _DetailPageState extends State<DetailPage> {
           seasonNumber: _selectedSeason,
           posterUrl: poster,
           episodeNumber: _episodeNumberInSeason(episodeIndex, episodes),
+          videoSourceName: _selectedSource.name,
         ),
       ),
     );

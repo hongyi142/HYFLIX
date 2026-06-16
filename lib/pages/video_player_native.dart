@@ -32,6 +32,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final TorrentStream? torrentStream;
   /// Total episode count for torrent TV shows (episodes list is empty for torrents).
   final int episodeCount;
+  final String? videoSourceName;
 
   const VideoPlayerScreen({
     super.key,
@@ -48,6 +49,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.seekToSeconds = 0,
     this.torrentStream,
     this.episodeCount = 0,
+    this.videoSourceName,
   });
 
   @override
@@ -891,6 +893,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         episodes: widget.episodes.map((e) => e.toJson()).toList(),
         episodeCount: _effectiveEpisodeCount,
         seasonNumber: widget.seasonNumber ?? 1,
+        videoSourceName: widget.videoSourceName ?? '',
       );
     }
   }

@@ -14,6 +14,7 @@ class ContentModel {
   final String year;
   final int? resumeEpisodeIndex;
   final int? resumePositionSeconds;
+  final String? videoSourceName;
 
   const ContentModel({
     required this.title,
@@ -28,6 +29,7 @@ class ContentModel {
     this.year = '',
     this.resumeEpisodeIndex,
     this.resumePositionSeconds,
+    this.videoSourceName,
   });
 
   ContentModel copyWith({
@@ -43,6 +45,7 @@ class ContentModel {
     String? year,
     int? resumeEpisodeIndex,
     int? resumePositionSeconds,
+    String? videoSourceName,
   }) {
     return ContentModel(
       title: title ?? this.title,
@@ -57,6 +60,7 @@ class ContentModel {
       year: year ?? this.year,
       resumeEpisodeIndex: resumeEpisodeIndex ?? this.resumeEpisodeIndex,
       resumePositionSeconds: resumePositionSeconds ?? this.resumePositionSeconds,
+      videoSourceName: videoSourceName ?? this.videoSourceName,
     );
   }
 
@@ -73,6 +77,7 @@ class ContentModel {
         'year': year,
         'resumeEpisodeIndex': resumeEpisodeIndex,
         'resumePositionSeconds': resumePositionSeconds,
+        'videoSourceName': videoSourceName,
       };
 
   factory ContentModel.fromJson(Map<String, dynamic> json) => ContentModel(
@@ -91,6 +96,7 @@ class ContentModel {
         year: json['year'] as String? ?? '',
         resumeEpisodeIndex: json['resumeEpisodeIndex'] as int?,
         resumePositionSeconds: json['resumePositionSeconds'] as int?,
+        videoSourceName: json['videoSourceName'] as String?,
       );
 
   factory ContentModel.fromTmdb(TmdbResult tmdb) => ContentModel(

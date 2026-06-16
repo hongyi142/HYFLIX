@@ -192,13 +192,72 @@ class _HomePageState extends State<HomePage> with RouteAware {
   Future<void> _resumeFromHistory(ContentModel item, int epIdx, int posSec) async {
     if (!mounted) return;
     final title = item.title;
+    final savedSource = item.videoSourceName;
 
     showDialog(context: context, barrierDismissible: false,
       builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2)));
 
     try {
       final tmdb = await TmdbService.search(title, year: item.year);
-      final content = await ApiService().matchTmdbToProvider(
+
+      // If saved source is Torrent, go straight to torrent resolution
+      if (savedSource == 'Torrent') {
+        if (tmdb != null && tmdb.id != null) {
+          final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
+          if (imdbId != null) {
+            final epName = item.episodes.isNotEmpty && epIdx < item.episodes.length
+                ? item.episodes[epIdx].name
+                : '';
+            final seasonNum = RegExp(r'第(\d+)季').firstMatch(epName)?.group(1)
+                ?? RegExp(r'[Ss](\d{1,2})').firstMatch(epName)?.group(1)
+                ?? '1';
+
+            final stream = await TorrentService().fetchBestStream(
+              imdbId,
+              tmdb.mediaType,
+              season: tmdb.mediaType == 'tv' ? int.tryParse(seasonNum) : null,
+              episode: tmdb.mediaType == 'tv' ? epIdx + 1 : null,
+            );
+
+            if (!mounted) return;
+            Navigator.pop(context);
+
+            if (stream != null) {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
+                videoUrl: '',
+                title: item.title,
+                originalTitle: title,
+                episodes: item.episodes,
+                initialEpisodeIndex: epIdx,
+                tmdbId: tmdb.id?.toString(),
+                isTvShow: item.episodes.length > 1,
+                seasonNumber: int.tryParse(seasonNum),
+                posterUrl: item.thumbnailUrl,
+                seekToSeconds: posSec,
+                torrentStream: stream,
+                videoSourceName: 'Torrent',
+              )));
+              _refreshWatchHistory();
+              return;
+            }
+          }
+        }
+        // Torrent failed — fall through to default VOD matching below
+        if (mounted) Navigator.pop(context);
+        showDialog(context: context, barrierDismissible: false,
+          builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2)));
+      }
+
+      // Try matching on the specific saved VOD source first
+      ContentModel? content;
+      if (savedSource != null && savedSource.isNotEmpty && savedSource != 'Torrent') {
+        final savedSrc = ApiService.sources.where((s) => s.name == savedSource).firstOrNull;
+        if (savedSrc != null && tmdb != null) {
+          content = await ApiService().matchTmdbToProviderFromSource(tmdb, savedSrc);
+        }
+      }
+      // Fallback to default source matching
+      content ??= await ApiService().matchTmdbToProvider(
         tmdb ?? TmdbResult(englishTitle: title, overview: '', posterUrl: '', backdropUrl: ''),
       );
 
@@ -217,7 +276,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
         await Navigator.push(context, MaterialPageRoute(builder: (_) => VideoPlayerScreen(
           videoUrl: videoUrl,
-          title: content.title,
+          title: content!.title,
           originalTitle: title,
           episodes: content.episodes,
           initialEpisodeIndex: epIdx,
@@ -226,6 +285,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
           seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
           posterUrl: content.thumbnailUrl,
           seekToSeconds: posSec,
+          videoSourceName: savedSource,
         )));
         _refreshWatchHistory();
         return;
@@ -257,13 +317,14 @@ class _HomePageState extends State<HomePage> with RouteAware {
           seasonNumber: seasonNum != null ? int.tryParse(seasonNum) : null,
           posterUrl: item.thumbnailUrl,
           seekToSeconds: posSec,
+          videoSourceName: savedSource,
         )));
         _refreshWatchHistory();
         return;
       }
 
-      // Torrent fallback
-      if (tmdb != null && tmdb.id != null) {
+      // Torrent fallback (for items without a saved source)
+      if (savedSource != 'Torrent' && tmdb != null && tmdb.id != null) {
         final imdbId = await TmdbService.fetchImdbId(tmdb.id!, tmdb.mediaType);
         if (imdbId != null) {
           final epName = item.episodes.isNotEmpty && epIdx < item.episodes.length
@@ -296,6 +357,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
               posterUrl: item.thumbnailUrl,
               seekToSeconds: posSec,
               torrentStream: stream,
+              videoSourceName: 'Torrent',
             )));
             _refreshWatchHistory();
             return;
@@ -380,7 +442,9 @@ class _HomePageState extends State<HomePage> with RouteAware {
       final progress = (history['progress'] as num?)?.toDouble() ?? 0.0;
       final savedM3u8Url = history['m3u8Url'] as String? ?? '';
       final savedEpisodesRaw = history['episodes'] as List<dynamic>?;
-      final isTorrentContent = savedM3u8Url.isEmpty && (savedEpisodesRaw == null || savedEpisodesRaw.isEmpty);
+      final savedVideoSourceName = history['videoSourceName'] as String? ?? '';
+      final isTorrentContent = savedVideoSourceName == 'Torrent' ||
+          (savedM3u8Url.isEmpty && (savedEpisodesRaw == null || savedEpisodesRaw.isEmpty));
 
       // Match by tmdbId first (most reliable), then by title
       // Skip matching for torrent content — use fallback path for _resumeTorrentPlayback
@@ -425,6 +489,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
             progress: progress,
             resumeEpisodeIndex: episodeIndex,
             resumePositionSeconds: positionSeconds,
+            videoSourceName: savedVideoSourceName.isNotEmpty ? savedVideoSourceName : null,
           ),
         );
       } else if (title.isNotEmpty || originalTitle.isNotEmpty) {
@@ -454,6 +519,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
             progress: progress,
             resumeEpisodeIndex: episodeIndex,
             resumePositionSeconds: positionSeconds,
+            videoSourceName: savedVideoSourceName.isNotEmpty ? savedVideoSourceName : null,
           ),
         );
       }
