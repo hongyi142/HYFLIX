@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 
 class AppTheme {
   // Colors
-  static const Color background = Color(0xFF0B0F14);
-  static const Color surface = Color(0xFF121821);
-  static const Color cardLight = Color(0xFF232A36);
-  static const Color cardDark = Color(0xFF1A1F2B);
-  static const Color textPrimary = Color(0xFFE5E7EB);
-  static const Color textSecondary = Color(0xFF9CA3AF);
-  static const Color accent = Color(0xFFFF3B40);
+  static const Color background = Color(0xFF0E0E0E);
+  static const Color surface = Color(0xFF131313);
+  static const Color cardLight = Color(0xFF2A2A2A);
+  static const Color cardDark = Color(0xFF1C1B1B);
+  static const Color textPrimary = Color(0xFFE5E2E1);
+  static const Color textSecondary = Color(0xFFC6C6C7);
+  static const Color accent = Color(0xFFE50914);
 
   // Spacing
   static const double spacing8 = 8.0;
@@ -19,9 +19,9 @@ class AppTheme {
   static const double spacing64 = 64.0;
 
   // Border Radius
-  static const BorderRadius radius16 = BorderRadius.all(Radius.circular(16.0));
-  static const BorderRadius radiusButton = BorderRadius.all(Radius.circular(14.0));
-  static const BorderRadius radiusPill = BorderRadius.all(Radius.circular(24.0));
+  static const BorderRadius radius16 = BorderRadius.all(Radius.circular(6.0));
+  static const BorderRadius radiusButton = BorderRadius.all(Radius.circular(4.0));
+  static const BorderRadius radiusPill = BorderRadius.all(Radius.circular(12.0));
 
   // Shadows
   static final List<BoxShadow> softShadow = [

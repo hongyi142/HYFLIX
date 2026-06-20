@@ -77,185 +77,241 @@ class _HeroSectionState extends State<HeroSection> {
 
     return Container(
       height: layout.heroHeight,
-      margin: EdgeInsets.symmetric(
-        horizontal: layout.pagePadding,
-        vertical: layout.isPhone ? 16 : AppTheme.spacing24,
-      ),
-      decoration: BoxDecoration(
-        borderRadius: AppTheme.radius16,
-        boxShadow: AppTheme.softShadow,
+      margin: EdgeInsets.zero,
+      decoration: const BoxDecoration(
+        color: Colors.black,
       ),
       child: Stack(
         children: [
-          ClipRRect(
-            borderRadius: AppTheme.radius16,
-            child: PageView.builder(
-              controller: _pageController,
-              onPageChanged: (i) => setState(() => _currentPage = i),
-              itemCount: widget.featuredContent.length,
-              itemBuilder: (context, index) {
-                final item = widget.featuredContent[index];
-                final tmdb = _tmdbCache[index];
-                final banner = tmdb?.backdropUrl.isNotEmpty == true
-                    ? tmdb!.backdropUrl
-                    : item.bannerUrl;
-                final title = tmdb?.englishTitle.isNotEmpty == true
-                    ? tmdb!.englishTitle
-                    : item.title;
-                // Use TMDB English overview; fall back to Chinese blurb
-                final overview = (tmdb?.overview.isNotEmpty == true)
-                    ? tmdb!.overview
-                    : item.description;
-                final genres = tmdb?.genres ?? [];
-                final year = tmdb?.year ?? '';
+          PageView.builder(
+            controller: _pageController,
+            onPageChanged: (i) => setState(() => _currentPage = i),
+            itemCount: widget.featuredContent.length,
+            itemBuilder: (context, index) {
+              final item = widget.featuredContent[index];
+              final tmdb = _tmdbCache[index];
+              final banner = tmdb?.backdropUrl.isNotEmpty == true
+                  ? tmdb!.backdropUrl
+                  : item.bannerUrl;
+              final title = tmdb?.englishTitle.isNotEmpty == true
+                  ? tmdb!.englishTitle
+                  : item.title;
+              final overview = (tmdb?.overview.isNotEmpty == true)
+                  ? tmdb!.overview
+                  : item.description;
+              final genres = tmdb?.genres ?? [];
+              final year = tmdb?.year ?? '';
+              final rating = tmdb?.voteAverage ?? 0.0;
+              final matchPercentage = rating > 0 ? '${(rating * 10).round()}% Match' : '98% Match';
 
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.network(
-                      proxyImageUrl(banner),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          Container(color: AppTheme.cardLight),
-                    ),
-                    // Gradient
-                    // Main content gradient (bottom-left focus)
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomLeft,
-                          end: Alignment.topRight,
-                          colors: [
-                            AppTheme.background,
-                            AppTheme.background.withOpacity(0.8),
-                            Colors.transparent,
-                          ],
-                          stops: const [0.0, 0.45, 0.85],
-                        ),
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    proxyImageUrl(banner),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        Container(color: AppTheme.cardLight),
+                  ),
+                  // Gradient Overlay 1: Bottom-to-top black fade
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          const Color(0xFF0E0E0E),
+                          const Color(0xFF0E0E0E).withOpacity(0.7),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.35, 0.85],
                       ),
                     ),
-                    // Top gradient for Navbar visibility
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            AppTheme.background.withOpacity(0.6),
-                            Colors.transparent,
-                          ],
-                          stops: const [0.0, 0.25],
-                        ),
+                  ),
+                  // Gradient Overlay 2: Left-to-right black fade for text readability
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          const Color(0xFF0E0E0E).withOpacity(0.85),
+                          const Color(0xFF0E0E0E).withOpacity(0.4),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.45, 1.0],
                       ),
                     ),
-                    // Text Content
-                    Positioned(
-                      left: layout.isPhone ? 20 : AppTheme.spacing64,
-                      right: layout.isPhone ? 20 : null,
-                      bottom: layout.isPhone ? 28 : 40,
-                      width: layout.isPhone ? null : layout.heroContentWidth,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Badge row
-                          Row(
-                            children: [
-                              _badge('TRENDING NOW', AppTheme.accent),
-                              if (year.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                _badge(year, Colors.white24),
-                              ],
-                              ...genres
-                                  .take(2)
-                                  .map(
-                                    (g) => Padding(
-                                      padding: const EdgeInsets.only(left: 6),
-                                      child: _badge(g, Colors.white12),
-                                    ),
-                                  ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            title,
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: layout.heroTitleSize,
-                              fontWeight: FontWeight.w800,
-                              height: 1.1,
+                  ),
+                  // Gradient Overlay 3: Top-to-bottom dark fade for navbar visibility
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          const Color(0xFF0E0E0E).withOpacity(0.7),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.25],
+                      ),
+                    ),
+                  ),
+                  // Content
+                  Positioned(
+                    left: layout.isPhone ? 20 : AppTheme.spacing64,
+                    right: layout.isPhone ? 20 : null,
+                    bottom: layout.isPhone ? 40 : 60,
+                    width: layout.isPhone ? null : layout.heroContentWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Metadata badges & text
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.accent,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                              child: const Text(
+                                'TOP 10',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                            const SizedBox(width: 8),
+                            Text(
+                              matchPercentage,
+                              style: const TextStyle(
+                                color: Color(0xFF46D369),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              year.isNotEmpty ? year : item.year,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white54, width: 1),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                              child: const Text(
+                                'HDR',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: layout.heroTitleSize,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -1.0,
+                            height: 1.1,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 10),
+                        // Genres text
+                        if (genres.isNotEmpty) ...[
+                          Text(
+                            genres.join('  •  '),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                           const SizedBox(height: 12),
-                          Text(
-                            overview,
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: layout.isPhone ? 13 : 14,
-                              height: 1.6,
-                            ),
-                            maxLines: layout.isPhone ? 2 : 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 24),
-                          Wrap(
-                            spacing: 14,
-                            runSpacing: 12,
-                            children: [
-                              PrimaryButton(
-                                text: 'Play Now',
-                                icon: LucideIcons.play,
-                                onTap: () => DetailPage.show(
-                                  context,
-                                  item,
-                                  initialTmdb: tmdb,
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              SecondaryButton(
-                                text: 'More Info',
-                                onTap: () => DetailPage.show(
-                                  context,
-                                  item,
-                                  initialTmdb: tmdb,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
                         ],
-                      ),
-                    ),
-                    // Centered Pagination pills
-                    Positioned(
-                      bottom: 24,
-                      left: 0,
-                      right: 0,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(widget.featuredContent.length, (
-                          i,
-                        ) {
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            margin: const EdgeInsets.only(right: 8),
-                            height: 4,
-                            width: _currentPage == i ? 24 : 6,
-                            decoration: BoxDecoration(
-                              color: _currentPage == i
-                                  ? AppTheme.accent
-                                  : Colors.white30,
-                              borderRadius: BorderRadius.circular(2),
+                        Text(
+                          overview,
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: layout.isPhone ? 13 : 14,
+                            height: 1.5,
+                          ),
+                          maxLines: layout.isPhone ? 2 : 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          children: [
+                            PrimaryButton(
+                              text: 'Play Now',
+                              icon: LucideIcons.play,
+                              onTap: () => DetailPage.show(
+                                context,
+                                item,
+                                initialTmdb: tmdb,
+                              ),
                             ),
-                          );
-                        }),
-                      ),
+                            const SizedBox(width: 12),
+                            SecondaryButton(
+                              text: 'More Info',
+                              icon: LucideIcons.info,
+                              onTap: () => DetailPage.show(
+                                context,
+                                item,
+                                initialTmdb: tmdb,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                  // Centered Pagination pills
+                  Positioned(
+                    bottom: 24,
+                    left: 0,
+                    right: 0,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(widget.featuredContent.length, (
+                        i,
+                      ) {
+                        return AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          margin: const EdgeInsets.only(right: 8),
+                          height: 4,
+                          width: _currentPage == i ? 24 : 6,
+                          decoration: BoxDecoration(
+                            color: _currentPage == i
+                                ? AppTheme.accent
+                                : Colors.white30,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
           // Right Arrow
           if (!layout.isPhone)
@@ -290,21 +346,4 @@ class _HeroSectionState extends State<HeroSection> {
       ),
     );
   }
-
-  Widget _badge(String text, Color bg) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(
-      text,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.8,
-      ),
-    ),
-  );
 }

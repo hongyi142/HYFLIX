@@ -187,9 +187,9 @@ class _MovieCardState extends State<MovieCard> {
               const SizedBox(height: 3),
               Row(children: [
                 Text(widget.content.rating > 0 ? widget.content.rating.toStringAsFixed(1) : '–',
-                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.w700)),
                 const SizedBox(width: 3),
-                const Icon(LucideIcons.star, color: Colors.amber, size: 12),
+                const Icon(LucideIcons.star, color: Colors.amber, size: 11),
               ]),
             ],
           ),

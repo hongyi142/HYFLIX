@@ -21,51 +21,39 @@ class Navbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final layout = ResponsiveLayout.of(context);
-    final horizontalMargin = layout.isPhone
-        ? 12.0
-        : layout.isTablet
-            ? 24.0
-            : 48.0;
-    final radius = layout.isPhone ? 14.0 : 18.0;
     final topPadding = MediaQuery.of(context).padding.top;
-    final topMargin = topPadding + (layout.isPhone ? 10 : 14);
-    return Container(
-      margin: EdgeInsets.fromLTRB(
-        horizontalMargin,
-        topMargin,
-        horizontalMargin,
-        0,
+    final currentHeight = (isScrolled ? 56.0 : 64.0) + topPadding;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      height: currentHeight,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: isScrolled ? const Color(0xE60E0E0E) : Colors.transparent, // 90% opacity of deep black background
+        border: Border(
+          bottom: BorderSide(
+            color: isScrolled ? Colors.white.withOpacity(0.1) : Colors.transparent,
+            width: 1.0,
+          ),
+        ),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
+      child: ClipRect(
         child: BackdropFilter(
           filter: ImageFilter.blur(
-            sigmaX: isScrolled ? 20 : 10,
-            sigmaY: isScrolled ? 20 : 10,
+            sigmaX: isScrolled ? 20.0 : 0.0,
+            sigmaY: isScrolled ? 20.0 : 0.0,
           ),
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: layout.isPhone ? 16 : layout.navHorizontalPadding,
-              vertical: layout.isPhone ? 10 : 12,
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: topPadding,
+              left: layout.pagePadding,
+              right: layout.pagePadding,
             ),
-            decoration: BoxDecoration(
-              color: Color.fromRGBO(14, 18, 24, isScrolled ? 0.92 : 0.65),
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(
-                color: Colors.white.withOpacity(isScrolled ? 0.12 : 0.08),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(isScrolled ? 0.4 : 0.2),
-                  blurRadius: isScrolled ? 24 : 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+            child: Center(
+              child: layout.isPhone
+                  ? _buildMobileNavbar(context)
+                  : _buildDesktopNavbar(context),
             ),
-            child: layout.isPhone
-                ? _buildMobileNavbar(context)
-                : _buildDesktopNavbar(context),
           ),
         ),
       ),
@@ -96,6 +84,11 @@ class Navbar extends StatelessWidget {
             _NavIcon(
               icon: LucideIcons.search,
               onTap: () => _openSearch(context),
+            ),
+            const SizedBox(width: 8),
+            _NavIcon(
+              icon: LucideIcons.bell,
+              onTap: () {}, // static notifications bell icon to match HTML layout
             ),
             const SizedBox(width: 12),
             _ProfileAvatar(onTap: () => _openProfile(context), size: 34),

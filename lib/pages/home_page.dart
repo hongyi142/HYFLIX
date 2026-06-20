@@ -542,12 +542,13 @@ class _HomePageState extends State<HomePage> with RouteAware {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(height: layout.topSafeSpacing),
                 if (heroItems.isNotEmpty)
                   HeroSection(
                     featuredContent: heroItems,
                     preloadedTmdb: _trendingTmdb,
-                  ),
+                  )
+                else
+                  SizedBox(height: layout.topSafeSpacing),
                 if (watchingItems.isNotEmpty)
                   _buildHorizontalSection(
                     context: context,
@@ -927,7 +928,7 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
           transform: _pressed
               ? (Matrix4.identity()..scale(0.97))
               : _hovered
-                  ? (Matrix4.identity()..scale(1.03))
+                  ? (Matrix4.identity()..scale(1.02))
                   : Matrix4.identity(),
           transformAlignment: Alignment.center,
           margin: widget.margin,
@@ -937,10 +938,10 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
             children: [
               Expanded(
                 child: _doubleBezel(
-                  borderRadius: 20,
-                  outerPadding: 3,
+                  borderRadius: 6,
+                  outerPadding: 2,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(17),
+                    borderRadius: BorderRadius.circular(4),
                     child: Stack(fit: StackFit.expand, children: [
                       Image.network(
                         proxyImageUrl(poster),
@@ -994,17 +995,30 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
                       // Badges
                       Positioned(top: 10, left: 10, child: _glassBadge('E${epIdx + 1}')),
                       Positioned(top: 10, right: 10, child: _glassBadge(_fmtTime(posSec))),
-                      // Progress bar
+                      // Progress bar with hover glow
                       Positioned(
                         bottom: 0,
                         left: 0,
                         right: 0,
-                        child: SizedBox(
+                        child: Container(
                           height: 3,
+                          decoration: BoxDecoration(
+                            boxShadow: _hovered
+                                ? [
+                                    BoxShadow(
+                                      color: AppTheme.accent.withOpacity(0.6),
+                                      blurRadius: 6,
+                                      spreadRadius: 2,
+                                    ),
+                                  ]
+                                : [],
+                          ),
                           child: LinearProgressIndicator(
                             value: progress.clamp(0.0, 1.0),
-                            backgroundColor: Colors.white.withOpacity(0.06),
-                            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                            backgroundColor: Colors.white.withOpacity(0.1),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              _hovered ? const Color(0xFFFFB4AA) : AppTheme.accent,
+                            ),
                           ),
                         ),
                       ),
@@ -1017,7 +1031,7 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
                 title,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                   letterSpacing: -0.2,
                 ),
@@ -1026,9 +1040,11 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
               ),
               const SizedBox(height: 3),
               Text(
-                '${(progress * 100).round()}% watched',
+                widget.content.episodes.isNotEmpty
+                    ? 'S1:E${epIdx + 1} • ${_fmtTime(posSec)} left'
+                    : 'Movie • ${_fmtTime(posSec)} left',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.3),
+                  color: Colors.white.withOpacity(0.4),
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),

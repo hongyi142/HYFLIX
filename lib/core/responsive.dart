@@ -28,7 +28,11 @@ class ResponsiveLayout {
   double get sectionGap => isPhone ? 32 : 48;
   double get navHorizontalPadding => isPhone ? 16 : (isTablet ? 24 : 64);
   double get topSafeSpacing => isPhone ? 88 : 60;
-  double get heroHeight => isPhone ? 380 : (isTablet ? 430 : 480);
+  double get heroHeight {
+    if (isPhone) return 500;
+    if (isTablet) return 620;
+    return math.max(700.0, math.min(size.height * 0.8, 850.0));
+  }
   double get heroContentWidth =>
       isPhone ? width - 64 : math.min(width * 0.5, 540);
   double get heroTitleSize => isPhone ? 28 : (isTablet ? 36 : 44);
