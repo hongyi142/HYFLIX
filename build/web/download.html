@@ -494,9 +494,9 @@
     <div class="section-header">
       <h2 class="section-title">Choose your platform</h2>
       <p class="section-sub">Pick the version that fits your device</p>
-      <div class="version-pill" id="versionBadge" style="display:none">
+      <div class="version-pill" id="versionBadge">
         <span class="version-dot"></span>
-        <span id="versionText"></span>
+        <span id="versionText">v1.01</span>
       </div>
     </div>
 
@@ -554,12 +554,44 @@
       return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
-    async function fetchConfig() {
-      const RTDB_URL = 'https://hyflix-56557-default-rtdb.asia-southeast1.firebasedatabase.app';
-      const res = await fetch(`${RTDB_URL}/download-config/platforms.json`);
-      if (!res.ok) throw new Error('Failed to load configuration');
-      return await res.json();
-    }
+    const CONFIG = {
+      android: {
+        enabled: true,
+        fileName: 'app-release.apk',
+        fileSize: 134268688,
+        downloadUrl: 'https://github.com/hongyi142/HYFLIX/releases/download/V1.01/app-release.apk'
+      },
+      windows: {
+        enabled: true,
+        fileName: 'hyflix-windows.zip',
+        fileSize: 44049808,
+        downloadUrl: 'https://github.com/hongyi142/HYFLIX/releases/download/V1.01/hyflix-windows.zip'
+      },
+      macos: {
+        enabled: false,
+        fileName: '',
+        fileSize: 0,
+        downloadUrl: '#'
+      },
+      ios: {
+        enabled: false,
+        fileName: '',
+        fileSize: 0,
+        downloadUrl: '#'
+      },
+      'android-tv': {
+        enabled: false,
+        fileName: '',
+        fileSize: 0,
+        downloadUrl: '#'
+      },
+      'apple-tv': {
+        enabled: false,
+        fileName: '',
+        fileSize: 0,
+        downloadUrl: '#'
+      }
+    };
 
     function renderCards(platforms) {
       const container = document.getElementById('content');
@@ -645,14 +677,9 @@
         .fromTo('.scroll-indicator', { opacity: 0 }, { opacity: 0.5, duration: 0.8 }, '-=0.2');
     }
 
-    async function init() {
+    function init() {
       animateHero();
-      try {
-        const config = await fetchConfig();
-        renderCards(config);
-      } catch (e) {
-        renderError(e.message || 'Something went wrong');
-      }
+      renderCards(CONFIG);
     }
 
     init();
