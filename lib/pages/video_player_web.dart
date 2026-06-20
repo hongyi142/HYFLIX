@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
+import '../core/proxy_url.dart';
 import '../models/episode.dart';
 import '../models/torrent_stream.dart';
 import '../widgets/buttons.dart';
@@ -22,6 +23,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final TorrentStream? torrentStream;
   final int? episodeNumber;
   final int episodeCount;
+  final String? videoSourceName;
 
   const VideoPlayerScreen({
     super.key,
@@ -38,6 +40,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.torrentStream,
     this.episodeNumber,
     this.episodeCount = 0,
+    this.videoSourceName,
   });
 
   @override
@@ -72,7 +75,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     try {
       _controller?.dispose();
       final controller = VideoPlayerController.networkUrl(
-        Uri.parse(url),
+        Uri.parse(proxyUrl(url)),
         httpHeaders: const {'User-Agent': 'Mozilla/5.0'},
       );
       _controller = controller;

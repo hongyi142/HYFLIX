@@ -204,7 +204,16 @@ class _DetailPageState extends State<DetailPage> {
 
     if (isTv) {
       _torrentSeasonCount = results[1] as int;
-      final episodes = results[2] as List<TmdbEpisodeInfo>;
+      if (_torrentSeasonCount < 1) _torrentSeasonCount = 1;
+
+      List<TmdbEpisodeInfo> episodes;
+      if (_selectedSeason > _torrentSeasonCount) {
+        _selectedSeason = 1;
+        episodes = await TmdbService.fetchSeasonEpisodes(tmdb.id!, 1);
+      } else {
+        episodes = results[2] as List<TmdbEpisodeInfo>;
+      }
+
       tmdbEpisodeCount = episodes.length;
       for (final ep in episodes) {
         episodeDetailsMap[ep.episodeNumber] = ep;
@@ -878,22 +887,6 @@ class _DetailPageState extends State<DetailPage> {
                     decoration: TextDecoration.none,
                   ),
                 ),
-              const SizedBox(width: 4),
-              GestureDetector(
-                onTap: () => setState(() => _reverseEpisodes = !_reverseEpisodes),
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: _reverseEpisodes ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Icon(
-                    LucideIcons.arrowDownUp,
-                    color: _reverseEpisodes ? AppTheme.accent : AppTheme.textSecondary,
-                    size: 18,
-                  ),
-                ),
-              ),
               // Season dropdown for multi-season TV shows
               if (!isMovie && _torrentSeasonCount > 1) ...[
                 const SizedBox(width: 8),
@@ -905,7 +898,9 @@ class _DetailPageState extends State<DetailPage> {
                     border: Border.all(color: Colors.white24),
                   ),
                   child: DropdownButton<int>(
-                    value: _selectedSeason,
+                    value: (_selectedSeason > 0 && _selectedSeason <= _torrentSeasonCount)
+                        ? _selectedSeason
+                        : 1,
                     dropdownColor: AppTheme.cardDark,
                     underline: const SizedBox(),
                     isDense: true,
@@ -1028,6 +1023,24 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                         ),
                       ),
+              if (!isMovie) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => setState(() => _reverseEpisodes = !_reverseEpisodes),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: _reverseEpisodes ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      LucideIcons.arrowDownUp,
+                      color: _reverseEpisodes ? AppTheme.accent : AppTheme.textSecondary,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ],
               if (_isLoadingTorrents) ...[
                 const SizedBox(width: 8),
                 const SizedBox(
@@ -1819,7 +1832,9 @@ class _DetailPageState extends State<DetailPage> {
                     border: Border.all(color: Colors.white24),
                   ),
                   child: DropdownButton<int>(
-                    value: _selectedSeason,
+                    value: seasons.contains(_selectedSeason)
+                        ? _selectedSeason
+                        : (seasons.isNotEmpty ? seasons.first : null),
                     dropdownColor: AppTheme.cardDark,
                     underline: const SizedBox(),
                     isDense: true,
