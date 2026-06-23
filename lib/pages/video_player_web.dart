@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
+import 'package:video_player_platform_interface/video_player_platform_interface.dart' as vppi;
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 import '../core/proxy_url.dart';
@@ -107,6 +108,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _isInitialized = false;
       _hasError = false;
     });
+
+    if (vppi.VideoPlayerPlatform.instance is! SafeVideoPlayerPlatform) {
+      vppi.VideoPlayerPlatform.instance = SafeVideoPlayerPlatform(vppi.VideoPlayerPlatform.instance);
+      debugPrint('[VideoPlayer:Web] Wrapped VideoPlayerPlatform.instance with SafeVideoPlayerPlatform');
+    }
 
     if (kDebugMode && Uri.base.port != 8888) {
       debugPrint('[VideoPlayer:Web] WARNING: Local development port is ${Uri.base.port}. '
@@ -657,4 +663,86 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       ),
     );
   }
+}
+
+class SafeVideoPlayerPlatform extends vppi.VideoPlayerPlatform {
+  final vppi.VideoPlayerPlatform delegate;
+  SafeVideoPlayerPlatform(this.delegate);
+
+  @override
+  Future<void> init() async {
+    try {
+      await delegate.init();
+    } on UnimplementedError {
+      debugPrint('[VideoPlayer:Web] Ignored unimplemented init() in delegate');
+    } catch (e) {
+      debugPrint('[VideoPlayer:Web] Error in init(): $e');
+    }
+  }
+
+  @override
+  Future<void> dispose(int playerId) => delegate.dispose(playerId);
+
+  @override
+  Stream<vppi.VideoEvent> videoEventsFor(int playerId) => delegate.videoEventsFor(playerId);
+
+  @override
+  Future<void> play(int playerId) => delegate.play(playerId);
+
+  @override
+  Future<void> pause(int playerId) => delegate.pause(playerId);
+
+  @override
+  Future<void> setLooping(int playerId, bool looping) => delegate.setLooping(playerId, looping);
+
+  @override
+  Future<void> setVolume(int playerId, double volume) => delegate.setVolume(playerId, volume);
+
+  @override
+  Future<void> setPlaybackSpeed(int playerId, double speed) => delegate.setPlaybackSpeed(playerId, speed);
+
+  @override
+  Future<void> seekTo(int playerId, Duration position) => delegate.seekTo(playerId, position);
+
+  @override
+  Future<Duration> getPosition(int playerId) => delegate.getPosition(playerId);
+
+  @override
+  Widget buildView(int playerId) => delegate.buildView(playerId);
+
+  @override
+  Widget buildViewWithOptions(vppi.VideoViewOptions options) => delegate.buildViewWithOptions(options);
+
+  @override
+  Future<int?> create(vppi.DataSource dataSource) => delegate.create(dataSource);
+
+  @override
+  Future<int?> createWithOptions(vppi.VideoCreationOptions options) => delegate.createWithOptions(options);
+
+  @override
+  Future<void> setWebOptions(int playerId, vppi.VideoPlayerWebOptions options) => delegate.setWebOptions(playerId, options);
+
+  @override
+  Future<List<vppi.VideoAudioTrack>> getAudioTracks(int playerId) => delegate.getAudioTracks(playerId);
+
+  @override
+  Future<List<vppi.VideoTrack>> getVideoTracks(int playerId) => delegate.getVideoTracks(playerId);
+
+  @override
+  Future<void> selectAudioTrack(int playerId, String trackId) => delegate.selectAudioTrack(playerId, trackId);
+
+  @override
+  Future<void> selectVideoTrack(int playerId, vppi.VideoTrack? track) => delegate.selectVideoTrack(playerId, track);
+
+  @override
+  bool isAudioTrackSupportAvailable() => delegate.isAudioTrackSupportAvailable();
+
+  @override
+  bool isVideoTrackSupportAvailable() => delegate.isVideoTrackSupportAvailable();
+
+  @override
+  Future<void> setAllowBackgroundPlayback(bool allowBackgroundPlayback) => delegate.setAllowBackgroundPlayback(allowBackgroundPlayback);
+
+  @override
+  Future<void> setMixWithOthers(bool mixWithOthers) => delegate.setMixWithOthers(mixWithOthers);
 }
