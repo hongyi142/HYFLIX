@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
@@ -69,16 +72,52 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _initPlayer(_currentUrl!);
   }
 
+  bool _needsResolving(String url) {
+    if (url.toLowerCase().contains('.m3u8')) return false;
+    if (url.toLowerCase().contains('.mp4')) return false;
+    if (url.contains('/share/') || url.contains('index.php?url=')) return true;
+    return false;
+  }
+
+  Future<String> _resolveUrlIfNeeded(String url) async {
+    if (!_needsResolving(url)) return url;
+
+    try {
+      final encoded = Uri.encodeComponent(url);
+      final proxyRequestUrl = '/api/proxy?resolve=true&url=$encoded';
+      debugPrint('[VideoPlayer:Web] Resolving share URL: $url');
+      final response = await http.get(Uri.parse(proxyRequestUrl));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        if (data.containsKey('url') && data['url'] is String) {
+          final resolvedUrl = data['url'] as String;
+          debugPrint('[VideoPlayer:Web] Successfully resolved share URL: $url -> $resolvedUrl');
+          return resolvedUrl;
+        }
+      }
+      debugPrint('[VideoPlayer:Web] Failed to resolve share URL: status=${response.statusCode} body=${response.body}');
+    } catch (e) {
+      debugPrint('[VideoPlayer:Web] Error resolving share URL: $e');
+    }
+    return url;
+  }
+
   Future<void> _initPlayer(String url) async {
     setState(() {
       _isInitialized = false;
       _hasError = false;
     });
 
+    if (kDebugMode && Uri.base.port != 8888) {
+      debugPrint('[VideoPlayer:Web] WARNING: Local development port is ${Uri.base.port}. '
+          'Netlify proxy functions (/api/proxy) might not work unless running via "netlify dev".');
+    }
+
     try {
+      final resolvedUrl = await _resolveUrlIfNeeded(url);
       _controller?.dispose();
       final controller = VideoPlayerController.networkUrl(
-        Uri.parse(proxyUrl(url)),
+        Uri.parse(proxyUrl(resolvedUrl)),
         httpHeaders: const {'User-Agent': 'Mozilla/5.0'},
       );
       _controller = controller;
@@ -229,114 +268,110 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Video
-              if (_isInitialized && _controller != null)
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: _controller!.value.aspectRatio,
-                    child: VideoPlayer(_controller!),
+          body: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _toggleControls,
+            onLongPressStart: (_) {
+              if (!_isLongPressSpeed && _isInitialized) {
+                setState(() => _isLongPressSpeed = true);
+                _controller?.setPlaybackSpeed(2.0);
+              }
+            },
+            onLongPressEnd: (_) {
+              if (_isLongPressSpeed) {
+                setState(() => _isLongPressSpeed = false);
+                _controller?.setPlaybackSpeed(1.0);
+              }
+            },
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Video
+                if (_isInitialized && _controller != null)
+                  Center(
+                    child: AspectRatio(
+                      aspectRatio: _controller!.value.aspectRatio,
+                      child: VideoPlayer(_controller!),
+                    ),
+                  )
+                else if (_hasError)
+                  const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red, size: 48),
+                        SizedBox(height: 16),
+                        Text('Failed to load video',
+                            style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      ],
+                    ),
+                  )
+                else
+                  const Center(
+                    child: CircularProgressIndicator(color: AppTheme.accent),
                   ),
-                )
-              else if (_hasError)
-                const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red, size: 48),
-                      SizedBox(height: 16),
-                      Text('Failed to load video',
-                          style: TextStyle(color: Colors.white70, fontSize: 16)),
-                    ],
+
+                // Buffering indicator
+                if (_isInitialized &&
+                    _controller != null &&
+                    _controller!.value.isBuffering)
+                  const Center(
+                    child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 3),
                   ),
-                )
-              else
-                const Center(
-                  child: CircularProgressIndicator(color: AppTheme.accent),
-                ),
 
-              // Buffering indicator
-              if (_isInitialized &&
-                  _controller != null &&
-                  _controller!.value.isBuffering)
-                const Center(
-                  child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 3),
-                ),
-
-              // Tap catcher — above video so taps are caught before the
-              // HTML <video> element consumes them.
-              GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _toggleControls,
-                onLongPressStart: (_) {
-                  if (!_isLongPressSpeed && _isInitialized) {
-                    setState(() => _isLongPressSpeed = true);
-                    _controller?.setPlaybackSpeed(2.0);
-                  }
-                },
-                onLongPressEnd: (_) {
-                  if (_isLongPressSpeed) {
-                    setState(() => _isLongPressSpeed = false);
-                    _controller?.setPlaybackSpeed(1.0);
-                  }
-                },
-                child: const SizedBox.expand(),
-              ),
-
-              // Long-press speed indicator
-              if (_isLongPressSpeed)
-                Positioned(
-                  top: 80,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.bolt, color: Colors.amber, size: 18),
-                          SizedBox(width: 6),
-                          Text(
-                            '2x Speed',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
+                // Long-press speed indicator
+                if (_isLongPressSpeed)
+                  Positioned(
+                    top: 80,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bolt, color: Colors.amber, size: 18),
+                            SizedBox(width: 6),
+                            Text(
+                              '2x Speed',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
+
+                // Controls overlay
+                AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 250),
+                  child: IgnorePointer(
+                    ignoring: !_showControls,
+                    child: _buildControls(currentEpName, hasEpisodes),
+                  ),
                 ),
 
-              // Controls overlay
-              AnimatedOpacity(
-                opacity: _showControls ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 250),
-                child: IgnorePointer(
-                  ignoring: !_showControls,
-                  child: _buildControls(currentEpName, hasEpisodes),
-                ),
-              ),
-
-              // Episode panel
-              if (_showEpisodes && hasEpisodes)
-                Positioned(
-                  top: 0,
-                  bottom: 0,
-                  right: 0,
-                  width: 300,
-                  child: _buildEpisodePanel(),
-                ),
-            ],
+                // Episode panel
+                if (_showEpisodes && hasEpisodes)
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    width: 300,
+                    child: _buildEpisodePanel(),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
