@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:js' as js;
+import 'dart:ui_web' as ui_web;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -50,8 +51,7 @@ class _WebVideoController {
       ..crossOrigin = 'anonymous';
 
     // Register the video element as a platform view
-    // ignore: undefined_prefixed_name
-    html.platformViewRegistry
+    ui_web.platformViewRegistry
         .registerViewFactory(_viewType!, (int viewId) => _video!);
 
     // Listen for native events
@@ -96,7 +96,7 @@ class _WebVideoController {
     final isHls = url.contains('.m3u8');
     final hlsClass = js.context['Hls'];
 
-    if (isHls && hlsClass != null && hlsClass['isSupported']()) {
+    if (isHls && hlsClass != null && hlsClass.callMethod('isSupported') == true) {
       // Use hls.js for m3u8 streams on non-Safari browsers
       _hls = js.JsObject(hlsClass);
       _hls!.callMethod('loadSource', [url]);
