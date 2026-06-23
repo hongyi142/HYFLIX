@@ -8,6 +8,7 @@ import '../core/proxy_url.dart';
 import '../models/episode.dart';
 import '../models/torrent_stream.dart';
 import '../widgets/buttons.dart';
+import 'fullscreen_web.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
   final String videoUrl;
@@ -57,6 +58,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   String? _currentUrl;
   Timer? _hideControlsTimer;
   bool _isExiting = false;
+  bool _isFullScreen = false;
+  bool _isLongPressSpeed = false;
 
   @override
   void initState() {
@@ -168,6 +171,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (_showControls) _scheduleHideControls();
   }
 
+  Future<void> _toggleFullScreen() async {
+    setState(() => _isFullScreen = !_isFullScreen);
+    try {
+      await toggleFullScreen();
+    } catch (e) {
+      debugPrint('[VideoPlayer:Web] Fullscreen toggle error: $e');
+      if (mounted) setState(() => _isFullScreen = !_isFullScreen);
+    }
+  }
+
   Future<void> _exitPlayer() async {
     if (_isExiting) return;
     _isExiting = true;
@@ -216,172 +229,233 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: GestureDetector(
-            onTap: _toggleControls,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Video
-                if (_isInitialized && _controller != null)
-                  Center(
-                    child: AspectRatio(
-                      aspectRatio: _controller!.value.aspectRatio,
-                      child: VideoPlayer(_controller!),
-                    ),
-                  )
-                else if (_hasError)
-                  const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.error_outline, color: Colors.red, size: 48),
-                        SizedBox(height: 16),
-                        Text('Failed to load video',
-                            style: TextStyle(color: Colors.white70, fontSize: 16)),
-                      ],
-                    ),
-                  )
-                else
-                  const Center(
-                    child: CircularProgressIndicator(color: AppTheme.accent),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Video
+              if (_isInitialized && _controller != null)
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: _controller!.value.aspectRatio,
+                    child: VideoPlayer(_controller!),
                   ),
-
-                // Buffering indicator
-                if (_isInitialized &&
-                    _controller != null &&
-                    _controller!.value.isBuffering)
-                  const Center(
-                    child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 3),
+                )
+              else if (_hasError)
+                const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red, size: 48),
+                      SizedBox(height: 16),
+                      Text('Failed to load video',
+                          style: TextStyle(color: Colors.white70, fontSize: 16)),
+                    ],
                   ),
+                )
+              else
+                const Center(
+                  child: CircularProgressIndicator(color: AppTheme.accent),
+                ),
 
-                // Controls overlay
-                if (_showControls)
-                  Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.black54, Colors.transparent, Colors.transparent, Colors.black54],
-                        stops: [0.0, 0.2, 0.7, 1.0],
+              // Buffering indicator
+              if (_isInitialized &&
+                  _controller != null &&
+                  _controller!.value.isBuffering)
+                const Center(
+                  child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 3),
+                ),
+
+              // Tap catcher — above video so taps are caught before the
+              // HTML <video> element consumes them.
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _toggleControls,
+                onLongPressStart: (_) {
+                  if (!_isLongPressSpeed && _isInitialized) {
+                    setState(() => _isLongPressSpeed = true);
+                    _controller?.setPlaybackSpeed(2.0);
+                  }
+                },
+                onLongPressEnd: (_) {
+                  if (_isLongPressSpeed) {
+                    setState(() => _isLongPressSpeed = false);
+                    _controller?.setPlaybackSpeed(1.0);
+                  }
+                },
+                child: const SizedBox.expand(),
+              ),
+
+              // Long-press speed indicator
+              if (_isLongPressSpeed)
+                Positioned(
+                  top: 80,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                    ),
-                  ),
-
-                // Top bar
-                if (_showControls)
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: SafeArea(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Row(
-                          children: [
-                            HoverButton(
-                              onTap: _exitPlayer,
-                              backgroundColor: Colors.black45,
-                              child: const Padding(
-                                padding: EdgeInsets.all(8),
-                                child: Icon(Icons.arrow_back, color: Colors.white, size: 22),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                currentEpName,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (hasEpisodes)
-                              HoverButton(
-                                onTap: () => setState(() {
-                                  _showEpisodes = !_showEpisodes;
-                                }),
-                                backgroundColor: _showEpisodes
-                                    ? AppTheme.accent
-                                    : Colors.black45,
-                                child: const Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: Icon(LucideIcons.list, color: Colors.white, size: 20),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Center play/pause
-                if (_showControls && _isInitialized)
-                  Center(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        HoverButton(
-                          onTap: () => _seekRelative(-10),
-                          backgroundColor: Colors.black45,
-                          child: const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Icon(Icons.replay_10, color: Colors.white, size: 32),
-                          ),
-                        ),
-                        const SizedBox(width: 24),
-                        HoverButton(
-                          onTap: _togglePlayPause,
-                          backgroundColor: Colors.black45,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Icon(
-                              _controller?.value.isPlaying == true
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.bolt, color: Colors.amber, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            '2x Speed',
+                            style: TextStyle(
                               color: Colors.white,
-                              size: 48,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 24),
-                        HoverButton(
-                          onTap: () => _seekRelative(10),
-                          backgroundColor: Colors.black45,
-                          child: const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Icon(Icons.forward_10, color: Colors.white, size: 32),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
+                ),
 
-                // Bottom progress bar
-                if (_showControls && _isInitialized && _controller != null)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: _buildProgressBar(),
-                  ),
+              // Controls overlay
+              AnimatedOpacity(
+                opacity: _showControls ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                child: IgnorePointer(
+                  ignoring: !_showControls,
+                  child: _buildControls(currentEpName, hasEpisodes),
+                ),
+              ),
 
-                // Episode panel
-                if (_showEpisodes && hasEpisodes)
-                  Positioned(
-                    top: 0,
-                    bottom: 0,
-                    right: 0,
-                    width: 300,
-                    child: _buildEpisodePanel(),
-                  ),
-              ],
-            ),
+              // Episode panel
+              if (_showEpisodes && hasEpisodes)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  width: 300,
+                  child: _buildEpisodePanel(),
+                ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildControls(String epName, bool hasEpisodes) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.black54, Colors.transparent, Colors.transparent, Colors.black54],
+          stops: [0.0, 0.2, 0.7, 1.0],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // Top bar
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    HoverButton(
+                      onTap: _exitPlayer,
+                      backgroundColor: Colors.black45,
+                      child: const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        epName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (hasEpisodes)
+                      HoverButton(
+                        onTap: () => setState(() {
+                          _showEpisodes = !_showEpisodes;
+                        }),
+                        backgroundColor: _showEpisodes
+                            ? AppTheme.accent
+                            : Colors.black45,
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(LucideIcons.list, color: Colors.white, size: 20),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Center play/pause
+          if (_isInitialized)
+            Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  HoverButton(
+                    onTap: () => _seekRelative(-10),
+                    backgroundColor: Colors.black45,
+                    child: const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Icon(Icons.replay_10, color: Colors.white, size: 32),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  HoverButton(
+                    onTap: _togglePlayPause,
+                    backgroundColor: Colors.black45,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Icon(
+                        _controller?.value.isPlaying == true
+                            ? Icons.pause
+                            : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  HoverButton(
+                    onTap: () => _seekRelative(10),
+                    backgroundColor: Colors.black45,
+                    child: const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Icon(Icons.forward_10, color: Colors.white, size: 32),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // Bottom progress bar + fullscreen
+          if (_isInitialized && _controller != null)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildProgressBar(),
+            ),
+        ],
       ),
     );
   }
@@ -430,12 +504,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       _formatDuration(position),
                       style: const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
+                    const Spacer(),
+                    HoverButton(
+                      onTap: _toggleFullScreen,
+                      backgroundColor: Colors.transparent,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                          color: Colors.white70,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
                     Text(
                       _formatDuration(duration),
                       style: const TextStyle(color: Colors.white70, fontSize: 12),

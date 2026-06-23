@@ -1,12 +1,12 @@
 {
-    "name": "hyflix",
-    "short_name": "hyflix",
+    "name": "HYFLIX",
+    "short_name": "HYFLIX",
     "start_url": ".",
-    "display": "standalone",
+    "display": "fullscreen",
     "background_color": "#0B0F14",
-    "theme_color": "#E50914",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "theme_color": "#0B0F14",
+    "description": "Stream movies and TV shows.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
