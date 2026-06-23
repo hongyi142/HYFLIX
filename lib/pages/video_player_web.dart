@@ -743,6 +743,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           color: Colors.white70, fontSize: 12),
                     ),
                     const Spacer(),
+                    Text(
+                      _formatDuration(duration),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(width: 8),
                     HoverButton(
                       onTap: _toggleFullScreen,
                       backgroundColor: Colors.transparent,
@@ -756,12 +762,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           size: 22,
                         ),
                       ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      _formatDuration(duration),
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12),
                     ),
                   ],
                 ),
