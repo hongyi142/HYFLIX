@@ -171,10 +171,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (_showControls) _scheduleHideControls();
   }
 
-  Future<void> _toggleFullScreen() async {
+  void _toggleFullScreen() {
     setState(() => _isFullScreen = !_isFullScreen);
     try {
-      await toggleFullScreen();
+      toggleFullScreen();
     } catch (e) {
       debugPrint('[VideoPlayer:Web] Fullscreen toggle error: $e');
       if (mounted) setState(() => _isFullScreen = !_isFullScreen);
