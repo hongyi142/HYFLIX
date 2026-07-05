@@ -8,12 +8,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:file_picker/file_picker.dart';
 import '../core/theme.dart';
 import '../core/proxy_url.dart';
 import '../models/episode.dart';
 import '../models/torrent_stream.dart';
 import '../widgets/buttons.dart';
 import 'fullscreen_web.dart';
+import '../services/subtitle_service.dart';
 
 /// Lightweight web video controller using an HTML <video> element + hls.js.
 class _WebVideoController {
@@ -132,6 +134,38 @@ class _WebVideoController {
 
   void setVolume(double volume) {
     if (_video != null) _video!.volume = volume.clamp(0.0, 1.0);
+  }
+
+  String srtToVtt(String srtContent) {
+    var vtt = srtContent.replaceAllMapped(
+      RegExp(r'(\d{2}:\d{2}:\d{2}),(\d{3})'),
+      (Match m) => '${m.group(1)}.${m.group(2)}',
+    );
+    if (!vtt.startsWith('WEBVTT')) {
+      vtt = 'WEBVTT\n\n$vtt';
+    }
+    return vtt;
+  }
+
+  void setSubtitleTrack(String? srtContent, {String title = 'Subtitles', String language = 'en'}) {
+    if (_video == null) return;
+    _video!.querySelectorAll('track').forEach((el) => el.remove());
+
+    if (srtContent == null || srtContent.trim().isEmpty) return;
+
+    final vttContent = srtToVtt(srtContent);
+    final blob = html.Blob([vttContent], 'text/vtt');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    
+    final track = html.TrackElement()
+      ..src = url
+      ..kind = 'subtitles'
+      ..srclang = language
+      ..label = title
+      ..default_ = true;
+      
+    _video!.append(track);
+    debugPrint('[VideoPlayer:Web] Set subtitle track: $title ($language)');
   }
 
   void _disposeHls() {
@@ -313,6 +347,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
       ctrl.play();
       _scheduleHideControls();
+      _fetchSubtitles();
     } catch (e) {
       debugPrint('[VideoPlayer:Web] Init error: $e');
       if (mounted) setState(() => _hasError = true);
@@ -339,6 +374,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     setState(() {
       _currentEpIndex = index;
       _showEpisodes = false;
+      _showSubtitles = false;
+      _selectedSub = null;
+      _availableSubs = [];
     });
     _initPlayer(widget.episodes[index].url);
   }
@@ -546,6 +584,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     width: 300,
                     child: _buildEpisodePanel(),
                   ),
+
+                // Subtitle panel
+                if (_showSubtitles)
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    width: 300,
+                    child: _buildSubtitlePanel(),
+                  ),
               ],
             ),
           ),
@@ -604,10 +652,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    if (widget.tmdbId != null) ...[
+                      HoverButton(
+                        onTap: () => setState(() {
+                          _showSubtitles = !_showSubtitles;
+                          _showEpisodes = false;
+                        }),
+                        backgroundColor:
+                            _showSubtitles ? AppTheme.accent : Colors.black45,
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(LucideIcons.subtitles,
+                              color: Colors.white, size: 20),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     if (hasEpisodes)
                       HoverButton(
                         onTap: () =>
-                            setState(() => _showEpisodes = !_showEpisodes),
+                            setState(() {
+                              _showEpisodes = !_showEpisodes;
+                              _showSubtitles = false;
+                            }),
                         backgroundColor:
                             _showEpisodes ? AppTheme.accent : Colors.black45,
                         child: const Padding(
@@ -865,6 +932,429 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               },
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  bool _showSubtitles = false;
+  bool _loadingSubs = false;
+  List<SubtitleItem> _availableSubs = [];
+  SubtitleItem? _selectedSub;
+  bool _downloadingSeason = false;
+
+  Future<void> _fetchSubtitles() async {
+    if (mounted) setState(() => _loadingSubs = true);
+    try {
+      final currentEpisode = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
+      final epNum = widget.episodeNumber ?? (widget.episodes.isNotEmpty ? _currentEpIndex + 1 : null);
+      final subs = await SubtitleService.searchSubtitles(
+        widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title,
+        tmdbId: widget.tmdbId,
+        seasonNumber: widget.seasonNumber,
+        episodeNumber: epNum,
+        episodeName: currentEpisode?.name,
+        isTvShow: widget.isTvShow,
+      );
+
+      // Load locally stored subtitles
+      List<SubtitleItem> localSubs = [];
+      if (widget.tmdbId != null && widget.seasonNumber != null) {
+        localSubs = await SubtitleService.loadLocalSubtitles(
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+          episodeNumber: epNum,
+        );
+      }
+
+      SubtitleItem? autoSelectedSub;
+      for (final sub in localSubs) {
+        if (sub.matchType == SubtitleMatchType.exactEpisode) {
+          autoSelectedSub = sub;
+          break;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _availableSubs = [...localSubs, ...subs];
+          _loadingSubs = false;
+        });
+
+        // Auto-select matching local subtitle if none is selected yet
+        if (autoSelectedSub != null && _selectedSub == null) {
+          _selectSubtitle(autoSelectedSub);
+        }
+      }
+    } catch (e) {
+      debugPrint('[VideoPlayer:Web] Error fetching subtitles: $e');
+      if (mounted) setState(() => _loadingSubs = false);
+    }
+  }
+
+  Future<void> _selectSubtitle(SubtitleItem item) async {
+    if (mounted) {
+      setState(() {
+        _selectedSub = item;
+        _showSubtitles = false;
+      });
+    }
+
+    String? srtContent;
+    final epNum = widget.episodeNumber ?? (widget.episodes.isNotEmpty ? _currentEpIndex + 1 : null);
+    
+    if (item.source == 'local' && item.localPath != null) {
+      srtContent = await SubtitleService.readLocalSubtitle(
+        item.localPath!,
+        episodeNumber: item.matchType == SubtitleMatchType.seasonFallback ? epNum : null,
+      );
+    } else if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null && widget.tmdbId != null && widget.seasonNumber != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Downloading and extracting season subtitles...'),
+            duration: Duration(seconds: 3),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
+      final saved = await SubtitleService.downloadSeasonSubtitles(
+        item: item,
+        tmdbId: widget.tmdbId!,
+        season: widget.seasonNumber!,
+      );
+      
+      if (saved.isNotEmpty) {
+        await _fetchSubtitles();
+        
+        final matchingLocal = await SubtitleService.findMatchingLocalSubtitle(
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+          episodeNumber: epNum,
+        );
+        
+        if (matchingLocal != null) {
+          _selectedSub = matchingLocal;
+          srtContent = await SubtitleService.readLocalSubtitle(
+            matchingLocal.localPath!,
+          );
+        } else {
+          srtContent = await SubtitleService.readLocalSubtitle(
+            saved.first.localPath!,
+            episodeNumber: epNum,
+          );
+        }
+      } else {
+        srtContent = await SubtitleService.fetchAndExtractEpisode(
+          item,
+          episodeNumber: epNum,
+        );
+      }
+    } else if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null) {
+      srtContent = await SubtitleService.fetchAndExtractEpisode(
+        item,
+        episodeNumber: epNum,
+      );
+    } else {
+      srtContent = await SubtitleService.fetchSubtitleContent(item);
+    }
+
+    if (srtContent != null && srtContent.trim().isNotEmpty) {
+      _controller?.setSubtitleTrack(
+        srtContent,
+        title: item.fileName,
+        language: item.language,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Subtitles active: ${item.language.toUpperCase()}'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to load subtitle content'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _downloadSeasonSubs(SubtitleItem item) async {
+    if (_downloadingSeason) return;
+    if (widget.tmdbId == null || widget.seasonNumber == null) return;
+
+    setState(() => _downloadingSeason = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Downloading season subtitles...'),
+        duration: Duration(seconds: 3),
+        backgroundColor: AppTheme.accent,
+      ),
+    );
+
+    final saved = await SubtitleService.downloadSeasonSubtitles(
+      item: item,
+      tmdbId: widget.tmdbId!,
+      season: widget.seasonNumber!,
+    );
+
+    if (mounted) {
+      setState(() => _downloadingSeason = false);
+      if (saved.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved ${saved.length} episode subtitle(s)'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+        await _fetchSubtitles();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No SRT files found in the download'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _importSubtitles() async {
+    if (widget.tmdbId == null || widget.seasonNumber == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Subtitles can only be imported for TV show episodes'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['srt', 'zip'],
+      allowMultiple: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+
+    final saved = <SubtitleItem>[];
+    for (final picked in result.files) {
+      if (picked.bytes == null) continue;
+      final name = picked.name;
+      final ext = name.split('.').last.toLowerCase();
+
+      if (ext == 'zip') {
+        final batch = await SubtitleService.importLocalSubtitleBatch(
+          zipBytes: picked.bytes!,
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+        );
+        saved.addAll(batch);
+      } else if (ext == 'srt') {
+        final content = utf8.decode(picked.bytes!, allowMalformed: true);
+        final item = await SubtitleService.importLocalSubtitle(
+          fileName: name,
+          content: content,
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+        );
+        if (item != null) saved.add(item);
+      }
+    }
+
+    if (mounted && saved.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Imported ${saved.length} subtitle(s)'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: AppTheme.accent,
+        ),
+      );
+      await _fetchSubtitles();
+    }
+  }
+
+  Widget _buildSubtitlePanel() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withOpacity(0.95),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 50, 20, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text('Subtitles',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                    icon: const Icon(LucideIcons.upload, color: AppTheme.accent, size: 20),
+                    tooltip: 'Import subtitle file',
+                    onPressed: _importSubtitles,
+                  ),
+                ],
+              ),
+            ),
+            if (_loadingSubs)
+              const Expanded(
+                child: Center(
+                    child: CircularProgressIndicator(color: AppTheme.accent)),
+              )
+            else if (_availableSubs.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('No subtitles found',
+                          style: TextStyle(color: AppTheme.textSecondary)),
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: _importSubtitles,
+                        icon: const Icon(LucideIcons.upload, size: 16),
+                        label: const Text('Import SRT / ZIP'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: _availableSubs.length + 1,
+                  itemBuilder: (context, i) {
+                    final sub = i > 0 ? _availableSubs[i - 1] : null;
+                    return GestureDetector(
+                      onTap: () {
+                        if (i == 0) {
+                          _controller?.setSubtitleTrack(null);
+                          setState(() {
+                            _selectedSub = null;
+                            _showSubtitles = false;
+                          });
+                        } else {
+                          _selectSubtitle(_availableSubs[i - 1]);
+                        }
+                      },
+                      child: _subtitleTile(
+                        i == 0 ? 'Off' : '${sub!.language.toUpperCase()} - ${sub.fileName}',
+                        i == 0 ? (_selectedSub == null) : (_selectedSub?.id == sub!.id),
+                        subtitle: i == 0 ? null : sub!.matchType.label,
+                        isLocal: sub?.source == 'local',
+                        onDownloadSeason: (i > 0 && sub!.matchType == SubtitleMatchType.seasonFallback && sub.source != 'local')
+                            ? () => _downloadSeasonSubs(sub)
+                            : null,
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _subtitleTile(String title, bool isActive, {
+    String? subtitle,
+    bool isLocal = false,
+    VoidCallback? onDownloadSeason,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isActive ? AppTheme.accent : Colors.white24,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(isActive ? LucideIcons.checkCircle : LucideIcons.circle,
+              color: isActive ? AppTheme.accent : AppTheme.textSecondary,
+              size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: isActive ? Colors.white : AppTheme.textSecondary,
+                          fontSize: 13,
+                          fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isLocal) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('LOCAL',
+                            style: TextStyle(color: AppTheme.accent, fontSize: 9, fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  ],
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isActive ? AppTheme.accent : AppTheme.textSecondary.withOpacity(0.6),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (onDownloadSeason != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onDownloadSeason,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(LucideIcons.download, color: AppTheme.accent, size: 14),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -317,6 +318,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (widget.torrentStream == null) {
         final native = _player.platform as NativePlayer;
         await native.setProperty('network-timeout', '60');
+        await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       }
 
       await _player.open(Media(url));
@@ -676,11 +678,24 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         );
       }
 
+      SubtitleItem? autoSelectedSub;
+      for (final sub in localSubs) {
+        if (sub.matchType == SubtitleMatchType.exactEpisode) {
+          autoSelectedSub = sub;
+          break;
+        }
+      }
+
       if (mounted) {
         setState(() {
           _availableSubs = [...localSubs, ...subs];
           _loadingSubs = false;
         });
+
+        // Auto-select matching local subtitle if none is selected yet
+        if (autoSelectedSub != null && _selectedSub == null) {
+          _selectSubtitle(autoSelectedSub);
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _loadingSubs = false);
@@ -697,11 +712,60 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     String? srtContent;
     final epNum = widget.episodeNumber ?? _episodeNumberInSeason(_currentEpIndex);
+    
     if (item.source == 'local' && item.localPath != null) {
       srtContent = await SubtitleService.readLocalSubtitle(
         item.localPath!,
         episodeNumber: item.matchType == SubtitleMatchType.seasonFallback ? epNum : null,
       );
+    } else if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null && widget.tmdbId != null && widget.seasonNumber != null) {
+      // Auto-download and unzip season subtitles to local storage
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Downloading and extracting season subtitles...'),
+            duration: Duration(seconds: 3),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
+      final saved = await SubtitleService.downloadSeasonSubtitles(
+        item: item,
+        tmdbId: widget.tmdbId!,
+        season: widget.seasonNumber!,
+      );
+      
+      if (saved.isNotEmpty) {
+        // Refresh subtitle list so local subtitles are shown
+        await _fetchSubtitles();
+        
+        // Find the matching local subtitle for this episode
+        final matchingLocal = await SubtitleService.findMatchingLocalSubtitle(
+          tmdbId: widget.tmdbId!,
+          season: widget.seasonNumber!,
+          episodeNumber: epNum,
+        );
+        
+        if (matchingLocal != null) {
+          // Load the matching local subtitle
+          _selectedSub = matchingLocal;
+          srtContent = await SubtitleService.readLocalSubtitle(
+            matchingLocal.localPath!,
+          );
+        } else {
+          // Fallback to first saved local subtitle if no exact match
+          srtContent = await SubtitleService.readLocalSubtitle(
+            saved.first.localPath!,
+            episodeNumber: epNum,
+          );
+        }
+      } else {
+        // Fallback to simple in-memory fetch if download/extract failed
+        srtContent = await SubtitleService.fetchAndExtractEpisode(
+          item,
+          episodeNumber: epNum,
+        );
+      }
     } else if (item.matchType == SubtitleMatchType.seasonFallback && epNum != null) {
       srtContent = await SubtitleService.fetchAndExtractEpisode(
         item,
@@ -2357,17 +2421,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (picked.path == null) continue;
       final path = picked.path!;
       final ext = path.split('.').last.toLowerCase();
+      final file = File(path);
+      final baseName = path.split(RegExp(r'[/\\]')).last;
 
       if (ext == 'zip') {
+        final bytes = await file.readAsBytes();
         final batch = await SubtitleService.importLocalSubtitleBatch(
-          zipPath: path,
+          zipBytes: bytes,
           tmdbId: widget.tmdbId!,
           season: widget.seasonNumber!,
         );
         saved.addAll(batch);
       } else if (ext == 'srt') {
+        final content = await file.readAsString();
         final item = await SubtitleService.importLocalSubtitle(
-          filePath: path,
+          fileName: baseName,
+          content: content,
           tmdbId: widget.tmdbId!,
           season: widget.seasonNumber!,
         );

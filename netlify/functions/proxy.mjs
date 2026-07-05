@@ -107,8 +107,7 @@ export default async (request) => {
         },
       });
     } else {
-      const body = await res.arrayBuffer();
-      return new Response(body, {
+      return new Response(res.body, {
         status: res.status,
         headers: {
           'Content-Type': contentType,
