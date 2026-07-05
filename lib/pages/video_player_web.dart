@@ -162,7 +162,7 @@ class _WebVideoController {
       ..kind = 'subtitles'
       ..srclang = language
       ..label = title
-      ..default_ = true;
+      ..setAttribute('default', 'true');
       
     _video!.append(track);
     debugPrint('[VideoPlayer:Web] Set subtitle track: $title ($language)');
