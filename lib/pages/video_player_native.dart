@@ -145,7 +145,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     super.initState();
     _startTime = DateTime.now();
     _currentEpIndex = widget.initialEpisodeIndex;
-    _currentTitle = widget.title;
+    _currentTitle = widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title;
     _player = Player();
     _controller = VideoController(_player);
 

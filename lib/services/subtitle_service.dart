@@ -27,17 +27,50 @@ class SubtitleItem {
 
   SubtitleItem({
     required this.id,
-    required this.fileName,
+    required String fileName,
     required this.language,
     this.downloadUrl,
     this.source = 'subdl',
     this.matchType = SubtitleMatchType.exactEpisode,
     this.localPath,
-  });
+  }) : fileName = SubtitleService.normalizeUnicodeAlphanumeric(fileName);
 }
 
 class SubtitleService {
   static final Map<String, List<SubtitleItem>> _cache = {};
+
+  static String normalizeUnicodeAlphanumeric(String input) {
+    final buffer = StringBuffer();
+    for (final rune in input.runes) {
+      var char = rune;
+      // Map mathematical capital letters (A-Z)
+      if (rune >= 0x1D400 && rune <= 0x1D419) char = rune - 0x1D400 + 0x41;
+      else if (rune >= 0x1D434 && rune <= 0x1D44D) char = rune - 0x1D434 + 0x41;
+      else if (rune >= 0x1D468 && rune <= 0x1D481) char = rune - 0x1D468 + 0x41;
+      else if (rune >= 0x1D5A0 && rune <= 0x1D5B9) char = rune - 0x1D5A0 + 0x41;
+      else if (rune >= 0x1D5D4 && rune <= 0x1D5ED) char = rune - 0x1D5D4 + 0x41;
+      else if (rune >= 0x1D608 && rune <= 0x1D621) char = rune - 0x1D608 + 0x41;
+      else if (rune >= 0x1D63C && rune <= 0x1D655) char = rune - 0x1D63C + 0x41;
+      else if (rune >= 0x1D670 && rune <= 0x1D689) char = rune - 0x1D670 + 0x41;
+      // Map mathematical lowercase letters (a-z)
+      else if (rune >= 0x1D41A && rune <= 0x1D433) char = rune - 0x1D41A + 0x61;
+      else if (rune >= 0x1D44E && rune <= 0x1D467) char = rune - 0x1D44E + 0x61;
+      else if (rune >= 0x1D482 && rune <= 0x1D49B) char = rune - 0x1D482 + 0x61;
+      else if (rune >= 0x1D5BA && rune <= 0x1D5D3) char = rune - 0x1D5BA + 0x61;
+      else if (rune >= 0x1D5EE && rune <= 0x1D607) char = rune - 0x1D5EE + 0x61;
+      else if (rune >= 0x1D622 && rune <= 0x1D63B) char = rune - 0x1D622 + 0x61;
+      else if (rune >= 0x1D656 && rune <= 0x1D66F) char = rune - 0x1D656 + 0x61;
+      else if (rune >= 0x1D68A && rune <= 0x1D6A3) char = rune - 0x1D68A + 0x61;
+      // Map mathematical digits (0-9)
+      else if (rune >= 0x1D7CE && rune <= 0x1D7D7) char = rune - 0x1D7CE + 0x30;
+      else if (rune >= 0x1D7D8 && rune <= 0x1D7E1) char = rune - 0x1D7D8 + 0x30;
+      else if (rune >= 0x1D7E2 && rune <= 0x1D7EB) char = rune - 0x1D7E2 + 0x30;
+      else if (rune >= 0x1D7EC && rune <= 0x1D7F5) char = rune - 0x1D7EC + 0x30; // 𝟬-𝟵
+      else if (rune >= 0x1D7F6 && rune <= 0x1D7FF) char = rune - 0x1D7F6 + 0x30;
+      buffer.writeCharCode(char);
+    }
+    return buffer.toString();
+  }
 
   static String? _extractEpisodeNumber(String episodeName) {
     String cleaned = episodeName;
@@ -98,7 +131,10 @@ class SubtitleService {
         }
 
         final searchUri = Uri.https('api.subdl.com', '/api/v1/subtitles', queryParams);
+        print('[SubDL] Requesting: $searchUri');
         final res = await http.get(searchUri).timeout(const Duration(seconds: 10));
+        print('[SubDL] Response Code: ${res.statusCode}');
+        print('[SubDL] Response Body: ${res.body.substring(0, res.body.length > 500 ? 500 : res.body.length)}...');
 
         if (res.statusCode != 200) break;
 
@@ -349,6 +385,7 @@ class SubtitleService {
         (episodeName != null ? _extractSeasonFromEpisodeName(episodeName) : null);
     final episodeNum = episodeNumber?.toString() ??
         (episodeName != null ? _extractEpisodeNumber(episodeName) : null);
+    print('[SubtitleService] searchSubtitles entry: query="$query", tmdbId=$tmdbId, season=$seasonNumber, episode=$episodeNumber, effectiveSeason=$effectiveSeason, episodeNum=$episodeNum');
     final cacheKey = '${tmdbId ?? query}_s${effectiveSeason ?? ''}';
     if (_cache.containsKey(cacheKey)) return _cache[cacheKey]!;
 
@@ -414,13 +451,17 @@ class SubtitleService {
 
     final subdlItems = results[0];
     final osItems = results[1];
+    print('[SubtitleService] _doSearch: SubDL returned ${subdlItems.length} items, OS returned ${osItems.length} items');
 
     // Merge: SubDL first, then OpenSubtitles, deduplicate by filename
     final merged = <SubtitleItem>[];
-    final seenNames = <String>{};
+    final seenKeys = <String>{};
     for (final item in [...subdlItems, ...osItems]) {
-      final key = item.fileName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-      if (key.isNotEmpty && seenNames.add(key)) {
+      var key = item.fileName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      if (key.isEmpty) {
+        key = item.fileName.toLowerCase().trim();
+      }
+      if (key.isNotEmpty && seenKeys.add(key)) {
         merged.add(item);
       }
     }
@@ -432,10 +473,13 @@ class SubtitleService {
       for (final s in merged) {
         // SubDL items already have API-based classification — keep it.
         // OpenSubtitles items need filename-based classification.
-        SubtitleMatchType matchType;
-        if (s.source == 'subdl') {
-          matchType = s.matchType;
-        } else {
+        SubtitleMatchType matchType = s.matchType;
+        if (s.source == 'subdl' && matchType == SubtitleMatchType.seasonFallback) {
+          final filenameMatch = classifyMatch(s.fileName, effectiveSeason, epInt);
+          if (filenameMatch != null) {
+            matchType = filenameMatch;
+          }
+        } else if (s.source != 'subdl') {
           matchType = classifyMatch(s.fileName, effectiveSeason, epInt)
               ?? SubtitleMatchType.seasonFallback;
         }

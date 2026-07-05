@@ -12,67 +12,98 @@ class SplashAnimation extends StatefulWidget {
 }
 
 class _SplashAnimationState extends State<SplashAnimation>
-    with TickerProviderStateMixin {
-  late AnimationController _sweepController;
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
-  bool _sweepComplete = false;
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _entranceScale;
+  late Animation<double> _entranceOpacity;
+  late Animation<double> _sweepProgress;
+  late Animation<double> _zoomScale;
+  late Animation<double> _zoomOpacity;
 
   @override
   void initState() {
     super.initState();
 
-    _sweepController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 2500),
       vsync: this,
     );
 
-    _pulseController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
+    _entranceScale = Tween<double>(begin: 0.7, end: 1.05).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.4, curve: Curves.easeOutCubic),
+      ),
     );
 
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
+    _entranceOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.3, curve: Curves.easeIn),
+      ),
     );
 
-    _sweepController.addStatusListener((status) {
-      if (status == AnimationStatus.completed && !_sweepComplete) {
-        _sweepComplete = true;
+    _sweepProgress = Tween<double>(begin: -0.15, end: 1.15).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.35, 0.75, curve: Curves.easeInOut),
+      ),
+    );
+
+    _zoomScale = Tween<double>(begin: 1.0, end: 3.5).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.75, 1.0, curve: Curves.easeInQuint),
+      ),
+    );
+
+    _zoomOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.78, 1.0, curve: Curves.easeOut),
+      ),
+    );
+
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
         widget.onRevealComplete?.call();
-        _pulseController.forward();
       }
     });
 
-    _sweepController.forward();
+    _controller.forward();
   }
 
   @override
   void dispose() {
-    _sweepController.dispose();
-    _pulseController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _pulseAnimation,
+      animation: _controller,
       builder: (context, child) {
-        return Transform.scale(
-          scale: _pulseAnimation.value,
-          child: child,
+        final scale = _entranceScale.value * _zoomScale.value;
+        final opacity = _entranceOpacity.value * _zoomOpacity.value;
+
+        return Opacity(
+          opacity: opacity.clamp(0.0, 1.0),
+          child: Transform.scale(
+            scale: scale,
+            child: child,
+          ),
         );
       },
       child: SizedBox(
-        width: 300,
-        height: 100,
+        width: 320,
+        height: 120,
         child: AnimatedBuilder(
-          animation: _sweepController,
+          animation: _controller,
           builder: (context, _) {
             return CustomPaint(
               painter: _HyflixLogoPainter(
-                sweepProgress: _sweepController.value,
+                sweepProgress: _sweepProgress.value,
                 accentColor: AppTheme.accent,
               ),
             );
@@ -117,6 +148,8 @@ class _HyflixLogoPainter extends CustomPainter {
             fontSize: fontSize,
             fontWeight: FontWeight.w900,
             letterSpacing: _letterSpacing,
+            color: accentColor,
+            fontFamily: 'SFPro',
           ),
         ),
         textDirection: ui.TextDirection.ltr,
@@ -183,13 +216,6 @@ class _HyflixLogoPainter extends CustomPainter {
       }
     }
 
-    // Draw play button in the "H" crossbar once H is revealed
-    if (painters.isNotEmpty) {
-      final hRight = positions[0].dx + painters[0].width;
-      if (hRight < sweepX) {
-        _drawPlayButton(canvas, positions[0], painters[0], fontSize);
-      }
-    }
   }
 
   void _drawSweepGlow(Canvas canvas, Size size, double sweepX, double fontSize) {
@@ -233,36 +259,7 @@ class _HyflixLogoPainter extends CustomPainter {
     canvas.drawRect(beamRect, corePaint);
   }
 
-  void _drawPlayButton(Canvas canvas, Offset letterPos, TextPainter tp, double fontSize) {
-    final hWidth = tp.width;
-    final hHeight = tp.height;
 
-    // Crossbar area: center vertical slice, ~40-65% of height
-    final barLeft = letterPos.dx + hWidth * 0.28;
-    final barRight = letterPos.dx + hWidth * 0.72;
-    final barTop = letterPos.dy + hHeight * 0.38;
-    final barBottom = letterPos.dy + hHeight * 0.62;
-
-    final barWidth = barRight - barLeft;
-    final barHeight = barBottom - barTop;
-
-    // Scale triangle to fit within the crossbar
-    final triHeight = barHeight * 0.6;
-    final triWidth = barWidth * 0.45;
-    final cx = barLeft + barWidth / 2;
-    final cy = barTop + barHeight / 2;
-
-    final path = Path()
-      ..moveTo(cx - triWidth / 2, cy - triHeight / 2)
-      ..lineTo(cx + triWidth / 2, cy)
-      ..lineTo(cx - triWidth / 2, cy + triHeight / 2)
-      ..close();
-
-    canvas.drawPath(
-      path,
-      Paint()..color = Colors.white.withOpacity(0.9),
-    );
-  }
 
   @override
   bool shouldRepaint(_HyflixLogoPainter oldDelegate) =>

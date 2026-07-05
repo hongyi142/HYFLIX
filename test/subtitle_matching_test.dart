@@ -61,5 +61,14 @@ void main() {
         equals(SubtitleMatchType.seasonFallback),
       );
     });
+
+    test('Normalizes mathematical stylized unicode symbols', () {
+      expect(
+        SubtitleService.normalizeUnicodeAlphanumeric(
+          '[𝗖𝗼𝗳𝗳𝗲𝗲𝗣𝗿𝗶𝘀𝗼𝗻] 𝗔𝗚𝗘𝗡𝗧 𝗞𝗜𝗠 𝗥𝗘𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗 𝗦𝟬𝟭𝗘𝟬𝟰 𝗡𝗙𝗫 𝗪𝗘𝗕',
+        ),
+        equals('[CoffeePrison] AGENT KIM REACTIVATED S01E04 NFX WEB'),
+      );
+    });
   });
 }

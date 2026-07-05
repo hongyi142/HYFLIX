@@ -41,6 +41,9 @@ class AppTheme {
       scaffoldBackgroundColor: background,
       primaryColor: accent,
       fontFamily: sfPro,
+      snackBarTheme: const SnackBarThemeData(
+        contentTextStyle: TextStyle(color: Colors.white, fontSize: 14, fontFamily: sfPro),
+      ),
       textTheme: const TextTheme(
         displayLarge: TextStyle(
           fontFamily: sfPro,

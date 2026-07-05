@@ -34,6 +34,7 @@ class _SplashPageState extends State<SplashPage> {
   }
 
   Future<void> _loadData() async {
+    final startTime = DateTime.now();
     try {
       // Load language and source preference before fetching content
       if (AuthService.isLoggedIn) {
@@ -79,6 +80,12 @@ class _SplashPageState extends State<SplashPage> {
         _tickProgress();
       }
 
+      final elapsed = DateTime.now().difference(startTime);
+      const minDuration = Duration(milliseconds: 2600);
+      if (elapsed < minDuration) {
+        await Future.delayed(minDuration - elapsed);
+      }
+
       if (mounted) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
@@ -100,6 +107,11 @@ class _SplashPageState extends State<SplashPage> {
       }
     } catch (e) {
       debugPrint('[splash] Complete failure: $e');
+      final elapsed = DateTime.now().difference(startTime);
+      const minDuration = Duration(milliseconds: 2600);
+      if (elapsed < minDuration) {
+        await Future.delayed(minDuration - elapsed);
+      }
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const HomePage()),
@@ -110,28 +122,10 @@ class _SplashPageState extends State<SplashPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
+    return const Scaffold(
+      backgroundColor: Colors.black,
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SplashAnimation(),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: 200,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: _progress,
-                  backgroundColor: Colors.white12,
-                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accent),
-                  minHeight: 3,
-                ),
-              ),
-            ),
-          ],
-        ),
+        child: SplashAnimation(),
       ),
     );
   }

@@ -311,7 +311,7 @@ class _DetailPageState extends State<DetailPage> {
     setState(() {
       _torrentFailed = true;
       _isLoadingTorrents = false;
-      _selectedSource = ApiService.sources.first;
+      _selectedSource = ApiService.defaultSource ?? ApiService.sources.first;
     });
     _refreshSourceEpisodes();
   }
@@ -443,7 +443,7 @@ class _DetailPageState extends State<DetailPage> {
         builder: (_) => VideoPlayerScreen(
           videoUrl: '',
           title: tmdb?.englishTitle ?? widget.content.title,
-          originalTitle: widget.content.title,
+          originalTitle: tmdb?.englishTitle ?? widget.content.title,
           episodes: const [],
           initialEpisodeIndex: episodeIndex,
           tmdbId: tmdb?.id?.toString(),
@@ -716,7 +716,7 @@ class _DetailPageState extends State<DetailPage> {
               ? episodes[episodeIndex].url
               : widget.content.m3u8Url,
           title: _tmdb?.englishTitle ?? widget.content.title,
-          originalTitle: widget.content.title,
+          originalTitle: _tmdb?.englishTitle ?? widget.content.title,
           episodes: episodes,
           initialEpisodeIndex: episodeIndex,
           tmdbId: _tmdb?.id?.toString(),
