@@ -12,7 +12,10 @@ import '../services/download_service.dart';
 import '../services/torrent_service.dart';
 import '../services/watchlist_service.dart';
 import '../services/tmdb_service.dart';
+import '../services/user_service.dart';
+import '../config/app_config.dart';
 import '../widgets/buttons.dart';
+
 
 class DetailPage extends StatefulWidget {
   final ContentModel content;
@@ -78,31 +81,50 @@ class _DetailPageState extends State<DetailPage> {
   List<String> _availableEncoders = [];
   Map<int, TmdbEpisodeInfo> _tmdbEpisodeDetails = {};
   String? _cachedImdbId;
+  bool _torrentSupported = true;
 
   /// Whether torrent streaming is available (all native content).
-  bool get _isNonChineseContent => !kIsWeb;
+  bool get _isNonChineseContent =>
+      _torrentSupported &&
+      (kIsWeb
+          ? (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY') ||
+              customTorrentioUrl.isNotEmpty
+          : true);
+
+  Future<void> _loadTorrentSetting() async {
+    try {
+      final enabled = await UserService.getEnableTorrent();
+      if (mounted) {
+        setState(() {
+          _torrentSupported = enabled;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void initState() {
     super.initState();
     _tmdb = widget.initialTmdb;
-    if (_tmdb == null) {
-      TmdbService.search(widget.content.title, year: widget.content.year).then((
-        r,
-      ) {
-        if (mounted) {
-          setState(() => _tmdb = r);
-          _fetchCast();
-          _routeContentSource();
-        }
-      });
-    } else {
-      _fetchCast();
-      _routeContentSource();
-    }
     _checkListed();
     _watchlistService.addListener(_checkListed);
     _downloadService.addListener(_onDownloadChanged);
+
+    _loadTorrentSetting().then((_) {
+      if (!mounted) return;
+      if (_tmdb == null) {
+        TmdbService.search(widget.content.title, year: widget.content.year).then((r) {
+          if (mounted) {
+            setState(() => _tmdb = r);
+            _fetchCast();
+            _routeContentSource();
+          }
+        });
+      } else {
+        _fetchCast();
+        _routeContentSource();
+      }
+    });
   }
 
   /// Route to the appropriate content source based on content type.
@@ -114,7 +136,7 @@ class _DetailPageState extends State<DetailPage> {
 
     if (savedSource != null && savedSource.isNotEmpty) {
       if (savedSource == 'Torrent') {
-        if (!kIsWeb) {
+        if (_isNonChineseContent) {
           _selectedSeason = _extractSeasonNumber() ?? 1;
           _selectedSource = _torrentSource;
           _fetchTorrentStreams();
@@ -132,10 +154,9 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     // Default routing when no saved source
-    if (kIsWeb) {
+    if (!_isNonChineseContent) {
       _refreshSourceEpisodes();
     } else {
-      // Native: always try torrent first for all content
       _selectedSeason = _extractSeasonNumber() ?? 1;
       _selectedSource = _torrentSource;
       _fetchTorrentStreams();
@@ -362,13 +383,61 @@ class _DetailPageState extends State<DetailPage> {
     // Filter by quality
     final qualityFiltered = streams.where((s) => s.quality == _selectedQuality).toList();
     if (qualityFiltered.isNotEmpty) {
-      qualityFiltered.sort((a, b) => b.seeders.compareTo(a.seeders));
+      qualityFiltered.sort((a, b) {
+        final isDebridA = a.url != null ? 1 : 0;
+        final isDebridB = b.url != null ? 1 : 0;
+        if (isDebridA != isDebridB) {
+          return isDebridB.compareTo(isDebridA); // Prioritize Debrid (1) over P2P (0)
+        }
+        if (kIsWeb) {
+          final titleA = '${a.title} ${a.filename}'.toLowerCase();
+          final titleB = '${b.title} ${b.filename}'.toLowerCase();
+          
+          final isCompA = (titleA.contains('.mp4') || titleA.contains('.m4v') || titleA.contains('.webm')) &&
+                          !(titleA.contains('.mkv') || titleA.contains('.avi') || titleA.contains('.ts')) &&
+                          !(titleA.contains('x265') || titleA.contains('hevc') || titleA.contains('h.265') || titleA.contains('h265') || titleA.contains('10bit'))
+              ? 1 : 0;
+          final isCompB = (titleB.contains('.mp4') || titleB.contains('.m4v') || titleB.contains('.webm')) &&
+                          !(titleB.contains('.mkv') || titleB.contains('.avi') || titleB.contains('.ts')) &&
+                          !(titleB.contains('x265') || titleB.contains('hevc') || titleB.contains('h.265') || titleB.contains('h265') || titleB.contains('10bit'))
+              ? 1 : 0;
+              
+          if (isCompA != isCompB) {
+            return isCompB.compareTo(isCompA); // Compatible first
+          }
+        }
+        return b.seeders.compareTo(a.seeders);
+      });
       return qualityFiltered.first;
     }
 
     // Fallback: best available
     if (streams.isNotEmpty) {
-      streams.sort((a, b) => b.seeders.compareTo(a.seeders));
+      streams.sort((a, b) {
+        final isDebridA = a.url != null ? 1 : 0;
+        final isDebridB = b.url != null ? 1 : 0;
+        if (isDebridA != isDebridB) {
+          return isDebridB.compareTo(isDebridA); // Prioritize Debrid (1) over P2P (0)
+        }
+        if (kIsWeb) {
+          final titleA = '${a.title} ${a.filename}'.toLowerCase();
+          final titleB = '${b.title} ${b.filename}'.toLowerCase();
+          
+          final isCompA = (titleA.contains('.mp4') || titleA.contains('.m4v') || titleA.contains('.webm')) &&
+                          !(titleA.contains('.mkv') || titleA.contains('.avi') || titleA.contains('.ts')) &&
+                          !(titleA.contains('x265') || titleA.contains('hevc') || titleA.contains('h.265') || titleA.contains('h265') || titleA.contains('10bit'))
+              ? 1 : 0;
+          final isCompB = (titleB.contains('.mp4') || titleB.contains('.m4v') || titleB.contains('.webm')) &&
+                          !(titleB.contains('.mkv') || titleB.contains('.avi') || titleB.contains('.ts')) &&
+                          !(titleB.contains('x265') || titleB.contains('hevc') || titleB.contains('h.265') || titleB.contains('h265') || titleB.contains('10bit'))
+              ? 1 : 0;
+              
+          if (isCompA != isCompB) {
+            return isCompB.compareTo(isCompA); // Compatible first
+          }
+        }
+        return b.seeders.compareTo(a.seeders);
+      });
       return streams.first;
     }
     return null;
@@ -678,8 +747,8 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _play(int episodeIndex) {
-    // Route to torrent on native (unless torrent already failed)
-    if (!kIsWeb && !_torrentFailed) {
+    // Route to torrent if supported (unless torrent already failed)
+    if (_isNonChineseContent && !_torrentFailed) {
       _playWithTorrent(episodeIndex);
       return;
     }
@@ -835,7 +904,7 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                   ),
                   // Episodes/streams section
-                  if (!kIsWeb && !_torrentFailed) ...[
+                  if (_isNonChineseContent && !_torrentFailed) ...[
                     // Torrent content: show quality filter + play/episode cards
                     SizedBox(height: layout.isPhone ? 28 : 36),
                     _buildTorrentEpisodesSection(layout),

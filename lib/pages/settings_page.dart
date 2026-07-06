@@ -30,6 +30,8 @@ class _SettingsPageState extends State<SettingsPage> {
   String _language = 'en';
   String _defaultSource = 'HHZY (Luxury)';
   bool _loadingSource = true;
+  bool _enableTorrent = true;
+  bool _loadingTorrentSetting = true;
   String? _expandedSection;
 
   @override
@@ -39,6 +41,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _emailController.text = AuthService.email ?? '';
     _loadLanguage();
     _loadDefaultSource();
+    _loadTorrentSetting();
   }
 
   Future<void> _loadLanguage() async {
@@ -59,6 +62,36 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     } catch (_) {
       if (mounted) setState(() => _loadingSource = false);
+    }
+  }
+
+  Future<void> _loadTorrentSetting() async {
+    try {
+      final enabled = await UserService.getEnableTorrent();
+      if (mounted) {
+        setState(() {
+          _enableTorrent = enabled;
+          _loadingTorrentSetting = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingTorrentSetting = false);
+    }
+  }
+
+  Future<void> _saveTorrentSetting(bool enabled) async {
+    setState(() => _enableTorrent = enabled);
+    try {
+      await UserService.saveEnableTorrent(enabled);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving preference: $e'),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
     }
   }
 
@@ -353,6 +386,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     _buildLanguageTile(),
                     const SizedBox(height: 10),
                     _buildSourceTile(),
+                    const SizedBox(height: 10),
+                    _buildTorrentToggleTile(),
                     const SizedBox(height: 36),
                     _buildSectionHeader('Account', LucideIcons.userCog),
                     const SizedBox(height: 12),
@@ -596,6 +631,39 @@ class _SettingsPageState extends State<SettingsPage> {
                 }).toList(),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  // ── Torrent Toggle Tile ─────────────────────────────────────────────
+
+  Widget _buildTorrentToggleTile() {
+    return _buildCard(
+      child: Column(
+        children: [
+          _SettingsTile(
+            icon: LucideIcons.play,
+            title: 'Enable Torrent Streams',
+            subtitle: 'Enable P2P & TorBox debrid video streaming',
+            trailing: _loadingTorrentSetting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                    ),
+                  )
+                : Switch(
+                    value: _enableTorrent,
+                    activeColor: AppTheme.accent,
+                    activeTrackColor: AppTheme.accent.withOpacity(0.3),
+                    inactiveThumbColor: Colors.grey,
+                    inactiveTrackColor: Colors.white10,
+                    onChanged: (val) => _saveTorrentSetting(val),
+                  ),
+          ),
         ],
       ),
     );

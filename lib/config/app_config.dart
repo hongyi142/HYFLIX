@@ -13,3 +13,16 @@ const String openSubtitlesApiKey = '';
 const String torrentioBaseUrl = 'https://torrentio.strem.fun';
 const String thepiratebayBaseUrl = 'https://thepiratebay-plus.strem.fun';
 const String meteorBaseUrl = 'https://meteorfortheweebs.midnightignite.me';
+
+// TorBox configuration
+// If you want to use the TorBox debrid service, paste your TorBox API key here.
+// When configured, HYFLIX will stream torrents at high speeds directly over HTTPS.
+const String torboxApiKey = '9c9f5759-e019-4cf0-a019-4bc4d09b088c';
+
+// Custom Torrentio configuration URL (optional)
+// Paste your custom-configured Torrentio installation link here (e.g. from torrentio.strem.fun/configure).
+// Supports stremio:// or https:// formats.
+// Example: 'stremio://torrentio.strem.fun/providers=yts,thepiratebay|torboxapi=YOUR_API_KEY/manifest.json'
+// If non-empty, this takes precedence over the torboxApiKey.
+const String customTorrentioUrl = '';
+

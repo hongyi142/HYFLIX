@@ -1,5 +1,6 @@
 class TorrentStream {
   final String infoHash;
+  final String? url; // Direct-play HTTPS url if resolved via Debrid
   final String title;
   final String quality;
   final int seeders;
@@ -11,6 +12,7 @@ class TorrentStream {
 
   const TorrentStream({
     required this.infoHash,
+    this.url,
     required this.title,
     required this.quality,
     required this.seeders,

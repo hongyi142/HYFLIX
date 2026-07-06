@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'auth_service.dart';
+
 
 class FirestoreService {
   static const String _dbUrl = 'https://hyflix-56557-default-rtdb.asia-southeast1.firebasedatabase.app';
@@ -257,6 +259,17 @@ class FirestoreService {
   static Future<String> getDefaultSource() async {
     final profile = await getProfile();
     return (profile?['defaultSource'] as String?) ?? 'HHZY (Luxury)';
+  }
+
+  // ── Torrent Preference ──────────────────────────────────────────────
+
+  static Future<void> saveEnableTorrent(bool enabled) async {
+    await _patch('$_usersPath.json', {'enableTorrent': enabled});
+  }
+
+  static Future<bool> getEnableTorrent() async {
+    final profile = await getProfile();
+    return (profile?['enableTorrent'] as bool?) ?? !kIsWeb;
   }
 
   // ── Low-level REST helpers ───────────────────────────────────────────

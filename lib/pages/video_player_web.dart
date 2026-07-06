@@ -474,54 +474,62 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: _toggleControls,
-            onLongPressStart: (_) {
-              if (!_isLongPressSpeed && _isInitialized) {
-                setState(() => _isLongPressSpeed = true);
-                _controller?.setPlaybackSpeed(2.0);
-              }
-            },
-            onLongPressEnd: (_) {
-              if (_isLongPressSpeed) {
-                setState(() => _isLongPressSpeed = false);
-                _controller?.setPlaybackSpeed(1.0);
-              }
-            },
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Video
-                if (_isInitialized &&
-                    _controller != null &&
-                    _controller!.viewType != null)
-                  Center(
-                    child: AspectRatio(
-                      aspectRatio: _controller!.aspectRatio.value,
-                      child: HtmlElementView(
-                        viewType: _controller!.viewType!,
-                      ),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Video / Error / Loading States
+              if (_isInitialized &&
+                  _controller != null &&
+                  _controller!.viewType != null)
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: _controller!.aspectRatio.value,
+                    child: HtmlElementView(
+                      viewType: _controller!.viewType!,
                     ),
-                  )
-                else if (_hasError)
-                  const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.error_outline, color: Colors.red, size: 48),
-                        SizedBox(height: 16),
-                        Text('Failed to load video',
-                            style:
-                                TextStyle(color: Colors.white70, fontSize: 16)),
-                      ],
-                    ),
-                  )
-                else
-                  const Center(
-                    child:
-                        CircularProgressIndicator(color: AppTheme.accent),
                   ),
+                )
+              else if (_hasError)
+                const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red, size: 48),
+                      SizedBox(height: 16),
+                      Text('Failed to load video',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 16)),
+                    ],
+                  ),
+                )
+              else
+                const Center(
+                  child:
+                      CircularProgressIndicator(color: AppTheme.accent),
+                ),
+
+              // Transparent gesture overlay to intercept pointer events from HtmlElementView on Web
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
+                  onLongPressStart: (_) {
+                    if (!_isLongPressSpeed && _isInitialized) {
+                      setState(() => _isLongPressSpeed = true);
+                      _controller?.setPlaybackSpeed(2.0);
+                    }
+                  },
+                  onLongPressEnd: (_) {
+                    if (_isLongPressSpeed) {
+                      setState(() => _isLongPressSpeed = false);
+                      _controller?.setPlaybackSpeed(1.0);
+                    }
+                  },
+                  child: Container(
+                    color: Colors.transparent,
+                  ),
+                ),
+              ),
 
                 // Buffering indicator
                 if (_isInitialized &&
@@ -598,8 +606,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildControls(String epName, bool hasEpisodes) {

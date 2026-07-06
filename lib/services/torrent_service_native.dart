@@ -76,15 +76,31 @@ class TorrentService {
     return dir.path;
   }
 
-  /// All Stremio addon base URLs to query for streams.
-  static const List<String> _addonBaseUrls = [
-    torrentioBaseUrl,
-    thepiratebayBaseUrl,
-    meteorBaseUrl,
-  ];
+  /// Resolves the effective Torrentio URL based on config credentials.
+  String getEffectiveTorrentioUrl() {
+    if (customTorrentioUrl.isNotEmpty) {
+      String url = customTorrentioUrl;
+      if (url.startsWith('stremio://')) {
+        url = 'https://${url.substring(10)}';
+      }
+      if (url.endsWith('/manifest.json')) {
+        url = url.substring(0, url.length - 14);
+      }
+      while (url.endsWith('/')) {
+        url = url.substring(0, url.length - 1);
+      }
+      return url;
+    }
+    
+    if (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY') {
+      return '$torrentioBaseUrl/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy|torbox=$torboxApiKey';
+    }
+    
+    return torrentioBaseUrl;
+  }
 
   /// Fetch available streams from all Stremio addons for a given IMDB ID.
-  /// Queries multiple addons in parallel and deduplicates by infoHash.
+  /// Queries multiple addons in parallel and deduplicates by infoHash or URL.
   Future<List<TorrentStream>> fetchStreams(
     String imdbId,
     String mediaType, {
@@ -99,27 +115,47 @@ class TorrentService {
         path = '/stream/movie/$imdbId.json';
       }
 
+      final addonBaseUrls = [
+        getEffectiveTorrentioUrl(),
+        thepiratebayBaseUrl,
+        meteorBaseUrl,
+      ];
+
       // Query all addons in parallel
-      final futures = _addonBaseUrls.map((baseUrl) =>
+      final futures = addonBaseUrls.map((baseUrl) =>
           _fetchFromAddon(baseUrl, path));
       final allResults = await Future.wait(futures);
 
-      // Merge and deduplicate by infoHash, keeping the entry with more seeders
-      final byHash = <String, TorrentStream>{};
+      // Merge and deduplicate by key (infoHash or URL), keeping the best stream
+      final byKey = <String, TorrentStream>{};
       for (final streams in allResults) {
         for (final stream in streams) {
-          final existing = byHash[stream.infoHash];
-          if (existing == null || stream.seeders > existing.seeders) {
-            byHash[stream.infoHash] = stream;
+          final key = stream.infoHash.isNotEmpty ? stream.infoHash : (stream.url ?? '');
+          if (key.isEmpty) continue;
+
+          final existing = byKey[key];
+          // Update if new, has more seeders, or if the new one is debrid-resolved but existing isn't
+          if (existing == null || 
+              stream.seeders > existing.seeders || 
+              (stream.url != null && existing.url == null)) {
+            byKey[key] = stream;
           }
         }
       }
 
-      final results = byHash.values.toList();
+      final results = byKey.values.toList();
       results.sort((a, b) {
         final qA = _qualityRank(a.quality);
         final qB = _qualityRank(b.quality);
         if (qA != qB) return qA.compareTo(qB);
+        
+        // Prioritize debrid streams (url != null) over P2P streams
+        final isDebridA = a.url != null ? 1 : 0;
+        final isDebridB = b.url != null ? 1 : 0;
+        if (isDebridA != isDebridB) {
+          return isDebridB.compareTo(isDebridA); // 1 (debrid) comes before 0 (P2P)
+        }
+
         return b.seeders.compareTo(a.seeders);
       });
 
@@ -150,8 +186,16 @@ class TorrentService {
       final results = <TorrentStream>[];
       for (final s in streams) {
         final map = s as Map<String, dynamic>;
-        final infoHash = map['infoHash'] as String? ?? '';
-        if (infoHash.isEmpty) continue;
+        String infoHash = map['infoHash'] as String? ?? '';
+        final url = map['url'] as String? ?? '';
+        
+        // If both infoHash and url are empty, it's an invalid stream
+        if (infoHash.isEmpty && url.isEmpty) continue;
+        
+        if (infoHash.isEmpty && url.isNotEmpty) {
+          // Generate a consistent dummy infoHash from the URL so model fields remain valid
+          infoHash = url.hashCode.toRadixString(16).padLeft(40, '0');
+        }
 
         final title = map['title'] as String? ?? '';
         final name = map['name'] as String? ?? '';
@@ -168,6 +212,7 @@ class TorrentService {
 
         results.add(TorrentStream(
           infoHash: infoHash,
+          url: url.isNotEmpty ? url : null,
           title: title,
           quality: quality,
           seeders: seeders,
@@ -188,7 +233,10 @@ class TorrentService {
   }
 
   static String _addonName(String baseUrl) {
-    if (baseUrl.contains('torrentio')) return 'Torrentio';
+    if (baseUrl.contains('torrentio')) {
+      if (baseUrl.contains('torbox')) return 'Torrentio (TorBox)';
+      return 'Torrentio';
+    }
     if (baseUrl.contains('piratebay')) return 'TPB+';
     if (baseUrl.contains('meteor')) return 'Meteor';
     return baseUrl;

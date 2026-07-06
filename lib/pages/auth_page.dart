@@ -122,6 +122,7 @@ class _AuthPageState extends State<AuthPage> {
                       hint: 'Display Name',
                       icon: LucideIcons.user,
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      onFieldSubmitted: (_) => _submit(),
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -137,6 +138,7 @@ class _AuthPageState extends State<AuthPage> {
                       if (!v.contains('@') || !v.contains('.')) return 'Invalid email';
                       return null;
                     },
+                    onFieldSubmitted: (_) => _submit(),
                   ),
                   const SizedBox(height: 16),
 
@@ -151,6 +153,7 @@ class _AuthPageState extends State<AuthPage> {
                       if (v.length < 6) return 'Min 6 characters';
                       return null;
                     },
+                    onFieldSubmitted: (_) => _submit(),
                   ),
                   const SizedBox(height: 24),
 
@@ -253,12 +256,14 @@ class _AuthPageState extends State<AuthPage> {
     TextInputType? keyboardType,
     bool obscure = false,
     String? Function(String?)? validator,
+    void Function(String)? onFieldSubmitted,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscure,
       validator: validator,
+      onFieldSubmitted: onFieldSubmitted,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       decoration: InputDecoration(
         hintText: hint,

@@ -172,6 +172,53 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   /// Start torrent playback — show buffering overlay while metadata downloads.
   Future<void> _startTorrentPlayback() async {
     final stream = widget.torrentStream!;
+
+    // Check if we have a direct debrid play link
+    if (stream.url != null && stream.url!.isNotEmpty) {
+      debugPrint('[VideoPlayer] Starting debrid direct stream: ${stream.url}');
+      setState(() {
+        _isTorrentBuffering = true;
+        _torrentStatus = 'Opening TorBox stream...';
+      });
+
+      // Listen to buffering state changes for status text
+      _bufferingSub = _player.stream.buffering.listen((buffering) {
+        if (mounted) {
+          setState(() {
+            _isTorrentBuffering = buffering;
+            if (buffering) {
+              _torrentStatus = 'Buffering...';
+            } else {
+              _seekRecoveryTimer?.cancel();
+            }
+          });
+        }
+      });
+
+      _torrentUrl = stream.url;
+
+      if (!mounted) return;
+      setState(() {
+        _isTorrentBuffering = false;
+        _torrentStatus = '';
+      });
+
+      // Configure mpv for direct streaming
+      try {
+        final native = _player.platform as NativePlayer;
+        await native.setProperty('network-timeout', '60');
+        await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await native.setProperty('cache-secs', '60');
+        await native.setProperty('demuxer-readahead-secs', '60');
+      } catch (e) {
+        debugPrint('[VideoPlayer] Failed to configure mpv: $e');
+      }
+
+      _openMedia(stream.url!, seekToSeconds: widget.seekToSeconds);
+      _fetchSubtitles();
+      return;
+    }
+
     debugPrint('[VideoPlayer] Starting torrent: ${stream.quality} '
         'hash=${stream.infoHash.substring(0, 16)}... fileIdx=${stream.fileIdx}');
 
@@ -191,7 +238,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
     });
 
-    // Update torrent stats periodically
+    // Update torrent stats periodically (only for P2P)
     _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         setState(() {
@@ -1400,7 +1447,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 },
               ),
             ),
-            if (isTorrent && stats != null) ...[
+            if (isTorrent && widget.torrentStream!.url != null) ...[
+              const SizedBox(height: 8),
+              _statRow('Type', 'TorBox Direct Play', color: Colors.cyanAccent),
+              const SizedBox(height: 8),
+              _statRow('Format', 'HTTPS CDN direct play'),
+              const SizedBox(height: 8),
+              _statRow('Quality', widget.torrentStream!.quality),
+              const SizedBox(height: 8),
+              _statRow('Size', widget.torrentStream!.size.isNotEmpty ? widget.torrentStream!.size : 'Unknown'),
+              const SizedBox(height: 8),
+              _statRow('Source', widget.torrentStream!.source),
+            ] else if (isTorrent && stats != null) ...[
               const SizedBox(height: 8),
               _statRow('Download', '${_formatBytes(stats['downloadRate'] ?? 0)}/s'),
               const SizedBox(height: 8),

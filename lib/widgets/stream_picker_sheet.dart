@@ -145,6 +145,31 @@ class _StreamTile extends StatelessWidget {
               ),
             ],
             const SizedBox(width: 12),
+            // Source badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: stream.url != null 
+                    ? Colors.cyan.withOpacity(0.15) 
+                    : Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: stream.url != null 
+                      ? Colors.cyan.withOpacity(0.4) 
+                      : Colors.grey.withOpacity(0.2),
+                ),
+              ),
+              child: Text(
+                stream.source.isNotEmpty ? stream.source : 'Torrent',
+                style: TextStyle(
+                  color: stream.url != null ? Colors.cyanAccent : AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
             // Seeders
             Icon(Icons.people, color: AppTheme.textSecondary, size: 14),
             const SizedBox(width: 4),

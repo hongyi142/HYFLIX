@@ -118,6 +118,14 @@ class UserService {
     return await FirestoreService.getDefaultSource();
   }
 
+  static Future<void> saveEnableTorrent(bool enabled) async {
+    await FirestoreService.saveEnableTorrent(enabled);
+  }
+
+  static Future<bool> getEnableTorrent() async {
+    return await FirestoreService.getEnableTorrent();
+  }
+
   // ── Watchlists ───────────────────────────────────────────────────────
 
   static Future<void> saveWatchlist(String listName, List<Map<String, dynamic>> items) async {
