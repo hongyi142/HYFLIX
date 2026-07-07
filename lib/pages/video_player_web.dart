@@ -949,6 +949,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   List<SubtitleItem> _availableSubs = [];
   SubtitleItem? _selectedSub;
   bool _downloadingSeason = false;
+  int _subDelayOffsetMs = 0;
+  String? _loadedSrtContent;
 
   Future<void> _fetchSubtitles() async {
     if (mounted) setState(() => _loadingSubs = true);
@@ -1067,6 +1069,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
 
     if (srtContent != null && srtContent.trim().isNotEmpty) {
+      setState(() {
+        _subDelayOffsetMs = 0;
+        _loadedSrtContent = srtContent;
+      });
+
       _controller?.setSubtitleTrack(
         srtContent,
         title: item.fileName,
@@ -1256,6 +1263,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           _controller?.setSubtitleTrack(null);
                           setState(() {
                             _selectedSub = null;
+                            _subDelayOffsetMs = 0;
+                            _loadedSrtContent = null;
                             _showSubtitles = false;
                           });
                         } else {
@@ -1275,9 +1284,122 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   },
                 ),
               ),
+            if (_selectedSub != null) ...[
+              const Divider(color: Colors.white24, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Subtitle Sync Offset',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${(_subDelayOffsetMs / 1000.0).toStringAsFixed(1)}s',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        Row(
+                          children: [
+                            _delayButton(
+                              label: '-0.5s',
+                              onTap: () => _adjustSubtitleDelay(-500),
+                            ),
+                            const SizedBox(width: 8),
+                            _delayButton(
+                              label: 'Reset',
+                              onTap: () => _adjustSubtitleDelay(0, isReset: true),
+                            ),
+                            const SizedBox(width: 8),
+                            _delayButton(
+                              label: '+0.5s',
+                              onTap: () => _adjustSubtitleDelay(500),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  void _adjustSubtitleDelay(int ms, {bool isReset = false}) {
+    if (_selectedSub == null || _loadedSrtContent == null) return;
+    setState(() {
+      if (isReset) {
+        _subDelayOffsetMs = 0;
+      } else {
+        _subDelayOffsetMs += ms;
+      }
+    });
+
+    final shifted = _shiftSrtTimestamps(
+      _loadedSrtContent!,
+      Duration(milliseconds: _subDelayOffsetMs),
+    );
+    _controller?.setSubtitleTrack(
+      shifted,
+      title: _selectedSub!.fileName,
+      language: _selectedSub!.language,
+    );
+  }
+
+  Widget _delayButton({required String label, required VoidCallback onTap}) {
+    return HoverButton(
+      onTap: onTap,
+      backgroundColor: Colors.white10,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+        ),
+      ),
+    );
+  }
+
+  static Duration _parseSrtTime(String h, String m, String s, String ms) {
+    return Duration(
+      hours: int.parse(h),
+      minutes: int.parse(m),
+      seconds: int.parse(s),
+      milliseconds: int.parse(ms),
+    );
+  }
+
+  static String _formatSrtTime(Duration d) {
+    final h = d.inHours.toString().padLeft(2, '0');
+    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    final ms = (d.inMilliseconds % 1000).toString().padLeft(3, '0');
+    return '$h:$m:$s,$ms';
+  }
+
+  String _shiftSrtTimestamps(String srtContent, Duration shift) {
+    if (shift == Duration.zero) return srtContent;
+    return srtContent.replaceAllMapped(
+      RegExp(r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})'),
+      (Match m) {
+        final original = _parseSrtTime(m.group(1)!, m.group(2)!, m.group(3)!, m.group(4)!);
+        final shifted = original + shift;
+        final finalDuration = shifted.isNegative ? Duration.zero : shifted;
+        return _formatSrtTime(finalDuration);
+      },
     );
   }
 

@@ -60,6 +60,9 @@ class VideoPlayerScreen extends StatefulWidget {
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
+  bool _torrentSupported = true;
+  int _subDelayOffsetMs = 0;
+  String? _loadedSrtContent;
   bool _showControls = true;
   bool _showEpisodes = false;
   bool _showSubtitles = false;
@@ -823,6 +826,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
 
     if (srtContent != null && srtContent.trim().isNotEmpty && mounted) {
+      setState(() {
+        _subDelayOffsetMs = 0;
+        _loadedSrtContent = srtContent;
+      });
+      await _player.setProperty('sub-delay', '0');
+
       await _player.setSubtitleTrack(SubtitleTrack.data(
         srtContent,
         title: item.fileName,
@@ -1906,6 +1915,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                               _player.setSubtitleTrack(SubtitleTrack.no());
                               setState(() {
                                 _selectedSub = null;
+                                _subDelayOffsetMs = 0;
+                                _loadedSrtContent = null;
                                 _showSubtitles = false;
                               });
                             } else {
@@ -1921,6 +1932,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             _player.setSubtitleTrack(SubtitleTrack.no());
                             setState(() {
                               _selectedSub = null;
+                              _subDelayOffsetMs = 0;
+                              _loadedSrtContent = null;
                               _showSubtitles = false;
                             });
                           } else {
@@ -1941,8 +1954,82 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 },
               ),
             ),
+            if (_selectedSub != null) ...[
+              const Divider(color: Colors.white24, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Subtitle Sync Offset',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${(_subDelayOffsetMs / 1000.0).toStringAsFixed(1)}s',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        Row(
+                          children: [
+                            _delayButton(
+                              label: '-0.5s',
+                              onTap: () => _adjustSubtitleDelay(-500),
+                            ),
+                            const SizedBox(width: 8),
+                            _delayButton(
+                              label: 'Reset',
+                              onTap: () => _adjustSubtitleDelay(0, isReset: true),
+                            ),
+                            const SizedBox(width: 8),
+                            _delayButton(
+                              label: '+0.5s',
+                              onTap: () => _adjustSubtitleDelay(500),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
         ],
       ),
+      ),
+    );
+  }
+
+  void _adjustSubtitleDelay(int ms, {bool isReset = false}) {
+    if (_selectedSub == null) return;
+    setState(() {
+      if (isReset) {
+        _subDelayOffsetMs = 0;
+      } else {
+        _subDelayOffsetMs += ms;
+      }
+    });
+    _player.setProperty('sub-delay', (_subDelayOffsetMs / 1000.0).toString());
+  }
+
+  Widget _delayButton({required String label, required VoidCallback onTap}) {
+    return HoverButton(
+      onTap: onTap,
+      backgroundColor: Colors.white10,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+        ),
       ),
     );
   }
