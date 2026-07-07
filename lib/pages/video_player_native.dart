@@ -830,7 +830,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         _subDelayOffsetMs = 0;
         _loadedSrtContent = srtContent;
       });
-      await _player.setProperty('sub-delay', '0');
+      try {
+        final native = _player.platform as NativePlayer;
+        await native.setProperty('sub-delay', '0');
+      } catch (e) {
+        debugPrint('[VideoPlayer] Failed to set sub-delay: $e');
+      }
 
       await _player.setSubtitleTrack(SubtitleTrack.data(
         srtContent,
@@ -2016,14 +2021,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         _subDelayOffsetMs += ms;
       }
     });
-    _player.setProperty('sub-delay', (_subDelayOffsetMs / 1000.0).toString());
+    try {
+      final native = _player.platform as NativePlayer;
+      native.setProperty('sub-delay', (_subDelayOffsetMs / 1000.0).toString());
+    } catch (e) {
+      debugPrint('[VideoPlayer] Failed to adjust sub-delay: $e');
+    }
   }
 
   Widget _delayButton({required String label, required VoidCallback onTap}) {
     return HoverButton(
       onTap: onTap,
       backgroundColor: Colors.white10,
-      borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Text(

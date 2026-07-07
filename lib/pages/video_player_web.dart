@@ -1362,7 +1362,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return HoverButton(
       onTap: onTap,
       backgroundColor: Colors.white10,
-      borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Text(
