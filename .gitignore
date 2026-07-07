@@ -53,4 +53,5 @@ app.*.map.json
 # Release packages
 /hyflix-android.apk
 /hyflix-windows.zip
+/hyflix-macos.dmg
 /hyflix-web.zip
