@@ -4,6 +4,7 @@ import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../models/content_model.dart';
 import '../widgets/movie_card.dart';
+import '../services/api_service.dart';
 
 class CategoryPage extends StatefulWidget {
   final String title;
@@ -23,6 +24,7 @@ class CategoryPage extends StatefulWidget {
 
 class _CategoryPageState extends State<CategoryPage> {
   final List<ContentModel> _items = [];
+  final Set<String> _seenTitles = {};
   bool _isLoading = false;
   bool _hasMore = true;
   int _page = 1;
@@ -32,7 +34,12 @@ class _CategoryPageState extends State<CategoryPage> {
   void initState() {
     super.initState();
     if (widget.initialItems.isNotEmpty) {
-      _items.addAll(widget.initialItems);
+      for (final item in widget.initialItems) {
+        final key = ApiService.normalizeText(item.title);
+        if (key.isNotEmpty && _seenTitles.add(key)) {
+          _items.add(item);
+        }
+      }
       _page = 2;
     }
     _loadMore();
@@ -57,7 +64,12 @@ class _CategoryPageState extends State<CategoryPage> {
           if (newItems.isEmpty) {
             _hasMore = false;
           } else {
-            _items.addAll(newItems);
+            for (final item in newItems) {
+              final key = ApiService.normalizeText(item.title);
+              if (key.isNotEmpty && _seenTitles.add(key)) {
+                _items.add(item);
+              }
+            }
             _page++;
           }
           _isLoading = false;

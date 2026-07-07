@@ -80,16 +80,13 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      final isChinese = RegExp(r'[一-龥]').hasMatch(query);
+      // Query TMDB first for all queries to ensure unique records and rich metadata
+      final tmdbResults = await TmdbService.searchMultiple(query, maxResults: 20);
+      List<ContentModel> results = tmdbResults.map((tmdb) => ContentModel.fromTmdb(tmdb)).toList();
 
-      List<ContentModel> results;
-      if (isChinese) {
-        // Chinese query → search VOD sources only
+      // Fallback: search VOD providers if TMDB returned no results
+      if (results.isEmpty) {
         results = await _searchVod([query]);
-      } else {
-        // English query → search TMDB only (richer metadata, no duplicates)
-        final tmdbResults = await TmdbService.searchMultiple(query, maxResults: 20);
-        results = tmdbResults.map((tmdb) => ContentModel.fromTmdb(tmdb)).toList();
       }
 
       if (mounted) {
@@ -105,8 +102,13 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<List<ContentModel>> _searchVod(List<String> queries) async {
     final List<Future<List<ContentModel>>> futures = [];
+    // Leverage the user's default source preference if configured
+    final sourcesToQuery = ApiService.defaultSource != null 
+        ? [ApiService.defaultSource!] 
+        : ApiService.sources;
+
     for (final q in queries) {
-      for (final source in ApiService.sources) {
+      for (final source in sourcesToQuery) {
         futures.add(_api.searchByTitleFromSource(q, source));
       }
     }
@@ -115,9 +117,10 @@ class _SearchPageState extends State<SearchPage> {
     final Set<String> seen = {};
     for (final list in resultsList) {
       for (final item in list) {
-        if (!seen.contains(item.title)) {
+        final titleKey = ApiService.normalizeText(item.title);
+        if (titleKey.isNotEmpty && !seen.contains(titleKey)) {
           all.add(item);
-          seen.add(item.title);
+          seen.add(titleKey);
         }
       }
     }

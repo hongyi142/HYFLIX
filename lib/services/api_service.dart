@@ -116,7 +116,7 @@ class ApiService {
     );
   }
 
-  static String _normalizeText(String value) => value
+  static String normalizeText(String value) => value
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff\uac00-\ud7af]'), '');
 
@@ -301,10 +301,10 @@ class ApiService {
     required String query,
   }) {
     final providerTitle = (raw['vod_name'] as String? ?? '').trim();
-    final providerTitleNormalized = _normalizeText(providerTitle);
-    final queryNormalized = _normalizeText(query);
-    final englishNormalized = _normalizeText(tmdb.englishTitle);
-    final originalNormalized = _normalizeText(tmdb.originalTitle);
+    final providerTitleNormalized = normalizeText(providerTitle);
+    final queryNormalized = normalizeText(query);
+    final englishNormalized = normalizeText(tmdb.englishTitle);
+    final originalNormalized = normalizeText(tmdb.originalTitle);
     final providerYear = (raw['vod_year'] as String? ?? '').trim();
     final typeId = _parseIntField(raw['type_id']);
     final typeId1 = _parseIntField(raw['type_id_1']);
@@ -398,7 +398,7 @@ class ApiService {
         for (final (query, results) in allResults) {
           for (final raw in results) {
             final key =
-                '${raw['vod_id'] ?? ''}:${_normalizeText((raw['vod_name'] as String? ?? ''))}';
+                '${raw['vod_id'] ?? ''}:${normalizeText((raw['vod_name'] as String? ?? ''))}';
             if (!seen.add(key)) continue;
             candidates.add({
               'query': query,
@@ -510,7 +510,7 @@ class ApiService {
         for (final match in chunkResults) {
           if (match == null) continue;
 
-          final titleKey = _normalizeText(match.title);
+          final titleKey = normalizeText(match.title);
           if (titleKey.isEmpty || !seenTitles.add(titleKey)) continue;
 
           matches.add(match);
@@ -632,7 +632,7 @@ class ApiService {
     final merged = <ContentModel>[];
     final seenTitles = <String>{};
     for (final item in [...tmdbMatches, ...providerFallback]) {
-      final key = _normalizeText(item.title);
+      final key = normalizeText(item.title);
       if (key.isNotEmpty && seenTitles.add(key)) {
         merged.add(item);
       }
