@@ -31,7 +31,6 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
-!build/web/
 /coverage/
 
 # Symbolication related
@@ -49,3 +48,8 @@ app.*.map.json
 .fvm/
 # Local Netlify folder
 .netlify
+
+# Release packages
+/hyflix-android.apk
+/hyflix-windows.zip
+/hyflix-web.zip
