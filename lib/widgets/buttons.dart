@@ -6,6 +6,7 @@ class HoverButton extends StatefulWidget {
   final VoidCallback onTap;
   final Color backgroundColor;
   final bool hasShadow;
+  final FocusNode? focusNode;
 
   const HoverButton({
     super.key,
@@ -13,6 +14,7 @@ class HoverButton extends StatefulWidget {
     required this.onTap,
     required this.backgroundColor,
     this.hasShadow = false,
+    this.focusNode,
   });
 
   @override
@@ -25,6 +27,7 @@ class _HoverButtonState extends State<HoverButton> {
   @override
   Widget build(BuildContext context) {
     return FocusableActionDetector(
+      focusNode: widget.focusNode,
       onShowFocusHighlight: (hasFocus) => setState(() => _isHovered = hasFocus),
       onShowHoverHighlight: (hasHover) => setState(() => _isHovered = hasHover),
       actions: {
@@ -59,17 +62,20 @@ class PrimaryButton extends StatelessWidget {
   final String text;
   final IconData? icon;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
 
   const PrimaryButton({
     super.key,
     required this.text,
     required this.onTap,
     this.icon,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return HoverButton(
+      focusNode: focusNode,
       onTap: onTap,
       backgroundColor: Colors.white,
       hasShadow: true,
@@ -101,17 +107,20 @@ class SecondaryButton extends StatelessWidget {
   final String text;
   final IconData? icon;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
 
   const SecondaryButton({
     super.key,
     required this.text,
     required this.onTap,
     this.icon,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return HoverButton(
+      focusNode: focusNode,
       onTap: onTap,
       backgroundColor: Colors.transparent,
       hasShadow: false,

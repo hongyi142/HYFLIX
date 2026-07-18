@@ -233,6 +233,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _hasError = false;
   bool _isInitialized = false;
   late int _currentEpIndex;
+
+  int get _effectiveEpisodeCount =>
+      widget.episodes.isNotEmpty ? widget.episodes.length : widget.episodeCount;
+
+  bool get _hasMultipleEpisodes => _effectiveEpisodeCount > 1;
   String? _currentUrl;
   Timer? _hideControlsTimer;
   bool _isExiting = false;
@@ -370,7 +375,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   void _playEpisode(int index) {
-    if (index < 0 || index >= widget.episodes.length) return;
+    if (index < 0 || index >= _effectiveEpisodeCount) return;
+    if (widget.episodes.isEmpty && widget.torrentStream != null) {
+      if (mounted) Navigator.pop(context, index);
+      return;
+    }
+    final ep = widget.episodes[index];
     setState(() {
       _currentEpIndex = index;
       _showEpisodes = false;
@@ -378,7 +388,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _selectedSub = null;
       _availableSubs = [];
     });
-    _initPlayer(widget.episodes[index].url);
+    _initPlayer(ep.url);
   }
 
   void _togglePlayPause() {
@@ -451,8 +461,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final hasEpisodes = widget.episodes.length > 1;
-    final currentEpName = hasEpisodes
+    final hasEpisodes = _hasMultipleEpisodes;
+    final currentEpName = hasEpisodes && widget.episodes.isNotEmpty
         ? widget.episodes[_currentEpIndex].name
         : widget.title;
 
@@ -886,10 +896,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: widget.episodes.length,
+              itemCount: _effectiveEpisodeCount,
               itemBuilder: (context, i) {
-                final ep = widget.episodes[i];
                 final isCurrent = i == _currentEpIndex;
+                final title = widget.episodes.isNotEmpty
+                    ? (widget.episodes[i].name.isNotEmpty
+                        ? widget.episodes[i].name
+                        : 'Episode ${i + 1}')
+                    : 'Episode ${i + 1}';
                 return InkWell(
                   onTap: () => _playEpisode(i),
                   child: Container(
@@ -916,7 +930,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                         ),
                         Expanded(
                           child: Text(
-                            ep.name,
+                            title,
                             style: TextStyle(
                               color:
                                   isCurrent ? Colors.white : Colors.white70,

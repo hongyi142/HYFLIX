@@ -28,15 +28,31 @@ class _HeroSectionState extends State<HeroSection> {
   final Map<int, TmdbResult> _tmdbCache = {};
   Timer? _autoTimer;
 
+  final FocusNode _playButtonFocusNode = FocusNode();
+  final FocusNode _infoButtonFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
+    _playButtonFocusNode.addListener(_onFocusChange);
+    _infoButtonFocusNode.addListener(_onFocusChange);
     if (widget.preloadedTmdb != null && widget.preloadedTmdb!.isNotEmpty) {
       _tmdbCache.addAll(widget.preloadedTmdb!);
     } else {
       _preloadTmdb();
     }
     _startAutoCarousel();
+  }
+
+  void _onFocusChange() {
+    if (_playButtonFocusNode.hasFocus || _infoButtonFocusNode.hasFocus) {
+      _autoTimer?.cancel();
+      _autoTimer = null;
+    } else {
+      if (_autoTimer == null && mounted) {
+        _startAutoCarousel();
+      }
+    }
   }
 
   void _startAutoCarousel() {
@@ -53,6 +69,10 @@ class _HeroSectionState extends State<HeroSection> {
 
   @override
   void dispose() {
+    _playButtonFocusNode.removeListener(_onFocusChange);
+    _infoButtonFocusNode.removeListener(_onFocusChange);
+    _playButtonFocusNode.dispose();
+    _infoButtonFocusNode.dispose();
     _autoTimer?.cancel();
     _pageController.dispose();
     super.dispose();
@@ -261,6 +281,7 @@ class _HeroSectionState extends State<HeroSection> {
                         Row(
                           children: [
                             PrimaryButton(
+                              focusNode: index == _currentPage ? _playButtonFocusNode : null,
                               text: 'Play Now',
                               icon: LucideIcons.play,
                               onTap: () => DetailPage.show(
@@ -271,6 +292,7 @@ class _HeroSectionState extends State<HeroSection> {
                             ),
                             const SizedBox(width: 12),
                             SecondaryButton(
+                              focusNode: index == _currentPage ? _infoButtonFocusNode : null,
                               text: 'More Info',
                               icon: LucideIcons.info,
                               onTap: () => DetailPage.show(

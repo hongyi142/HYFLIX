@@ -60,6 +60,13 @@ class VideoPlayerScreen extends StatefulWidget {
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
+  
+  // Panel auto-focus nodes
+  final FocusNode _subtitleFirstFocusNode = FocusNode();
+  final FocusNode _episodeFirstFocusNode = FocusNode();
+  final FocusNode _audioFirstFocusNode = FocusNode();
+  final FocusNode _settingsFirstFocusNode = FocusNode();
+
   bool _torrentSupported = true;
   int _subDelayOffsetMs = 0;
   String? _loadedSrtContent;
@@ -135,6 +142,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   // Periodic save during playback (crash protection)
   Timer? _periodicSaveTimer;
 
+  // FocusNode for TV D-pad handling
+  final FocusNode _playerFocusNode = FocusNode();
+
   /// Effective episode count: uses episodes list length if available,
   /// otherwise falls back to episodeCount param (for torrent content).
   int get _effectiveEpisodeCount =>
@@ -146,6 +156,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _playerFocusNode.requestFocus();
     _startTime = DateTime.now();
     _currentEpIndex = widget.initialEpisodeIndex;
     _currentTitle = widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title;
@@ -209,6 +220,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       // Configure mpv for direct streaming
       try {
         final native = _player.platform as NativePlayer;
+        await _optimizeMpvPerformance(native);
         await native.setProperty('network-timeout', '60');
         await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await native.setProperty('cache-secs', '60');
@@ -321,6 +333,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _configureMpvForTorrent() async {
     try {
       final native = _player.platform as NativePlayer;
+      await _optimizeMpvPerformance(native);
       // Default is 5s; torrent HTTP server can block up to 60s waiting for pieces
       await native.setProperty('network-timeout', '60');
       // Keep 60s of video cached ahead of the playhead
@@ -355,10 +368,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
   }
 
+  Future<void> _optimizeMpvPerformance(NativePlayer native) async {
+    try {
+      if (Platform.isAndroid) {
+        // Enable hardware decoding via Android MediaCodec
+        await native.setProperty('hwdec', 'mediacodec');
+        // Enable direct rendering to save memory copy overhead
+        await native.setProperty('vd-lavc-dr', 'yes');
+        // Increase demuxer max cache sizes for high resolution streams
+        await native.setProperty('demuxer-max-bytes', '200000000'); // 200MB cache
+        await native.setProperty('demuxer-max-back-bytes', '50000000'); // 50MB back buffer
+      }
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error optimizing native mpv performance: $e');
+    }
+  }
+
   Future<void> _openMedia(String url, {int seekToSeconds = 0}) async {
     try {
       debugPrint('[VideoPlayer] Opening media: $url');
       _bufferingSub?.cancel();
+
+      final native = _player.platform as NativePlayer;
+      await _optimizeMpvPerformance(native);
 
       // Configure mpv timeout for VOD streams. Chinese VOD CDNs can be slow
       // so we raise the network timeout. We do NOT set cache-secs or
@@ -366,7 +398,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       // more generous than the 30s we were using, and that was causing
       // stuttering on Chinese VOD streams.
       if (widget.torrentStream == null) {
-        final native = _player.platform as NativePlayer;
         await native.setProperty('network-timeout', '60');
         await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       }
@@ -949,6 +980,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     } catch (e) {
       debugPrint('[VideoPlayer] Error disposing player: $e');
     }
+    _playerFocusNode.dispose();
+    _subtitleFirstFocusNode.dispose();
+    _episodeFirstFocusNode.dispose();
+    _audioFirstFocusNode.dispose();
+    _settingsFirstFocusNode.dispose();
     super.dispose();
   }
 
@@ -992,6 +1028,85 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
 
     if (mounted) Navigator.pop(context);
+  }
+
+  bool _handleBackPress() {
+    if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks || _showSettings) {
+      setState(() {
+        _showSubtitles = false;
+        _showEpisodes = false;
+        _showStats = false;
+        _showAudioTracks = false;
+        _showSettings = false;
+        _showControls = true;
+      });
+      _scheduleHideControls();
+      _playerFocusNode.requestFocus();
+      return true;
+    }
+    return false;
+  }
+
+  void _openSubtitlePanel() {
+    setState(() {
+      _showSubtitles = true;
+      _showEpisodes = false;
+      _showStats = false;
+      _showAudioTracks = false;
+      _showSettings = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _subtitleFirstFocusNode.requestFocus();
+    });
+  }
+
+  void _openEpisodePanel() {
+    setState(() {
+      _showEpisodes = true;
+      _showSubtitles = false;
+      _showStats = false;
+      _showAudioTracks = false;
+      _showSettings = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _episodeFirstFocusNode.requestFocus();
+    });
+  }
+
+  void _openAudioTrackPanel() {
+    setState(() {
+      _showAudioTracks = true;
+      _showSubtitles = false;
+      _showEpisodes = false;
+      _showStats = false;
+      _showSettings = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _audioFirstFocusNode.requestFocus();
+    });
+  }
+
+  void _openSettingsPanel() {
+    setState(() {
+      _showSettings = true;
+      _showSubtitles = false;
+      _showEpisodes = false;
+      _showStats = false;
+      _showAudioTracks = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _settingsFirstFocusNode.requestFocus();
+    });
+  }
+
+  void _openStatsPanel() {
+    setState(() {
+      _showStats = !_showStats;
+      _showSubtitles = false;
+      _showEpisodes = false;
+      _showAudioTracks = false;
+      _showSettings = false;
+    });
   }
 
   Future<void> _saveWatchData(Duration position, Duration duration) async {
@@ -1056,22 +1171,65 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _exitPlayer();
+        if (!didPop) {
+          if (!_handleBackPress()) {
+            _exitPlayer();
+          }
+        }
       },
       child: KeyboardListener(
-      focusNode: FocusNode()..requestFocus(),
+      focusNode: _playerFocusNode,
       autofocus: true,
       onKeyEvent: (e) {
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) _exitPlayer();
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.space) _player.playOrPause();
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
-          if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
+        if (e is! KeyDownEvent) return;
+
+        // Auto-show controls on D-pad navigation or OK buttons if they are currently hidden
+        if (!_showControls) {
+          if (e.logicalKey == LogicalKeyboardKey.arrowUp ||
+              e.logicalKey == LogicalKeyboardKey.arrowDown ||
+              e.logicalKey == LogicalKeyboardKey.arrowLeft ||
+              e.logicalKey == LogicalKeyboardKey.arrowRight ||
+              e.logicalKey == LogicalKeyboardKey.select ||
+              e.logicalKey == LogicalKeyboardKey.enter ||
+              e.logicalKey == LogicalKeyboardKey.numpadEnter) {
+            setState(() => _showControls = true);
+            _scheduleHideControls();
+
+            // Perform default arrow left/right seek or OK play/pause triggers
+            if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
+              final pos = _player.state.position;
+              _player.seek(pos - const Duration(seconds: 5));
+            } else if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
+              final pos = _player.state.position;
+              _player.seek(pos + const Duration(seconds: 5));
+            } else if (e.logicalKey == LogicalKeyboardKey.select ||
+                       e.logicalKey == LogicalKeyboardKey.enter ||
+                       e.logicalKey == LogicalKeyboardKey.numpadEnter) {
+              _player.playOrPause();
+            }
+            return;
+          }
         }
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.arrowLeft) {
+
+        if (e.logicalKey == LogicalKeyboardKey.escape) {
+          if (!_handleBackPress()) {
+            _exitPlayer();
+          }
+        } else if (e.logicalKey == LogicalKeyboardKey.space ||
+                   e.logicalKey == LogicalKeyboardKey.select ||
+                   e.logicalKey == LogicalKeyboardKey.enter ||
+                   e.logicalKey == LogicalKeyboardKey.numpadEnter) {
+          final primaryFocus = FocusManager.instance.primaryFocus;
+          if (!_showControls || primaryFocus == _playerFocusNode || primaryFocus == null) {
+            _player.playOrPause();
+            _scheduleHideControls();
+          }
+        } else if (e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
+          if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
+        } else if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
           final pos = _player.state.position;
           _player.seek(pos - const Duration(seconds: 5));
-        }
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.arrowRight) {
+        } else if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
           final pos = _player.state.position;
           _player.seek(pos + const Duration(seconds: 5));
         }
@@ -1284,8 +1442,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 child: _buildAudioTrackPanel(),
               ),
 
-              // Episode panel (slides from right) — only for VOD with episode list
-              if (hasEpisodes && widget.episodes.isNotEmpty)
+              // Episode panel (slides from right)
+              if (hasEpisodes)
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeInOut,
@@ -1587,13 +1745,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 const SizedBox(width: 16),
                 // Network stats icon
                 HoverButton(
-                  onTap: () => setState(() {
-                    _showStats = !_showStats;
-                    _showSubtitles = false;
-                    _showEpisodes = false;
-                    _showAudioTracks = false;
-                    _showSettings = false;
-                  }),
+                  onTap: _openStatsPanel,
                   backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
                   child: Padding(
                     padding: const EdgeInsets.all(10),
@@ -1602,13 +1754,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
                 const SizedBox(width: 16),
                 HoverButton(
-                  onTap: () => setState(() {
-                    _showSettings = !_showSettings;
-                    _showStats = false;
-                    _showSubtitles = false;
-                    _showEpisodes = false;
-                    _showAudioTracks = false;
-                  }),
+                  onTap: _openSettingsPanel,
                   backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
                   child: Padding(
                     padding: const EdgeInsets.all(10),
@@ -1617,13 +1763,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
                 const SizedBox(width: 16),
                 HoverButton(
-                  onTap: () => setState(() {
-                    _showSubtitles = !_showSubtitles;
-                    _showEpisodes = false;
-                    _showStats = false;
-                    _showAudioTracks = false;
-                    _showSettings = false;
-                  }),
+                  onTap: _openSubtitlePanel,
                   backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
                   child: Padding(
                     padding: const EdgeInsets.all(10),
@@ -1633,13 +1773,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 if (_audioTracks.length > 1) ...[
                   const SizedBox(width: 16),
                   HoverButton(
-                    onTap: () => setState(() {
-                      _showAudioTracks = !_showAudioTracks;
-                      _showSubtitles = false;
-                      _showEpisodes = false;
-                      _showStats = false;
-                      _showSettings = false;
-                    }),
+                    onTap: _openAudioTrackPanel,
                     backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
                     child: Padding(
                       padding: const EdgeInsets.all(10),
@@ -1647,16 +1781,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     ),
                   ),
                 ],
-                if (hasEpisodes && widget.episodes.isNotEmpty) ...[
+                if (hasEpisodes) ...[
                   const SizedBox(width: 16),
                   HoverButton(
-                    onTap: () => setState(() {
-                      _showEpisodes = !_showEpisodes;
-                      _showSubtitles = false;
-                      _showStats = false;
-                      _showAudioTracks = false;
-                      _showSettings = false;
-                    }),
+                    onTap: _openEpisodePanel,
                     backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
                     child: Padding(
                       padding: const EdgeInsets.all(10),
@@ -1912,49 +2040,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 itemCount: _availableSubs.length + 1,
                 itemBuilder: (context, i) {
                     final sub = i > 0 ? _availableSubs[i - 1] : null;
-                    return FocusableActionDetector(
-                      actions: {
-                        ActivateIntent: CallbackAction<ActivateIntent>(
-                          onInvoke: (intent) {
-                            if (i == 0) {
-                              _player.setSubtitleTrack(SubtitleTrack.no());
-                              setState(() {
-                                _selectedSub = null;
-                                _subDelayOffsetMs = 0;
-                                _loadedSrtContent = null;
-                                _showSubtitles = false;
-                              });
-                            } else {
-                              _selectSubtitle(_availableSubs[i - 1]);
-                            }
-                            return null;
-                          },
-                        ),
+                    return _FocusableTileWrapper(
+                      focusNode: i == 0 ? _subtitleFirstFocusNode : null,
+                      onTap: () {
+                        if (i == 0) {
+                          _player.setSubtitleTrack(SubtitleTrack.no());
+                          setState(() {
+                            _selectedSub = null;
+                            _subDelayOffsetMs = 0;
+                            _loadedSrtContent = null;
+                            _showSubtitles = false;
+                          });
+                        } else {
+                          _selectSubtitle(_availableSubs[i - 1]);
+                        }
                       },
-                      child: GestureDetector(
-                        onTap: () {
-                          if (i == 0) {
-                            _player.setSubtitleTrack(SubtitleTrack.no());
-                            setState(() {
-                              _selectedSub = null;
-                              _subDelayOffsetMs = 0;
-                              _loadedSrtContent = null;
-                              _showSubtitles = false;
-                            });
-                          } else {
-                            _selectSubtitle(_availableSubs[i - 1]);
-                          }
-                        },
-                        child: _subtitleTile(
+                      builder: (context, isFocused) {
+                        return _subtitleTile(
                           i == 0 ? 'Off' : '${sub!.language.toUpperCase()} - ${sub.fileName}',
                           i == 0 ? (_selectedSub == null) : (_selectedSub?.id == sub!.id),
                           subtitle: i == 0 ? null : sub!.matchType.label,
                           isLocal: sub?.source == 'local',
+                          isFocused: isFocused,
                           onDownloadSeason: (i > 0 && sub!.matchType == SubtitleMatchType.seasonFallback && sub.source != 'local' && !kIsWeb)
                               ? () => _downloadSeasonSubs(sub)
                               : null,
-                        ),
-                      ),
+                        );
+                      },
                     );
                 },
               ),
@@ -2161,6 +2273,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   ),
                   const SizedBox(height: 8),
                   HoverButton(
+                    focusNode: _settingsFirstFocusNode,
                     onTap: () {
                       if (_introTimestamp != null) {
                         _resetIntro();
@@ -2341,9 +2454,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     final isActive = _selectedAudioTrack == track ||
                         (_selectedAudioTrack == null && i == 0);
                     final label = _audioTrackLabel(track);
-                    return GestureDetector(
+                    return _FocusableTileWrapper(
+                      focusNode: i == 0 ? _audioFirstFocusNode : null,
                       onTap: () => _selectAudioTrack(track),
-                      child: _panelTile(label, isActive),
+                      builder: (context, isFocused) {
+                        return _panelTile(
+                          label,
+                          isActive,
+                          isFocused: isFocused,
+                        );
+                      },
                     );
                   },
                 ),
@@ -2371,15 +2491,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return parts.isNotEmpty ? parts.join(' - ') : 'Track ${track.id}';
   }
 
-  Widget _panelTile(String title, bool isActive, {String? subtitle}) {
+  Widget _panelTile(String title, bool isActive, {String? subtitle, bool isFocused = false}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+        color: isFocused
+            ? Colors.white.withOpacity(0.12)
+            : (isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isActive ? AppTheme.accent : Colors.white24,
+          color: isFocused
+              ? Colors.white
+              : (isActive ? AppTheme.accent : Colors.white24),
+          width: isFocused ? 2.0 : 1.0,
         ),
       ),
       child: Row(
@@ -2425,15 +2550,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     String? subtitle,
     bool isLocal = false,
     VoidCallback? onDownloadSeason,
+    bool isFocused = false,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
+        color: isFocused
+            ? Colors.white.withOpacity(0.12)
+            : (isActive ? AppTheme.accent.withOpacity(0.2) : Colors.transparent),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isActive ? AppTheme.accent : Colors.white24,
+          color: isFocused
+              ? Colors.white
+              : (isActive ? AppTheme.accent : Colors.white24),
+          width: isFocused ? 2.0 : 1.0,
         ),
       ),
       child: Row(
@@ -2793,6 +2924,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildEpisodePanel() {
+    final isTorrent = widget.episodes.isEmpty && widget.torrentStream != null;
+    final count = isTorrent ? widget.episodeCount : widget.episodes.length;
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {}, // absorb taps so they don't close the panel
@@ -2815,26 +2949,24 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: widget.episodes.length,
+                itemCount: count,
                 itemBuilder: (context, i) {
-                  final ep = widget.episodes[i];
                   final isActive = i == _currentEpIndex;
-                  return FocusableActionDetector(
-                    actions: {
-                      ActivateIntent: CallbackAction<ActivateIntent>(
-                        onInvoke: (intent) {
-                          _playEpisode(i);
-                          return null;
-                        },
-                      ),
-                    },
-                    child: GestureDetector(
-                      onTap: () => _playEpisode(i),
-                      child: _panelTile(
-                        ep.name.isNotEmpty ? ep.name : 'Episode ${i + 1}',
+                  final title = isTorrent
+                      ? 'Episode ${i + 1}'
+                      : (widget.episodes[i].name.isNotEmpty
+                          ? widget.episodes[i].name
+                          : 'Episode ${i + 1}');
+                  return _FocusableTileWrapper(
+                    focusNode: i == 0 ? _episodeFirstFocusNode : null,
+                    onTap: () => _playEpisode(i),
+                    builder: (context, isFocused) {
+                      return _panelTile(
+                        title,
                         isActive,
-                      ),
-                    ),
+                        isFocused: isFocused,
+                      );
+                    },
                   );
                 },
               ),
@@ -2850,5 +2982,46 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+}
+
+class _FocusableTileWrapper extends StatefulWidget {
+  final Widget Function(BuildContext context, bool isFocused) builder;
+  final VoidCallback onTap;
+  final FocusNode? focusNode;
+
+  const _FocusableTileWrapper({
+    super.key,
+    required this.builder,
+    required this.onTap,
+    this.focusNode,
+  });
+
+  @override
+  State<_FocusableTileWrapper> createState() => _FocusableTileWrapperState();
+}
+
+class _FocusableTileWrapperState extends State<_FocusableTileWrapper> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return FocusableActionDetector(
+      focusNode: widget.focusNode,
+      onShowFocusHighlight: (hasFocus) => setState(() => _isFocused = hasFocus),
+      onShowHoverHighlight: (hasHover) => setState(() => _isFocused = hasHover),
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            widget.onTap();
+            return null;
+          },
+        ),
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: widget.builder(context, _isFocused),
+      ),
+    );
   }
 }

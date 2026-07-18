@@ -82,7 +82,15 @@ class _SearchPageState extends State<SearchPage> {
     try {
       // Query TMDB first for all queries to ensure unique records and rich metadata
       final tmdbResults = await TmdbService.searchMultiple(query, maxResults: 20);
-      List<ContentModel> results = tmdbResults.map((tmdb) => ContentModel.fromTmdb(tmdb)).toList();
+      final Set<String> seen = {};
+      List<ContentModel> results = [];
+      for (final tmdb in tmdbResults) {
+        final model = ContentModel.fromTmdb(tmdb);
+        final key = ApiService.normalizeText(model.title);
+        if (key.isNotEmpty && seen.add(key)) {
+          results.add(model);
+        }
+      }
 
       // Fallback: search VOD providers if TMDB returned no results
       if (results.isEmpty) {

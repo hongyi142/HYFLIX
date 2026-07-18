@@ -19,9 +19,9 @@ void main() async {
 
   ensureMediaKitInitialized();
   await ApiService.init();
+  await AuthService.init();
   await WatchlistService().init();
   await DownloadService().init();
-  await AuthService.init();
   runApp(const HyflixApp());
 }
 

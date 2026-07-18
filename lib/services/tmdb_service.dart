@@ -127,7 +127,7 @@ class TmdbService {
   }
 
   /// Fetches top trending movies from TMDB for the current year.
-  static Future<List<TmdbResult>> fetchTrendingMovies({int count = 8}) async {
+  static Future<List<TmdbResult>> fetchTrendingMovies({int page = 1, int? count}) async {
     if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
 
     try {
@@ -139,6 +139,7 @@ class TmdbService {
         'primary_release_year': currentYear,
         'include_adult': 'false',
         'include_video': 'false',
+        'page': '$page',
       });
 
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
@@ -153,14 +154,17 @@ class TmdbService {
         }).toList(),
       );
 
-      return results.take(count).toList();
+      if (count != null) {
+        return results.take(count).toList();
+      }
+      return results;
     } catch (_) {
       return [];
     }
   }
 
   /// Fetches top trending TV shows from TMDB for the current year.
-  static Future<List<TmdbResult>> fetchTrendingTVSeries({int count = 8}) async {
+  static Future<List<TmdbResult>> fetchTrendingTVSeries({int page = 1, int? count}) async {
     if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
 
     try {
@@ -172,6 +176,7 @@ class TmdbService {
         'first_air_date_year': currentYear,
         'include_adult': 'false',
         'include_null_first_air_dates': 'false',
+        'page': '$page',
       });
 
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
@@ -186,7 +191,10 @@ class TmdbService {
         }).toList(),
       );
 
-      return results.take(count).toList();
+      if (count != null) {
+        return results.take(count).toList();
+      }
+      return results;
     } catch (_) {
       return [];
     }
@@ -194,7 +202,8 @@ class TmdbService {
 
   /// Fetches recent popular movies within the last [withinDays] days.
   static Future<List<TmdbResult>> fetchRecentPopularMovies({
-    int count = 8,
+    int page = 1,
+    int? count,
     int withinDays = 60,
   }) async {
     if (tmdbApiKey.isEmpty || tmdbApiKey.contains('PASTE')) return [];
@@ -210,7 +219,7 @@ class TmdbService {
         'sort_by': 'popularity.desc',
         'primary_release_date.gte': cutoff.toIso8601String().split('T').first,
         'primary_release_date.lte': today.toIso8601String().split('T').first,
-        'page': '1',
+        'page': '$page',
       });
 
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
@@ -227,6 +236,7 @@ class TmdbService {
   static Future<List<TmdbResult>> _discoverMedia({
     required String mediaType,
     required Map<String, String> params,
+    int? page,
     int count = 10,
     int maxPages = 3,
     bool Function(TmdbResult result)? predicate,
@@ -237,13 +247,48 @@ class TmdbService {
     final seenIds = <int>{};
 
     try {
-      for (int page = 1; page <= maxPages && items.length < count; page++) {
+      if (page != null) {
         final query = <String, String>{
           'api_key': tmdbApiKey,
           'language': currentLanguage,
           'include_adult': 'false',
           'sort_by': 'popularity.desc',
           'page': '$page',
+          ...params,
+        };
+
+        if (mediaType == 'movie') {
+          query['include_video'] = 'false';
+        } else {
+          query['include_null_first_air_dates'] = 'false';
+        }
+
+        final uri = Uri.https('api.themoviedb.org', '/3/discover/$mediaType', query);
+        final res = await http.get(uri).timeout(const Duration(seconds: 10));
+        if (res.statusCode != 200) return [];
+
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        final results = _mapResults(
+          (body['results'] as List<dynamic>? ?? []).map((item) {
+            final map = Map<String, dynamic>.from(item as Map);
+            map['media_type'] = mediaType;
+            return map;
+          }).toList(),
+        );
+
+        if (predicate != null) {
+          return results.where(predicate).toList();
+        }
+        return results;
+      }
+
+      for (int p = 1; p <= maxPages && items.length < count; p++) {
+        final query = <String, String>{
+          'api_key': tmdbApiKey,
+          'language': currentLanguage,
+          'include_adult': 'false',
+          'sort_by': 'popularity.desc',
+          'page': '$p',
           ...params,
         };
 
@@ -351,11 +396,13 @@ class TmdbService {
   }
 
   static Future<List<TmdbResult>> fetchRecentPopularTVSeries({
+    int? page,
     int count = 10,
     int withinDays = 60,
   }) =>
       _discoverMedia(
         mediaType: 'tv',
+        page: page,
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
@@ -364,11 +411,13 @@ class TmdbService {
       );
 
   static Future<List<TmdbResult>> fetchRecentPopularKoreanDramas({
+    int? page,
     int count = 10,
     int withinDays = 60,
   }) =>
       _discoverMedia(
         mediaType: 'tv',
+        page: page,
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
@@ -378,11 +427,13 @@ class TmdbService {
       );
 
   static Future<List<TmdbResult>> fetchRecentPopularChineseDramas({
+    int? page,
     int count = 10,
     int withinDays = 60,
   }) =>
       _discoverMedia(
         mediaType: 'tv',
+        page: page,
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
@@ -392,11 +443,13 @@ class TmdbService {
       );
 
   static Future<List<TmdbResult>> fetchRecentPopularHongKongSeries({
+    int? page,
     int count = 10,
     int withinDays = 60,
   }) =>
       _discoverMedia(
         mediaType: 'tv',
+        page: page,
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
@@ -406,11 +459,13 @@ class TmdbService {
       );
 
   static Future<List<TmdbResult>> fetchRecentPopularChineseAnimation({
+    int? page,
     int count = 10,
     int withinDays = 60,
   }) =>
       _discoverMedia(
         mediaType: 'tv',
+        page: page,
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),
@@ -423,6 +478,7 @@ class TmdbService {
   /// Returns TmdbResult-compatible objects for seamless pipeline integration.
   /// Uses countryOfOrigin: CN to filter for Chinese animations specifically.
   static Future<List<TmdbResult>> fetchTrendingChineseAnimationFromAniList({
+    int page = 1,
     int count = 10,
   }) async {
     const query = r'''
@@ -458,7 +514,7 @@ class TmdbService {
         },
         body: json.encode({
           'query': query,
-          'variables': {'page': 1, 'perPage': count},
+          'variables': {'page': page, 'perPage': count},
         }),
       ).timeout(const Duration(seconds: 15));
 
@@ -471,8 +527,8 @@ class TmdbService {
       final data = body['data'] as Map<String, dynamic>?;
       if (data == null) return [];
 
-      final page = data['Page'] as Map<String, dynamic>;
-      final media = page['media'] as List<dynamic>? ?? [];
+      final pageMap = data['Page'] as Map<String, dynamic>;
+      final media = pageMap['media'] as List<dynamic>? ?? [];
 
       final results = <TmdbResult>[];
       for (final m in media) {
@@ -539,11 +595,13 @@ class TmdbService {
   }
 
   static Future<List<TmdbResult>> fetchRecentPopularWesternSeries({
+    int? page,
     int count = 10,
     int withinDays = 60,
   }) =>
       _discoverMedia(
         mediaType: 'tv',
+        page: page,
         count: count,
         params: {
           ..._recentDateParams(mediaType: 'tv', withinDays: withinDays),

@@ -31,7 +31,7 @@ class ResponsiveLayout {
   double get heroHeight {
     if (isPhone) return 500;
     if (isTablet) return 620;
-    return math.max(700.0, math.min(size.height * 0.8, 850.0));
+    return math.max(360.0, math.min(size.height * 0.65, 800.0));
   }
   double get heroContentWidth =>
       isPhone ? width - 64 : math.min(width * 0.5, 540);

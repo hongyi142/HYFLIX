@@ -25,6 +25,16 @@ class WatchlistService extends ChangeNotifier {
     } else {
       _prefs?.setStringList(_listsKey, _listNames);
     }
+
+    // Listen to Auth changes to sync/clear local data automatically
+    AuthService.addAuthListener((loggedIn) {
+      if (loggedIn) {
+        syncFromCloud();
+      } else {
+        _clearLocalData();
+      }
+    });
+
     // Sync from Firebase if logged in
     if (AuthService.isLoggedIn) {
       await syncFromCloud();
@@ -132,6 +142,17 @@ class WatchlistService extends ChangeNotifier {
   void _saveList(String listName, List<ContentModel> items) {
     final jsonList = items.map((e) => e.toJson()).toList();
     _prefs?.setString('$_listPrefix$listName', json.encode(jsonList));
+    notifyListeners();
+  }
+
+  void _clearLocalData() {
+    if (_prefs == null) return;
+    for (final name in _listNames) {
+      _prefs?.remove('$_listPrefix$name');
+    }
+    _listNames = ['My List'];
+    _prefs?.setStringList(_listsKey, _listNames);
+    _prefs?.remove('${_listPrefix}My List');
     notifyListeners();
   }
 }

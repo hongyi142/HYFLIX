@@ -81,17 +81,30 @@ class _HomePageState extends State<HomePage> with RouteAware {
     _loadContent();
   }
 
+  List<ContentModel> _deduplicateList(List<ContentModel> list, Set<String> seenTitles) {
+    final List<ContentModel> result = [];
+    for (final item in list) {
+      final key = ApiService.normalizeText(item.title);
+      if (key.isNotEmpty && seenTitles.add(key)) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
   @override
   void initState() {
     super.initState();
     _instance = this;
-    _trendingMovies = widget.trendingMovies;
-    _trendingSeries = widget.trendingSeries;
-    _chineseAnimation = widget.chineseAnim;
-    _chineseDramas = widget.chineseDramas;
-    _koreanDramas = widget.koreanDramas;
-    _westernSeries = widget.westernSeries;
-    _hongKongSeries = widget.hkSeries;
+
+    final Set<String> globalSeen = {};
+    _trendingMovies = _deduplicateList(widget.trendingMovies, globalSeen);
+    _trendingSeries = _deduplicateList(widget.trendingSeries, globalSeen);
+    _chineseAnimation = _deduplicateList(widget.chineseAnim, globalSeen);
+    _chineseDramas = _deduplicateList(widget.chineseDramas, globalSeen);
+    _koreanDramas = _deduplicateList(widget.koreanDramas, globalSeen);
+    _westernSeries = _deduplicateList(widget.westernSeries, globalSeen);
+    _hongKongSeries = _deduplicateList(widget.hkSeries, globalSeen);
 
     _loadContent();
     _scrollController.addListener(() {
@@ -136,9 +149,14 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
     final trendingItems = <ContentModel>[];
     final trendingTmdbMap = <int, TmdbResult>{};
+    final Set<String> heroSeen = {};
+    int addedCount = 0;
     for (int i = 0; i < trendingTmdbResults.length; i++) {
       final tmdb = trendingTmdbResults[i];
-      trendingTmdbMap[i] = tmdb;
+      final titleKey = ApiService.normalizeText(tmdb.englishTitle);
+      if (titleKey.isEmpty || !heroSeen.add(titleKey)) continue;
+
+      trendingTmdbMap[addedCount] = tmdb;
       trendingItems.add(
         ContentModel(
           title: tmdb.englishTitle,
@@ -152,6 +170,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
           rating: tmdb.voteAverage,
         ),
       );
+      addedCount++;
     }
 
     if (!mounted) return;
@@ -579,9 +598,9 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       context,
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
-                          title: 'Movies',
-                          fetchFunction: (p) => _api.fetchMovies(page: p),
-                          initialItems: _trendingMovies,
+                          title: 'Top Trending Movies',
+                          fetchFunction: (p) => TmdbService.fetchTrendingMovies(page: p)
+                              .then((res) => res.map(ContentModel.fromTmdb).toList()),
                         ),
                       ),
                     ),
@@ -600,9 +619,9 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       context,
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
-                          title: 'Series',
-                          fetchFunction: (p) => _api.fetchTVSeries(page: p),
-                          initialItems: _trendingSeries,
+                          title: 'Top Trending Series',
+                          fetchFunction: (p) => TmdbService.fetchTrendingTVSeries(page: p)
+                              .then((res) => res.map(ContentModel.fromTmdb).toList()),
                         ),
                       ),
                     ),
@@ -622,9 +641,8 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
                           title: 'Chinese Series',
-                          fetchFunction: (p) =>
-                              _api.fetchChineseDramas(page: p),
-                          initialItems: _chineseDramas,
+                          fetchFunction: (p) => TmdbService.fetchRecentPopularChineseDramas(page: p)
+                              .then((res) => res.map(ContentModel.fromTmdb).toList()),
                         ),
                       ),
                     ),
@@ -644,8 +662,14 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
                           title: 'Chinese Animation',
-                          fetchFunction: (p) => _api.fetchAnimation(page: p),
-                          initialItems: _chineseAnimation,
+                          fetchFunction: (p) => TmdbService.fetchTrendingChineseAnimationFromAniList(page: p, count: 20)
+                              .then((results) async {
+                                if (results.isEmpty) {
+                                  return TmdbService.fetchRecentPopularChineseAnimation(page: p)
+                                      .then((res) => res.map(ContentModel.fromTmdb).toList());
+                                }
+                                return results.map(ContentModel.fromTmdb).toList();
+                              }),
                         ),
                       ),
                     ),
@@ -665,8 +689,8 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
                           title: 'Korean Series',
-                          fetchFunction: (p) => _api.fetchKoreanDramas(page: p),
-                          initialItems: _koreanDramas,
+                          fetchFunction: (p) => TmdbService.fetchRecentPopularKoreanDramas(page: p)
+                              .then((res) => res.map(ContentModel.fromTmdb).toList()),
                         ),
                       ),
                     ),
@@ -686,9 +710,8 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
                           title: 'Western Series',
-                          fetchFunction: (p) =>
-                              _api.fetchWesternSeries(page: p),
-                          initialItems: _westernSeries,
+                          fetchFunction: (p) => TmdbService.fetchRecentPopularWesternSeries(page: p)
+                              .then((res) => res.map(ContentModel.fromTmdb).toList()),
                         ),
                       ),
                     ),
@@ -708,9 +731,8 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       MaterialPageRoute(
                         builder: (_) => CategoryPage(
                           title: 'Hong Kong Series',
-                          fetchFunction: (p) =>
-                              _api.fetchHongKongSeries(page: p),
-                          initialItems: _hongKongSeries,
+                          fetchFunction: (p) => TmdbService.fetchRecentPopularHongKongSeries(page: p)
+                              .then((res) => res.map(ContentModel.fromTmdb).toList()),
                         ),
                       ),
                     ),
@@ -914,9 +936,17 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
     final epIdx = widget.content.resumeEpisodeIndex ?? 0;
     final posSec = widget.content.resumePositionSeconds ?? 0;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() { _hovered = false; _pressed = false; }),
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) => setState(() => _hovered = hasFocus),
+      onShowHoverHighlight: (hasHover) => setState(() => _hovered = hasHover),
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            widget.onResume(epIdx, posSec);
+            return null;
+          },
+        ),
+      },
       child: GestureDetector(
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) => setState(() => _pressed = false),
@@ -933,6 +963,13 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
           transformAlignment: Alignment.center,
           margin: widget.margin,
           width: widget.cardWidth,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _hovered ? Colors.white : Colors.transparent,
+              width: 2,
+            ),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
