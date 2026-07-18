@@ -62,6 +62,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final VideoController _controller;
   
   // Panel auto-focus nodes
+  final FocusNode _playPauseFocusNode = FocusNode();
   final FocusNode _subtitleFirstFocusNode = FocusNode();
   final FocusNode _episodeFirstFocusNode = FocusNode();
   final FocusNode _audioFirstFocusNode = FocusNode();
@@ -128,6 +129,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   List<AudioTrack> _audioTracks = [];
   AudioTrack? _selectedAudioTrack;
   StreamSubscription<Tracks>? _audioTracksSub;
+  StreamSubscription<bool>? _playingSub;
 
   // Exit guard
   bool _isExiting = false;
@@ -172,6 +174,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _loadIntroTimestamp();
     _loadSubtitleSettings();
     _listenPosition();
+    _listenPlaying();
     _setupAutoplay();
     _listenAudioTracks();
     _scheduleHideControls();
@@ -457,6 +460,28 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  void _listenPlaying() {
+    _playingSub = _player.stream.playing.listen((playing) {
+      if (!mounted) return;
+      if (playing) {
+        setState(() {
+          _showControls = false;
+        });
+        _playerFocusNode.requestFocus();
+      } else {
+        setState(() {
+          _showControls = true;
+        });
+        // Delay slightly to ensure controls are built and focusable
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _playPauseFocusNode.requestFocus();
+          }
+        });
+      }
+    });
+  }
+
   void _listenPosition() {
     _positionSub = _player.stream.position.listen((pos) {
       if (!mounted) return;
@@ -580,6 +605,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _selectedAudioTrack = track;
       _showAudioTracks = false;
     });
+    if (_player.state.playing) {
+      _playerFocusNode.requestFocus();
+    } else {
+      _playPauseFocusNode.requestFocus();
+    }
   }
 
   void _playNextEpisode() {
@@ -882,6 +912,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             backgroundColor: AppTheme.accent,
           ),
         );
+        if (_player.state.playing) {
+          _playerFocusNode.requestFocus();
+        } else {
+          _playPauseFocusNode.requestFocus();
+        }
       }
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -890,6 +925,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           duration: Duration(seconds: 2),
         ),
       );
+      if (_player.state.playing) {
+        _playerFocusNode.requestFocus();
+      } else {
+        _playPauseFocusNode.requestFocus();
+      }
     }
   }
 
@@ -933,13 +973,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   void _scheduleHideControls() {
     Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && _showControls) setState(() => _showControls = false);
+      if (mounted && _showControls && _player.state.playing) setState(() => _showControls = false);
     });
   }
 
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
-    if (_showControls) _scheduleHideControls();
+    if (_showControls) {
+      _scheduleHideControls();
+      if (!_player.state.playing) {
+        _playPauseFocusNode.requestFocus();
+      }
+    }
   }
 
   @override
@@ -981,6 +1026,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       debugPrint('[VideoPlayer] Error disposing player: $e');
     }
     _playerFocusNode.dispose();
+    _playPauseFocusNode.dispose();
     _subtitleFirstFocusNode.dispose();
     _episodeFirstFocusNode.dispose();
     _audioFirstFocusNode.dispose();
@@ -1041,7 +1087,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         _showControls = true;
       });
       _scheduleHideControls();
-      _playerFocusNode.requestFocus();
+      if (_player.state.playing) {
+        _playerFocusNode.requestFocus();
+      } else {
+        _playPauseFocusNode.requestFocus();
+      }
       return true;
     }
     return false;
@@ -1183,6 +1233,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       onKeyEvent: (e) {
         if (e is! KeyDownEvent) return;
 
+        final primaryFocus = FocusManager.instance.primaryFocus;
+        final isPlayerFocused = primaryFocus == _playerFocusNode || primaryFocus == null;
+
         // Auto-show controls on D-pad navigation or OK buttons if they are currently hidden
         if (!_showControls) {
           if (e.logicalKey == LogicalKeyboardKey.arrowUp ||
@@ -1219,19 +1272,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                    e.logicalKey == LogicalKeyboardKey.select ||
                    e.logicalKey == LogicalKeyboardKey.enter ||
                    e.logicalKey == LogicalKeyboardKey.numpadEnter) {
-          final primaryFocus = FocusManager.instance.primaryFocus;
-          if (!_showControls || primaryFocus == _playerFocusNode || primaryFocus == null) {
+          if (!_showControls || isPlayerFocused) {
             _player.playOrPause();
             _scheduleHideControls();
           }
         } else if (e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
           if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
         } else if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          final pos = _player.state.position;
-          _player.seek(pos - const Duration(seconds: 5));
+          if (isPlayerFocused || _player.state.playing) {
+            final pos = _player.state.position;
+            _player.seek(pos - const Duration(seconds: 5));
+          }
         } else if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
-          final pos = _player.state.position;
-          _player.seek(pos + const Duration(seconds: 5));
+          if (isPlayerFocused || _player.state.playing) {
+            final pos = _player.state.position;
+            _player.seek(pos + const Duration(seconds: 5));
+          }
         }
       },
       child: Scaffold(
@@ -1804,6 +1860,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 builder: (context, snap) {
                   final playing = snap.data ?? _player.state.playing;
                   return HoverButton(
+                    focusNode: _playPauseFocusNode,
                     onTap: () {
                       _player.playOrPause();
                       setState(() {});
@@ -2051,6 +2108,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             _loadedSrtContent = null;
                             _showSubtitles = false;
                           });
+                          if (_player.state.playing) {
+                            _playerFocusNode.requestFocus();
+                          } else {
+                            _playPauseFocusNode.requestFocus();
+                          }
                         } else {
                           _selectSubtitle(_availableSubs[i - 1]);
                         }
