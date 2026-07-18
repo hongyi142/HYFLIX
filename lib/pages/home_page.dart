@@ -75,17 +75,28 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
   final ScrollController _scrollController = ScrollController();
   bool _isScrolled = false;
+  final Set<String> _globalSeen = {};
 
   void _refreshContent() {
     setState(() => _isLoading = true);
     _loadContent();
   }
 
-  List<ContentModel> _deduplicateList(List<ContentModel> list, Set<String> seenTitles) {
+  String _getBaseKey(String title) {
+    String t = TmdbService.cleanTitle(title);
+    t = t.split('：').first;
+    t = t.split(':').first;
+    t = t.split(' - ').first;
+    t = t.replaceAll(RegExp(r'(剧场版|特别篇|OVA|SP).*', caseSensitive: false), '');
+    return ApiService.normalizeText(t);
+  }
+
+  List<ContentModel> _deduplicateList(List<ContentModel> list) {
     final List<ContentModel> result = [];
     for (final item in list) {
-      final key = ApiService.normalizeText(item.title);
-      if (key.isNotEmpty && seenTitles.add(key)) {
+      final key = _getBaseKey(item.title);
+      
+      if (key.isNotEmpty && _globalSeen.add(key)) {
         result.add(item);
       }
     }
@@ -97,14 +108,15 @@ class _HomePageState extends State<HomePage> with RouteAware {
     super.initState();
     _instance = this;
 
-    final Set<String> globalSeen = {};
-    _trendingMovies = _deduplicateList(widget.trendingMovies, globalSeen);
-    _trendingSeries = _deduplicateList(widget.trendingSeries, globalSeen);
-    _chineseAnimation = _deduplicateList(widget.chineseAnim, globalSeen);
-    _chineseDramas = _deduplicateList(widget.chineseDramas, globalSeen);
-    _koreanDramas = _deduplicateList(widget.koreanDramas, globalSeen);
-    _westernSeries = _deduplicateList(widget.westernSeries, globalSeen);
-    _hongKongSeries = _deduplicateList(widget.hkSeries, globalSeen);
+    _globalSeen.clear();
+    
+    _trendingMovies = _deduplicateList(widget.trendingMovies);
+    _trendingSeries = _deduplicateList(widget.trendingSeries);
+    _chineseAnimation = _deduplicateList(widget.chineseAnim);
+    _chineseDramas = _deduplicateList(widget.chineseDramas);
+    _koreanDramas = _deduplicateList(widget.koreanDramas);
+    _westernSeries = _deduplicateList(widget.westernSeries);
+    _hongKongSeries = _deduplicateList(widget.hkSeries);
 
     _loadContent();
     _scrollController.addListener(() {
@@ -153,8 +165,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
     int addedCount = 0;
     for (int i = 0; i < trendingTmdbResults.length; i++) {
       final tmdb = trendingTmdbResults[i];
-      final titleKey = ApiService.normalizeText(tmdb.englishTitle);
-      if (titleKey.isEmpty || !heroSeen.add(titleKey)) continue;
+      final key = _getBaseKey(tmdb.englishTitle);
+      // Hero sections get their own dedup key so they aren't completely blocked by shelf items,
+      // but they must not duplicate *within* the hero section.
+      if (key.isEmpty || !heroSeen.add(key)) continue;
 
       trendingTmdbMap[addedCount] = tmdb;
       trendingItems.add(

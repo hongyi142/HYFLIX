@@ -61,6 +61,15 @@ class _SearchPageState extends State<SearchPage> {
     if (mounted) setState(() {});
   }
 
+  String _getBaseKey(String title) {
+    String t = TmdbService.cleanTitle(title);
+    t = t.split('：').first;
+    t = t.split(':').first;
+    t = t.split(' - ').first;
+    t = t.replaceAll(RegExp(r'(剧场版|特别篇|OVA|SP).*', caseSensitive: false), '');
+    return ApiService.normalizeText(t);
+  }
+
   Future<void> _clearHistory() async {
     _searchHistory.clear();
     final prefs = await SharedPreferences.getInstance();
@@ -86,7 +95,7 @@ class _SearchPageState extends State<SearchPage> {
       List<ContentModel> results = [];
       for (final tmdb in tmdbResults) {
         final model = ContentModel.fromTmdb(tmdb);
-        final key = ApiService.normalizeText(model.title);
+        final key = _getBaseKey(model.title);
         if (key.isNotEmpty && seen.add(key)) {
           results.add(model);
         }
@@ -125,10 +134,9 @@ class _SearchPageState extends State<SearchPage> {
     final Set<String> seen = {};
     for (final list in resultsList) {
       for (final item in list) {
-        final titleKey = ApiService.normalizeText(item.title);
-        if (titleKey.isNotEmpty && !seen.contains(titleKey)) {
+        final key = _getBaseKey(item.title);
+        if (key.isNotEmpty && seen.add(key)) {
           all.add(item);
-          seen.add(titleKey);
         }
       }
     }
