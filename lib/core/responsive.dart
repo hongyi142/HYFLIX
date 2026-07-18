@@ -37,17 +37,14 @@ class ResponsiveLayout {
     if (isPhone) return 500;
     if (isTablet) return 620;
 
-    // For large screens (TV / desktop), scale hero based on aspect ratio.
-    // Wider screens (16:9 TV) show more horizontal content so the hero
-    // should take up LESS vertical space so content shelves are visible below.
-    final ar = size.width / size.height; // ~1.78 for 16:9, ~1.6 for 16:10
-    // Map aspect ratio to a height fraction:
-    //   ar ≤ 1.5  (3:2 monitor)        → 63% of screen height
-    //   ar ~1.6   (16:10 monitor)      → 58% of screen height
-    //   ar ~1.78  (16:9 TV / 1080p)   → 52% of screen height
-    //   ar ≥ 2.0  (ultra-wide)         → 48% of screen height
-    final fraction = (0.52 + (1.78 - ar.clamp(1.5, 2.0)) * 0.22)
-        .clamp(0.48, 0.65);
+    // On TV screens (16:9 wide-screen), fill the entire viewport height.
+    // This matches the Netflix TV UX where the hero is full-screen and the
+    // action buttons are slightly cut off, hinting scrollable shelf content below.
+    if (isTVAspect) return size.height;
+
+    // On regular desktop monitors, use a comfortable fraction based on aspect ratio.
+    final ar = size.width / size.height;
+    final fraction = (0.52 + (1.78 - ar.clamp(1.5, 2.0)) * 0.22).clamp(0.55, 0.70);
     return math.max(360.0, math.min(size.height * fraction, 680.0));
   }
 
