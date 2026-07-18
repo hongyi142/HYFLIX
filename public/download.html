@@ -693,12 +693,19 @@
 
         if (data.assets && Array.isArray(data.assets)) {
           let foundAndroid = false;
+          let foundAndroidTv = false;
           let foundWindows = false;
           let foundMacos = false;
 
           data.assets.forEach(asset => {
             const name = asset.name.toLowerCase();
-            if (name.endsWith('.apk') && name.includes('android')) {
+            if (name.endsWith('.apk') && name.includes('android-tv')) {
+              dynamicConfig['android-tv'].enabled = true;
+              dynamicConfig['android-tv'].fileName = asset.name;
+              dynamicConfig['android-tv'].fileSize = asset.size;
+              dynamicConfig['android-tv'].downloadUrl = asset.browser_download_url;
+              foundAndroidTv = true;
+            } else if (name.endsWith('.apk') && name.includes('android')) {
               dynamicConfig.android.enabled = true;
               dynamicConfig.android.fileName = asset.name;
               dynamicConfig.android.fileSize = asset.size;
@@ -719,7 +726,7 @@
             }
           });
 
-          if (foundAndroid || foundWindows || foundMacos) {
+          if (foundAndroid || foundAndroidTv || foundWindows || foundMacos) {
             renderCards(dynamicConfig);
             return;
           }
