@@ -48,6 +48,20 @@ class _HeroSectionState extends State<HeroSection> {
     if (_playButtonFocusNode.hasFocus || _infoButtonFocusNode.hasFocus) {
       _autoTimer?.cancel();
       _autoTimer = null;
+
+      // Scroll the parent Scrollable to the top to show the full hero section
+      try {
+        final scrollable = Scrollable.maybeOf(context);
+        if (scrollable != null && scrollable.position.pixels > 0) {
+          scrollable.position.animateTo(
+            0.0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      } catch (e) {
+        debugPrint('Failed to scroll parent: $e');
+      }
     } else {
       if (_autoTimer == null && mounted) {
         _startAutoCarousel();

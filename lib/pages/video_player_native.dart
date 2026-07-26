@@ -15,6 +15,8 @@ import '../services/subtitle_service.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/torrent_service.dart';
+import '../services/torbox_service.dart';
+import '../config/app_config.dart';
 import '../widgets/buttons.dart';
 import 'fullscreen_stub.dart'
     if (dart.library.html) 'fullscreen_web.dart';
@@ -63,6 +65,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   
   // Panel auto-focus nodes
   final FocusNode _playPauseFocusNode = FocusNode();
+  final FocusNode _topBarBackFocusNode = FocusNode();
   final FocusNode _subtitleFirstFocusNode = FocusNode();
   final FocusNode _episodeFirstFocusNode = FocusNode();
   final FocusNode _audioFirstFocusNode = FocusNode();
@@ -138,11 +141,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _isSeeking = false;
   double _seekValue = 0.0;
 
+  // D-pad Scrubbing state
+  bool _isScrubbing = false;
+  double _scrubValue = 0.0;
+  Duration _originalPosition = Duration.zero;
+  LogicalKeyboardKey? _currentScrubKey;
+  bool _wasPlayingBeforeScrub = false;
+
   // Seek recovery for torrent streams
   Timer? _seekRecoveryTimer;
 
   // Periodic save during playback (crash protection)
   Timer? _periodicSaveTimer;
+
+  // Timer to auto-hide player controls after inactivity
+  Timer? _hideControlsTimer;
 
   // FocusNode for TV D-pad handling
   final FocusNode _playerFocusNode = FocusNode();
@@ -240,9 +253,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     debugPrint('[VideoPlayer] Starting torrent: ${stream.quality} '
         'hash=${stream.infoHash.substring(0, 16)}... fileIdx=${stream.fileIdx}');
 
+    final isTorBoxActive = torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY';
+
     setState(() {
       _isTorrentBuffering = true;
-      _torrentStatus = 'Connecting to peers...';
+      _torrentStatus = isTorBoxActive ? 'Resolving stream via TorBox...' : 'Connecting to peers...';
     });
 
     // Listen to buffering state changes for status text
@@ -286,6 +301,30 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     final (url, streamId) = result;
     _torrentUrl = url;
+
+    // Check if the stream was resolved to a direct HTTPS debrid link (TorBox)
+    if (streamId == 0 || url.startsWith('http://') || url.startsWith('https://')) {
+      debugPrint('[VideoPlayer] Direct TorBox debrid stream ready: $url');
+      setState(() {
+        _isTorrentBuffering = false;
+        _torrentStatus = '';
+      });
+
+      try {
+        final native = _player.platform as NativePlayer;
+        await _optimizeMpvPerformance(native);
+        await native.setProperty('network-timeout', '60');
+        await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await native.setProperty('cache-secs', '60');
+        await native.setProperty('demuxer-readahead-secs', '60');
+      } catch (e) {
+        debugPrint('[VideoPlayer] Failed to configure mpv: $e');
+      }
+
+      _openMedia(url, seekToSeconds: widget.seekToSeconds);
+      _fetchSubtitles();
+      return;
+    }
 
     // Subscribe to stream updates for real-time buffer info in the overlay
     _streamInfoSub = TorrentService().streamUpdates?.listen((streams) {
@@ -376,9 +415,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (Platform.isAndroid) {
         // Enable hardware decoding via Android MediaCodec
         await native.setProperty('hwdec', 'mediacodec');
-        // Enable direct rendering to save memory copy overhead
         await native.setProperty('vd-lavc-dr', 'yes');
-        // Increase demuxer max cache sizes for high resolution streams
+        await native.setProperty('demuxer-max-bytes', '200000000'); // 200MB cache
+        await native.setProperty('demuxer-max-back-bytes', '50000000'); // 50MB back buffer
+      } else {
+        // Enable GPU hardware decoding on Windows / macOS / Linux
+        await native.setProperty('hwdec', 'auto-safe');
+        await native.setProperty('vd-lavc-dr', 'yes');
         await native.setProperty('demuxer-max-bytes', '200000000'); // 200MB cache
         await native.setProperty('demuxer-max-back-bytes', '50000000'); // 50MB back buffer
       }
@@ -461,25 +504,68 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   void _listenPlaying() {
+    // NOTE: We deliberately do NOT auto-hide controls or move focus here.
+    // The D-pad state machine (onKeyEvent) handles all controls visibility
+    // and focus management explicitly. Any automatic state changes here would
+    // race with the explicit D-pad handlers and cause focus to be stolen.
     _playingSub = _player.stream.playing.listen((playing) {
       if (!mounted) return;
-      if (playing) {
+      // Intentionally empty — state managed via D-pad controls state machine.
+    });
+  }
+
+  void _handleDpadSeekKeyEvent(KeyEvent e, Duration dur) {
+    if (dur.inMilliseconds <= 0) return;
+    final isLeft = e.logicalKey == LogicalKeyboardKey.arrowLeft;
+
+    if (e is KeyDownEvent || e is KeyRepeatEvent) {
+      if (!_isScrubbing) {
+        _wasPlayingBeforeScrub = _player.state.playing;
+        _player.pause();
+        _originalPosition = _player.state.position;
+        _scrubValue = dur.inMilliseconds > 0 
+            ? _originalPosition.inMilliseconds / dur.inMilliseconds 
+            : 0.0;
+        _currentScrubKey = e.logicalKey;
         setState(() {
-          _showControls = false;
-        });
-        _playerFocusNode.requestFocus();
-      } else {
-        setState(() {
+          _isScrubbing = true;
           _showControls = true;
         });
-        // Delay slightly to ensure controls are built and focusable
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _playPauseFocusNode.requestFocus();
-          }
-        });
       }
-    });
+
+      // 5 seconds jump per tap/repeat (5000ms / dur.inMilliseconds)
+      final stepFraction = 5000 / dur.inMilliseconds;
+      setState(() {
+        _scrubValue = isLeft 
+            ? (_scrubValue - stepFraction).clamp(0.0, 1.0) 
+            : (_scrubValue + stepFraction).clamp(0.0, 1.0);
+      });
+      _scheduleHideControls();
+    } else if (e is KeyUpEvent) {
+      if (e.logicalKey == _currentScrubKey) {
+        final targetMs = (_scrubValue * dur.inMilliseconds).round();
+        _player.seek(Duration(milliseconds: targetMs));
+        
+        setState(() {
+          _isScrubbing = false;
+          _currentScrubKey = null;
+        });
+
+        if (_wasPlayingBeforeScrub) {
+          _player.play();
+          setState(() {
+            _showControls = false;
+          });
+          _playerFocusNode.requestFocus();
+        } else {
+          // If paused, keep controls visible and focus the Play/Pause button
+          setState(() {
+            _showControls = true;
+          });
+          _playPauseFocusNode.requestFocus();
+        }
+      }
+    }
   }
 
   void _listenPosition() {
@@ -605,11 +691,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _selectedAudioTrack = track;
       _showAudioTracks = false;
     });
-    if (_player.state.playing) {
-      _playerFocusNode.requestFocus();
-    } else {
-      _playPauseFocusNode.requestFocus();
-    }
+    _playPauseFocusNode.requestFocus();
   }
 
   void _playNextEpisode() {
@@ -912,12 +994,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             backgroundColor: AppTheme.accent,
           ),
         );
-        if (_player.state.playing) {
-          _playerFocusNode.requestFocus();
-        } else {
-          _playPauseFocusNode.requestFocus();
-        }
       }
+      _playPauseFocusNode.requestFocus();
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -925,11 +1003,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      if (_player.state.playing) {
-        _playerFocusNode.requestFocus();
-      } else {
-        _playPauseFocusNode.requestFocus();
-      }
+      _playPauseFocusNode.requestFocus();
     }
   }
 
@@ -958,6 +1032,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
     _openMedia(ep.url);
     _loadIntroTimestamp();
+    _playerFocusNode.requestFocus();
   }
 
   Future<void> _toggleFullScreen() async {
@@ -972,8 +1047,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   void _scheduleHideControls() {
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && _showControls && _player.state.playing) setState(() => _showControls = false);
+    _hideControlsTimer?.cancel();
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+      // Only auto-hide controls when the player is playing (not paused)
+      // and we are not in the middle of a D-pad scrub.
+      if (mounted && _showControls && !_isScrubbing && _player.state.playing) {
+        setState(() => _showControls = false);
+        // Return keyboard focus to root so the state machine works correctly.
+        _playerFocusNode.requestFocus();
+      }
     });
   }
 
@@ -981,9 +1063,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     setState(() => _showControls = !_showControls);
     if (_showControls) {
       _scheduleHideControls();
-      if (!_player.state.playing) {
-        _playPauseFocusNode.requestFocus();
-      }
+      _playPauseFocusNode.requestFocus();
+    } else {
+      _playerFocusNode.requestFocus();
     }
   }
 
@@ -1027,10 +1109,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
     _playerFocusNode.dispose();
     _playPauseFocusNode.dispose();
+    _topBarBackFocusNode.dispose();
     _subtitleFirstFocusNode.dispose();
     _episodeFirstFocusNode.dispose();
     _audioFirstFocusNode.dispose();
     _settingsFirstFocusNode.dispose();
+    _hideControlsTimer?.cancel();
     super.dispose();
   }
 
@@ -1077,6 +1161,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   bool _handleBackPress() {
+    if (_isScrubbing) {
+      setState(() {
+        _isScrubbing = false;
+        _currentScrubKey = null;
+      });
+      if (_wasPlayingBeforeScrub) {
+        _player.play();
+        setState(() {
+          _showControls = false;
+        });
+        _playerFocusNode.requestFocus();
+      } else {
+        setState(() {
+          _showControls = true;
+        });
+        _playPauseFocusNode.requestFocus();
+      }
+      return true;
+    }
     if (_showSubtitles || _showEpisodes || _showStats || _showAudioTracks || _showSettings) {
       setState(() {
         _showSubtitles = false;
@@ -1087,11 +1190,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         _showControls = true;
       });
       _scheduleHideControls();
-      if (_player.state.playing) {
-        _playerFocusNode.requestFocus();
-      } else {
-        _playPauseFocusNode.requestFocus();
-      }
+      _playPauseFocusNode.requestFocus();
+      return true;
+    }
+    if (_showControls) {
+      // Controls visible with no panels — resume playback and hide overlay
+      _player.play();
+      _hideControlsTimer?.cancel();
+      setState(() => _showControls = false);
+      _playerFocusNode.requestFocus();
       return true;
     }
     return false;
@@ -1231,63 +1338,88 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       focusNode: _playerFocusNode,
       autofocus: true,
       onKeyEvent: (e) {
-        if (e is! KeyDownEvent) return;
-
         final primaryFocus = FocusManager.instance.primaryFocus;
         final isPlayerFocused = primaryFocus == _playerFocusNode || primaryFocus == null;
 
-        // Auto-show controls on D-pad navigation or OK buttons if they are currently hidden
-        if (!_showControls) {
-          if (e.logicalKey == LogicalKeyboardKey.arrowUp ||
-              e.logicalKey == LogicalKeyboardKey.arrowDown ||
-              e.logicalKey == LogicalKeyboardKey.arrowLeft ||
-              e.logicalKey == LogicalKeyboardKey.arrowRight ||
-              e.logicalKey == LogicalKeyboardKey.select ||
-              e.logicalKey == LogicalKeyboardKey.enter ||
-              e.logicalKey == LogicalKeyboardKey.numpadEnter) {
-            setState(() => _showControls = true);
-            _scheduleHideControls();
+        // 1. Handle D-pad Left/Right scrubbing/seeking in both states:
+        //    (Only if player background or play button is focused, meaning no settings panel has focus).
+        final isLeft = e.logicalKey == LogicalKeyboardKey.arrowLeft;
+        final isRight = e.logicalKey == LogicalKeyboardKey.arrowRight;
+        final canScrub = primaryFocus == _playerFocusNode || primaryFocus == _playPauseFocusNode || primaryFocus == null;
+        if ((isLeft || isRight) && canScrub) {
+          _handleDpadSeekKeyEvent(e, _player.state.duration);
+          return;
+        }
 
-            // Perform default arrow left/right seek or OK play/pause triggers
-            if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
-              final pos = _player.state.position;
-              _player.seek(pos - const Duration(seconds: 5));
-            } else if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
-              final pos = _player.state.position;
-              _player.seek(pos + const Duration(seconds: 5));
-            } else if (e.logicalKey == LogicalKeyboardKey.select ||
-                       e.logicalKey == LogicalKeyboardKey.enter ||
-                       e.logicalKey == LogicalKeyboardKey.numpadEnter) {
-              _player.playOrPause();
-            }
+        // We ignore other event types for non-scrubbing actions
+        if (e is! KeyDownEvent) return;
+
+        // 2. State 1: Media is Playing (Controls are Hidden)
+        if (!_showControls) {
+          if (e.logicalKey == LogicalKeyboardKey.arrowUp) {
+            // Pause, show controls, and focus top config bar
+            _player.pause();
+            setState(() {
+              _showControls = true;
+            });
+            _scheduleHideControls();
+            _topBarBackFocusNode.requestFocus();
             return;
+          }
+          if (e.logicalKey == LogicalKeyboardKey.arrowDown) {
+            // Temporarily show progress bar overlay for 3 seconds without pausing or shifting focus
+            setState(() {
+              _showControls = true;
+            });
+            _scheduleHideControls();
+            return;
+          }
+          if (e.logicalKey == LogicalKeyboardKey.select ||
+              e.logicalKey == LogicalKeyboardKey.enter ||
+              e.logicalKey == LogicalKeyboardKey.numpadEnter ||
+              e.logicalKey == LogicalKeyboardKey.space) {
+            // Pause, show controls, and focus center play button
+            _player.pause();
+            setState(() {
+              _showControls = true;
+            });
+            _scheduleHideControls();
+            _playPauseFocusNode.requestFocus();
+            return;
+          }
+        } else {
+          // 3. State 2: Media is Paused (Controls are Visible)
+          // If background has raw focus, handle Up/Down and OK keys
+          if (isPlayerFocused) {
+            if (e.logicalKey == LogicalKeyboardKey.arrowUp) {
+              _topBarBackFocusNode.requestFocus();
+              return;
+            }
+            if (e.logicalKey == LogicalKeyboardKey.arrowDown) {
+              _playPauseFocusNode.requestFocus();
+              return;
+            }
+            if (e.logicalKey == LogicalKeyboardKey.select ||
+                e.logicalKey == LogicalKeyboardKey.enter ||
+                e.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                e.logicalKey == LogicalKeyboardKey.space) {
+              _player.playOrPause();
+              _scheduleHideControls();
+              return;
+            }
           }
         }
 
+        // 4. Global fallback keys (Escape / Space / Skip Intro)
         if (e.logicalKey == LogicalKeyboardKey.escape) {
           if (!_handleBackPress()) {
             _exitPlayer();
           }
-        } else if (e.logicalKey == LogicalKeyboardKey.space ||
-                   e.logicalKey == LogicalKeyboardKey.select ||
-                   e.logicalKey == LogicalKeyboardKey.enter ||
-                   e.logicalKey == LogicalKeyboardKey.numpadEnter) {
-          if (!_showControls || isPlayerFocused) {
-            _player.playOrPause();
-            _scheduleHideControls();
-          }
+        } else if (e.logicalKey == LogicalKeyboardKey.space) {
+          _player.playOrPause();
+          _scheduleHideControls();
         } else if (e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
           if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
-        } else if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          if (isPlayerFocused || _player.state.playing) {
-            final pos = _player.state.position;
-            _player.seek(pos - const Duration(seconds: 5));
-          }
-        } else if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
-          if (isPlayerFocused || _player.state.playing) {
-            final pos = _player.state.position;
-            _player.seek(pos + const Duration(seconds: 5));
-          }
         }
       },
       child: Scaffold(
@@ -1782,111 +1914,137 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           // Top bar
           Positioned(
             top: 32, left: 20, right: 20,
-            child: Row(
-              children: [
-                HoverButton(
-                  onTap: _exitPlayer,
-                  backgroundColor: Colors.black54,
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 22),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(epName,
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis),
-                ),
-                const SizedBox(width: 16),
-                // Network stats icon
-                HoverButton(
-                  onTap: _openStatsPanel,
-                  backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: const Icon(LucideIcons.wifi, color: Colors.white, size: 20),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                HoverButton(
-                  onTap: _openSettingsPanel,
-                  backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: const Icon(LucideIcons.sliders, color: Colors.white, size: 20),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                HoverButton(
-                  onTap: _openSubtitlePanel,
-                  backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: const Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
-                  ),
-                ),
-                if (_audioTracks.length > 1) ...[
-                  const SizedBox(width: 16),
+            child: Focus(
+              onKeyEvent: (node, event) {
+                // Only intercept D-pad Down when the overlay is visible.
+                // When controls are hidden, let events bubble to the root KeyboardListener.
+                if (_showControls && event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                  _playPauseFocusNode.requestFocus();
+                  return KeyEventResult.handled;
+                }
+                return KeyEventResult.ignored;
+              },
+              child: Row(
+                children: [
                   HoverButton(
-                    onTap: _openAudioTrackPanel,
-                    backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
+                    focusNode: _topBarBackFocusNode,
+                    onTap: _exitPlayer,
+                    backgroundColor: Colors.black54,
                     child: Padding(
                       padding: const EdgeInsets.all(10),
-                      child: const Icon(LucideIcons.volume2, color: Colors.white, size: 20),
+                      child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 22),
                     ),
                   ),
-                ],
-                if (hasEpisodes) ...[
                   const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(epName,
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  const SizedBox(width: 16),
+                  // Network stats icon
                   HoverButton(
-                    onTap: _openEpisodePanel,
-                    backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
+                    onTap: _openStatsPanel,
+                    backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
                     child: Padding(
                       padding: const EdgeInsets.all(10),
-                      child: const Icon(LucideIcons.list, color: Colors.white, size: 20),
+                      child: const Icon(LucideIcons.wifi, color: Colors.white, size: 20),
                     ),
                   ),
+                  const SizedBox(width: 16),
+                  HoverButton(
+                    onTap: _openSettingsPanel,
+                    backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: const Icon(LucideIcons.sliders, color: Colors.white, size: 20),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  HoverButton(
+                    onTap: _openSubtitlePanel,
+                    backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: const Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
+                    ),
+                  ),
+                  if (_audioTracks.length > 1) ...[
+                    const SizedBox(width: 16),
+                    HoverButton(
+                      onTap: _openAudioTrackPanel,
+                      backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: const Icon(LucideIcons.volume2, color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ],
+                  if (hasEpisodes) ...[
+                    const SizedBox(width: 16),
+                    HoverButton(
+                      onTap: _openEpisodePanel,
+                      backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: const Icon(LucideIcons.list, color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
 
           // Center play/pause (hidden during buffering)
           if (!_isTorrentBuffering && !_player.state.buffering)
             Center(
-              child: StreamBuilder(
-                stream: _player.stream.playing,
-                builder: (context, snap) {
-                  final playing = snap.data ?? _player.state.playing;
-                  return HoverButton(
-                    focusNode: _playPauseFocusNode,
-                    onTap: () {
-                      _player.playOrPause();
-                      setState(() {});
-                    },
-                    backgroundColor: Colors.transparent,
-                    child: ClipOval(
-                      child: BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.all(28),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(_showControls ? 0.15 : 0.0),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withOpacity(0.2)),
-                          ),
-                          child: Icon(
-                            playing ? LucideIcons.pause : LucideIcons.play,
-                            color: Colors.white.withOpacity(0.9),
-                            size: 38,
+              child: Focus(
+                onKeyEvent: (node, event) {
+                  // Only intercept D-pad Up when the overlay is visible.
+                  // When controls are hidden, let events bubble to the root KeyboardListener.
+                  if (_showControls && event is KeyDownEvent) {
+                    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                      _topBarBackFocusNode.requestFocus();
+                      return KeyEventResult.handled;
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: StreamBuilder(
+                  stream: _player.stream.playing,
+                  builder: (context, snap) {
+                    final playing = snap.data ?? _player.state.playing;
+                    return HoverButton(
+                      focusNode: _playPauseFocusNode,
+                      onTap: () {
+                        _player.playOrPause();
+                        _scheduleHideControls();
+                        setState(() {});
+                      },
+                      backgroundColor: Colors.transparent,
+                      child: ClipOval(
+                        child: BackdropFilter(
+                          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.all(28),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(_showControls ? 0.15 : 0.0),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white.withOpacity(0.2)),
+                            ),
+                            child: Icon(
+                              playing ? LucideIcons.pause : LucideIcons.play,
+                              color: Colors.white.withOpacity(0.9),
+                              size: 38,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
 
@@ -1898,6 +2056,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               child: Row(
                 children: [
                   HoverButton(
+                    focusNode: FocusNode(canRequestFocus: false),
                     onTap: _currentEpIndex > 0
                         ? () => _playEpisode(_currentEpIndex - 1)
                         : () {},
@@ -1917,6 +2076,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   ),
                   const SizedBox(width: 8),
                   HoverButton(
+                    focusNode: FocusNode(canRequestFocus: false),
                     onTap: _currentEpIndex < _effectiveEpisodeCount - 1
                         ? () => _playEpisode(_currentEpIndex + 1)
                         : () {},
@@ -1944,6 +2104,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             bottom: 16,
             right: 24,
             child: HoverButton(
+              focusNode: FocusNode(canRequestFocus: false),
               onTap: _toggleFullScreen,
               backgroundColor: Colors.black54,
               child: Padding(
@@ -1972,12 +2133,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   final progress = dur.inMilliseconds > 0
                       ? pos.inMilliseconds / dur.inMilliseconds
                       : 0.0;
+                  final displayPos = _isScrubbing
+                      ? Duration(milliseconds: (_scrubValue * dur.inMilliseconds).round())
+                      : (_isSeeking
+                          ? Duration(milliseconds: (_seekValue * dur.inMilliseconds).round())
+                          : pos);
                   return Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(_fmt(pos),
+                          Text(_fmt(displayPos),
                               style: const TextStyle(
                                   color: Colors.white70, fontSize: 13)),
                           Text(_fmt(dur),
@@ -1998,9 +2164,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                               const RoundSliderOverlayShape(overlayRadius: 14),
                         ),
                         child: Slider(
-                          value: _isSeeking
-                              ? _seekValue
-                              : progress.clamp(0.0, 1.0),
+                          value: _isScrubbing
+                              ? _scrubValue
+                              : (_isSeeking
+                                  ? _seekValue
+                                  : progress.clamp(0.0, 1.0)),
                           onChangeStart: (v) {
                             _isSeeking = true;
                             _seekValue = v;
@@ -2020,6 +2188,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             }
                             setState(() {});
                           },
+                          focusNode: FocusNode(canRequestFocus: false),
                         ),
                       ),
                     ],
@@ -2108,11 +2277,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             _loadedSrtContent = null;
                             _showSubtitles = false;
                           });
-                          if (_player.state.playing) {
-                            _playerFocusNode.requestFocus();
-                          } else {
-                            _playPauseFocusNode.requestFocus();
-                          }
                         } else {
                           _selectSubtitle(_availableSubs[i - 1]);
                         }

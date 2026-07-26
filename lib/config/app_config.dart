@@ -13,6 +13,8 @@ const String openSubtitlesApiKey = '';
 const String torrentioBaseUrl = 'https://torrentio.strem.fun';
 const String thepiratebayBaseUrl = 'https://thepiratebay-plus.strem.fun';
 const String meteorBaseUrl = 'https://meteorfortheweebs.midnightignite.me';
+const String knightcrawlerBaseUrl = 'https://knightcrawler.elfhosted.com';
+const String mediafusionBaseUrl = 'https://mediafusion.elfhosted.com';
 
 // TorBox configuration
 // If you want to use the TorBox debrid service, paste your TorBox API key here.

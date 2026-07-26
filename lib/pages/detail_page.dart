@@ -996,34 +996,32 @@ class _DetailPageState extends State<DetailPage> {
               // Quality selector (dropdown if multiple, label if single)
               if (_availableQualities.isNotEmpty)
                 _availableQualities.length > 1
-                    ? Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.cardDark,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: DropdownButton<String>(
-                          value: _selectedQuality,
-                          dropdownColor: AppTheme.cardDark,
-                          underline: const SizedBox(),
-                          isDense: true,
-                          items: _availableQualities
-                              .map((q) => DropdownMenuItem(
-                                    value: q,
-                                    child: Text(
-                                      q,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        decoration: TextDecoration.none,
+                    ? FocusableWrapper(
+                        isDropdown: true,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          child: DropdownButton<String>(
+                            value: _selectedQuality,
+                            dropdownColor: AppTheme.cardDark,
+                            underline: const SizedBox(),
+                            isDense: true,
+                            items: _availableQualities
+                                .map((q) => DropdownMenuItem(
+                                      value: q,
+                                      child: Text(
+                                        q,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          decoration: TextDecoration.none,
+                                        ),
                                       ),
-                                    ),
-                                  ))
-                              .toList(),
-                          onChanged: (v) {
-                            if (v != null) setState(() => _selectedQuality = v);
-                          },
+                                    ))
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setState(() => _selectedQuality = v);
+                            },
+                          ),
                         ),
                       )
                     : Container(
@@ -1046,34 +1044,32 @@ class _DetailPageState extends State<DetailPage> {
               // Encoder/source selector (dropdown if multiple, label if single)
               if (_availableEncoders.isNotEmpty && _selectedEncoder.isNotEmpty)
                 _availableEncoders.length > 1
-                    ? Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.cardDark,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: DropdownButton<String>(
-                          value: _selectedEncoder,
-                          dropdownColor: AppTheme.cardDark,
-                          underline: const SizedBox(),
-                          isDense: true,
-                          items: _availableEncoders
-                              .map((e) => DropdownMenuItem(
-                                    value: e,
-                                    child: Text(
-                                      e,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        decoration: TextDecoration.none,
+                    ? FocusableWrapper(
+                        isDropdown: true,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          child: DropdownButton<String>(
+                            value: _selectedEncoder,
+                            dropdownColor: AppTheme.cardDark,
+                            underline: const SizedBox(),
+                            isDense: true,
+                            items: _availableEncoders
+                                .map((e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(
+                                        e,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          decoration: TextDecoration.none,
+                                        ),
                                       ),
-                                    ),
-                                  ))
-                              .toList(),
-                          onChanged: (v) {
-                            if (v != null) setState(() => _selectedEncoder = v);
-                          },
+                                    ))
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setState(() => _selectedEncoder = v);
+                            },
+                          ),
                         ),
                       )
                     : Container(
@@ -1094,14 +1090,11 @@ class _DetailPageState extends State<DetailPage> {
                       ),
               if (!isMovie) ...[
                 const SizedBox(width: 8),
-                GestureDetector(
+                FocusableWrapper(
                   onTap: () => setState(() => _reverseEpisodes = !_reverseEpisodes),
-                  child: Container(
+                  borderRadius: 6,
+                  child: Padding(
                     padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: _reverseEpisodes ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
                     child: Icon(
                       LucideIcons.arrowDownUp,
                       color: _reverseEpisodes ? AppTheme.accent : AppTheme.textSecondary,
@@ -2012,14 +2005,11 @@ class _DetailPageState extends State<DetailPage> {
               ],
               const Spacer(),
               // Reverse order button
-              GestureDetector(
+              FocusableWrapper(
                 onTap: () => setState(() => _reverseEpisodes = !_reverseEpisodes),
-                child: Container(
+                borderRadius: 6,
+                child: Padding(
                   padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: _reverseEpisodes ? AppTheme.accent.withOpacity(0.2) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
                   child: Icon(
                     LucideIcons.arrowDownUp,
                     color: _reverseEpisodes ? AppTheme.accent : AppTheme.textSecondary,
@@ -2255,6 +2245,65 @@ class _DetailPageState extends State<DetailPage> {
         LucideIcons.play,
         color: AppTheme.textSecondary,
         size: 24,
+      ),
+    );
+  }
+}
+
+class FocusableWrapper extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final double borderRadius;
+  final bool isDropdown;
+
+  const FocusableWrapper({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.borderRadius = 8,
+    this.isDropdown = false,
+  });
+
+  @override
+  State<FocusableWrapper> createState() => _FocusableWrapperState();
+}
+
+class _FocusableWrapperState extends State<FocusableWrapper> {
+  bool _isFocusedOrHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return FocusableActionDetector(
+      onShowFocusHighlight: (val) => setState(() => _isFocusedOrHovered = val),
+      onShowHoverHighlight: (val) => setState(() => _isFocusedOrHovered = val),
+      actions: widget.onTap != null
+          ? {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (intent) {
+                  widget.onTap!();
+                  return null;
+                },
+              ),
+            }
+          : null,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          decoration: BoxDecoration(
+            color: _isFocusedOrHovered
+                ? AppTheme.accent.withOpacity(0.15)
+                : (widget.isDropdown ? AppTheme.cardDark : Colors.transparent),
+            borderRadius: BorderRadius.circular(widget.borderRadius),
+            border: Border.all(
+              color: _isFocusedOrHovered
+                  ? AppTheme.accent
+                  : (widget.isDropdown ? Colors.white24 : Colors.transparent),
+              width: 1.5,
+            ),
+          ),
+          child: widget.child,
+        ),
       ),
     );
   }

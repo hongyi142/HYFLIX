@@ -34,18 +34,12 @@ class ResponsiveLayout {
   bool get isTVAspect => !isPhone && (size.width / size.height) >= 1.7;
 
   double get heroHeight {
-    if (isPhone) return 500;
-    if (isTablet) return 620;
-
-    // On TV screens (16:9 wide-screen), fill the entire viewport height.
-    // This matches the Netflix TV UX where the hero is full-screen and the
-    // action buttons are slightly cut off, hinting scrollable shelf content below.
+    // Only apply the full-screen hero height changes to Android TV / TV Aspect screens.
     if (isTVAspect) return size.height;
 
-    // On regular desktop monitors, use a comfortable fraction based on aspect ratio.
-    final ar = size.width / size.height;
-    final fraction = (0.52 + (1.78 - ar.clamp(1.5, 2.0)) * 0.22).clamp(0.55, 0.70);
-    return math.max(360.0, math.min(size.height * fraction, 680.0));
+    if (isPhone) return 380;
+    if (isTablet) return 430;
+    return 480; // Standard desktop/monitor
   }
 
   double get heroContentWidth =>

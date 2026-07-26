@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../models/torrent_stream.dart';
+import 'torbox_service.dart';
 
 export '../models/torrent_stream.dart';
 
@@ -53,54 +54,20 @@ class TorrentService {
         path = '/stream/movie/$imdbId.json';
       }
 
-      final baseUrl = getEffectiveTorrentioUrl();
-      final uri = Uri.parse('$baseUrl$path');
-      debugPrint('[TorrentService:Web] Querying: $uri');
-      
-      final res = await http.get(uri).timeout(const Duration(seconds: 15));
-      if (res.statusCode != 200) return [];
+      final addonBaseUrls = [
+        getEffectiveTorrentioUrl(),
+        thepiratebayBaseUrl,
+        meteorBaseUrl,
+      ];
 
-      final body = json.decode(res.body) as Map<String, dynamic>;
-      final streams = body['streams'] as List<dynamic>? ?? [];
+      final isTorBoxActive = TorBoxService().isConfigured;
+
+      final futures = addonBaseUrls.map((base) => _fetchFromAddonWeb(base, path, isTorBoxActive));
+      final allResults = await Future.wait(futures);
 
       final results = <TorrentStream>[];
-      for (final s in streams) {
-        final map = s as Map<String, dynamic>;
-        final url = map['url'] as String? ?? '';
-        
-        // Web ONLY supports debrid direct play links (where url is present)
-        if (url.isEmpty) continue;
-
-        String infoHash = map['infoHash'] as String? ?? '';
-        if (infoHash.isEmpty) {
-          infoHash = url.hashCode.toRadixString(16).padLeft(40, '0');
-        }
-
-        final title = map['title'] as String? ?? '';
-        final name = map['name'] as String? ?? '';
-        final filename = (map['behaviorHints'] as Map<String, dynamic>?)?['filename'] as String? ?? '';
-        final fileIdx = map['fileIdx'] as int? ?? 0;
-
-        final fullTitle = '$title $name $filename';
-        final quality = _extractQuality(fullTitle);
-        final isHDR = fullTitle.toLowerCase().contains('hdr') ||
-            fullTitle.toLowerCase().contains('dolby vision') ||
-            fullTitle.toLowerCase().contains('dv');
-        final seeders = _extractSeeders(title);
-        final size = _extractSize(title);
-
-        results.add(TorrentStream(
-          infoHash: infoHash,
-          url: url,
-          title: title,
-          quality: quality,
-          seeders: seeders,
-          size: size,
-          fileIdx: fileIdx,
-          isHDR: isHDR,
-          filename: filename,
-          source: _addonName(baseUrl),
-        ));
+      for (final streams in allResults) {
+        results.addAll(streams);
       }
 
       results.sort((a, b) {
@@ -136,9 +103,70 @@ class TorrentService {
     }
   }
 
+  Future<List<TorrentStream>> _fetchFromAddonWeb(
+      String baseUrl, String path, bool isTorBoxActive) async {
+    try {
+      final uri = Uri.parse('$baseUrl$path');
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return [];
+
+      final body = json.decode(res.body) as Map<String, dynamic>;
+      final streams = body['streams'] as List<dynamic>? ?? [];
+
+      final results = <TorrentStream>[];
+      for (final s in streams) {
+        final map = s as Map<String, dynamic>;
+        final url = map['url'] as String? ?? '';
+        String infoHash = map['infoHash'] as String? ?? '';
+
+        if (infoHash.isEmpty && url.isEmpty) continue;
+        if (!isTorBoxActive && url.isEmpty) continue; // Web requires debrid if TorBox is disabled
+
+        if (infoHash.isEmpty && url.isNotEmpty) {
+          infoHash = url.hashCode.toRadixString(16).padLeft(40, '0');
+        }
+
+        final title = map['title'] as String? ?? '';
+        final name = map['name'] as String? ?? '';
+        final filename = (map['behaviorHints'] as Map<String, dynamic>?)?['filename'] as String? ?? '';
+        final fileIdx = map['fileIdx'] as int? ?? 0;
+
+        final fullTitle = '$title $name $filename';
+        final quality = _extractQuality(fullTitle);
+        final isHDR = fullTitle.toLowerCase().contains('hdr') ||
+            fullTitle.toLowerCase().contains('dolby vision') ||
+            fullTitle.toLowerCase().contains('dv');
+        final seeders = _extractSeeders(title);
+        final size = _extractSize(title);
+
+        results.add(TorrentStream(
+          infoHash: infoHash,
+          url: url.isNotEmpty ? url : null,
+          title: title,
+          quality: quality,
+          seeders: seeders,
+          size: size,
+          fileIdx: fileIdx,
+          isHDR: isHDR,
+          filename: filename,
+          source: _addonName(baseUrl),
+        ));
+      }
+      return results;
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<(String, int)?> startStream(TorrentStream stream) async {
     if (stream.url != null && stream.url!.isNotEmpty) {
       return (stream.url!, 0);
+    }
+    if (TorBoxService().isConfigured) {
+      final resolved = await TorBoxService().resolveStream(stream);
+      if (resolved != null && resolved.isNotEmpty) {
+        return (resolved, 0);
+      }
     }
     return null;
   }

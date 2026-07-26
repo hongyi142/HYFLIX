@@ -722,32 +722,24 @@ class ApiService {
 
   static const List<VideoSource> sources = [
     VideoSource(
-      name: 'HHZY (Luxury)',
-      baseUrl: 'https://hhzyapi.com/api.php/provide/vod/',
+      name: 'JSZY (Jisu)',
+      baseUrl: 'https://jszyapi.com/api.php/provide/vod/',
     ),
     VideoSource(
-      name: '1080ZYK',
-      baseUrl: 'https://api.1080zyku.com/inc/apijson.php/provide/vod/',
-    ),
-    VideoSource(
-      name: 'Suoni (Sony)',
-      baseUrl: 'https://suoniapi.com/api.php/provide/vod/',
-    ),
-    VideoSource(
-      name: 'Hong Niu',
-      baseUrl: 'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/',
+      name: 'BaoFeng (暴风)',
+      baseUrl: 'https://bfzyapi.com/api.php/provide/vod/',
     ),
     VideoSource(
       name: 'BDZY (Baidu)',
       baseUrl: 'https://api.apibdzy.com/api.php/provide/vod/',
     ),
     VideoSource(
-      name: 'JYZY (Golden Eagle)',
-      baseUrl: 'https://jyzyapi.com/api.php/provide/vod/',
+      name: 'HHZY (Luxury)',
+      baseUrl: 'https://hhzyapi.com/api.php/provide/vod/',
     ),
     VideoSource(
-      name: 'JSZY (Jisu)',
-      baseUrl: 'https://jszyapi.com/api.php/provide/vod/',
+      name: 'Wolong (卧龙)',
+      baseUrl: 'https://collect.wolongzyw.com/api.php/provide/vod/',
     ),
   ];
 

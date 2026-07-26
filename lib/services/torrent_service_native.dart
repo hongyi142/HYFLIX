@@ -7,6 +7,7 @@ import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/torrent_stream.dart';
+import 'torbox_service.dart';
 
 export '../models/torrent_stream.dart';
 
@@ -119,6 +120,8 @@ class TorrentService {
         getEffectiveTorrentioUrl(),
         thepiratebayBaseUrl,
         meteorBaseUrl,
+        knightcrawlerBaseUrl,
+        mediafusionBaseUrl,
       ];
 
       // Query all addons in parallel
@@ -130,6 +133,7 @@ class TorrentService {
       final byKey = <String, TorrentStream>{};
       for (final streams in allResults) {
         for (final stream in streams) {
+
           final key = stream.infoHash.isNotEmpty ? stream.infoHash : (stream.url ?? '');
           if (key.isEmpty) continue;
 
@@ -239,11 +243,29 @@ class TorrentService {
     }
     if (baseUrl.contains('piratebay')) return 'TPB+';
     if (baseUrl.contains('meteor')) return 'Meteor';
+    if (baseUrl.contains('knightcrawler')) return 'KnightCrawler';
+    if (baseUrl.contains('mediafusion')) return 'MediaFusion';
     return baseUrl;
   }
 
   /// Start streaming a torrent. Returns the local HTTP URL and stream ID.
   Future<(String url, int streamId)?> startStream(TorrentStream stream) async {
+    // Check if we have a direct debrid URL already resolved
+    if (stream.url != null && stream.url!.isNotEmpty) {
+      return (stream.url!, 0);
+    }
+
+    // If TorBox is configured, attempt on-demand TorBox API resolution
+    if (TorBoxService().isConfigured) {
+      debugPrint('[TorrentService] TorBox is active. Resolving stream via TorBox API...');
+      final torboxUrl = await TorBoxService().resolveStream(stream);
+      if (torboxUrl != null && torboxUrl.isNotEmpty) {
+        debugPrint('[TorrentService] TorBox resolution successful: $torboxUrl');
+        return (torboxUrl, 0);
+      }
+      debugPrint('[TorrentService] TorBox resolution failed. Falling back to native P2P...');
+    }
+
     await _ensureInit();
     if (!_initialized) return null;
 

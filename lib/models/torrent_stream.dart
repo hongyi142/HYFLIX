@@ -42,4 +42,29 @@ class TorrentStream {
       '&tr=https://tracker.zhuqiy.com:443/announce'
       '&tr=https://tracker.moeking.me:443/announce'
       '&tr=https://tracker.nekomi.cn:443/announce';
+  TorrentStream copyWith({
+    String? infoHash,
+    String? url,
+    String? title,
+    String? quality,
+    int? seeders,
+    String? size,
+    int? fileIdx,
+    bool? isHDR,
+    String? filename,
+    String? source,
+  }) {
+    return TorrentStream(
+      infoHash: infoHash ?? this.infoHash,
+      url: url ?? this.url,
+      title: title ?? this.title,
+      quality: quality ?? this.quality,
+      seeders: seeders ?? this.seeders,
+      size: size ?? this.size,
+      fileIdx: fileIdx ?? this.fileIdx,
+      isHDR: isHDR ?? this.isHDR,
+      filename: filename ?? this.filename,
+      source: source ?? this.source,
+    );
+  }
 }
