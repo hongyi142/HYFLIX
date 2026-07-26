@@ -183,8 +183,19 @@ class TorrentService {
       final res = await http.get(uri).timeout(const Duration(seconds: 15));
 
       if (res.statusCode != 200) return [];
+      final trimmedBody = res.body.trim();
+      if (trimmedBody.isEmpty || trimmedBody.startsWith('<')) {
+        return [];
+      }
 
-      final body = json.decode(res.body) as Map<String, dynamic>;
+      final Map<String, dynamic> body;
+      try {
+        final decoded = json.decode(res.body);
+        if (decoded is! Map<String, dynamic>) return [];
+        body = decoded;
+      } catch (e) {
+        return [];
+      }
       final streams = body['streams'] as List<dynamic>? ?? [];
 
       final results = <TorrentStream>[];
@@ -263,7 +274,8 @@ class TorrentService {
         debugPrint('[TorrentService] TorBox resolution successful: $torboxUrl');
         return (torboxUrl, 0);
       }
-      debugPrint('[TorrentService] TorBox resolution failed. Falling back to native P2P...');
+      debugPrint('[TorrentService] TorBox resolution failed. Skipping P2P fallback because TorBox is active.');
+      return null;
     }
 
     await _ensureInit();

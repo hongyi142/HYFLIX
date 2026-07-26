@@ -70,5 +70,15 @@ void main() {
         equals('[CoffeePrison] AGENT KIM REACTIVATED S01E04 NFX WEB'),
       );
     });
+
+    test('Classifies match for unicode-styled release titles', () {
+      final normalized = SubtitleService.normalizeUnicodeAlphanumeric(
+        '[𝗖𝗼𝗳𝗳𝗲𝗲𝗣𝗿𝗶𝘀𝗼𝗻] 𝗔𝗚𝗘𝗡𝗧 𝗞𝗜𝗠 𝗥𝗘𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗 𝗦𝟬𝟭𝗘𝟬𝟵 𝗡𝗙𝗫 𝗪𝗘𝗕.zip',
+      );
+      expect(
+        SubtitleService.classifyMatch(normalized, 1, 9),
+        equals(SubtitleMatchType.exactEpisode),
+      );
+    });
   });
 }

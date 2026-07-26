@@ -110,12 +110,14 @@ class TorBoxService {
   /// Send magnet link to POST /v1/api/torrents/createtorrent
   Future<int?> _addTorrent(String magnetUri) async {
     final url = Uri.parse('$_apiBase/torrents/createtorrent');
-    final req = http.MultipartRequest('POST', url)
-      ..headers['Authorization'] = 'Bearer $torboxApiKey'
-      ..fields['magnet'] = magnetUri;
-
-    final streamedResponse = await req.send().timeout(const Duration(seconds: 15));
-    final response = await http.Response.fromStream(streamedResponse);
+    final response = await http.post(
+      url,
+      headers: {
+        'Authorization': 'Bearer $torboxApiKey',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: {'magnet': magnetUri},
+    ).timeout(const Duration(seconds: 15));
 
     if (response.statusCode != 200 && response.statusCode != 201) {
       debugPrint('[TorBoxService] createtorrent HTTP error ${response.statusCode}: ${response.body}');

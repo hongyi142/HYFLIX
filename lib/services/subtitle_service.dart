@@ -89,6 +89,14 @@ class SubtitleService {
     return null;
   }
 
+  static String? _extractEpisodeFromQuery(String text) {
+    final sEpMatch = RegExp(r'[Ss]\d{1,2}[Ee](\d{1,3})', caseSensitive: false).firstMatch(text);
+    if (sEpMatch != null) return int.tryParse(sEpMatch.group(1)!)?.toString();
+    final epMatch = RegExp(r'\b[Ee](\d{1,3})\b', caseSensitive: false).firstMatch(text);
+    if (epMatch != null) return int.tryParse(epMatch.group(1)!)?.toString();
+    return _extractEpisodeNumber(text);
+  }
+
   // ─── SubDL search (with pagination) ────────────────────────────
   static Future<List<SubtitleItem>> _searchSubDL({
     required String query,
@@ -382,9 +390,9 @@ class SubtitleService {
     bool isTvShow = false,
   }) async {
     final effectiveSeason = seasonNumber ??
-        (episodeName != null ? _extractSeasonFromEpisodeName(episodeName) : null);
+        (episodeName != null ? _extractSeasonFromEpisodeName(episodeName) : _extractSeasonFromEpisodeName(query));
     final episodeNum = episodeNumber?.toString() ??
-        (episodeName != null ? _extractEpisodeNumber(episodeName) : null);
+        (episodeName != null ? _extractEpisodeNumber(episodeName) : _extractEpisodeFromQuery(query));
     print('[SubtitleService] searchSubtitles entry: query="$query", tmdbId=$tmdbId, season=$seasonNumber, episode=$episodeNumber, effectiveSeason=$effectiveSeason, episodeNum=$episodeNum');
     final cacheKey = '${tmdbId ?? query}_s${effectiveSeason ?? ''}';
     if (_cache.containsKey(cacheKey)) return _cache[cacheKey]!;

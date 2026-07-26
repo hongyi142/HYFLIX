@@ -1807,7 +1807,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 },
               ),
             ),
-            if (isTorrent && widget.torrentStream!.url != null) ...[
+            if (isTorrent && (widget.torrentStream!.url != null || _torrentUrl != null || (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY'))) ...[
               const SizedBox(height: 8),
               _statRow('Type', 'TorBox Direct Play', color: Colors.cyanAccent),
               const SizedBox(height: 8),
