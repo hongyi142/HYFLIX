@@ -384,10 +384,10 @@ class _DetailPageState extends State<DetailPage> {
     final qualityFiltered = streams.where((s) => s.quality == _selectedQuality).toList();
     if (qualityFiltered.isNotEmpty) {
       qualityFiltered.sort((a, b) {
-        final isDebridA = a.url != null ? 1 : 0;
-        final isDebridB = b.url != null ? 1 : 0;
-        if (isDebridA != isDebridB) {
-          return isDebridB.compareTo(isDebridA); // Prioritize Debrid (1) over P2P (0)
+        final isTorBoxReadyA = (a.url != null || a.isTorBoxCached) ? 1 : 0;
+        final isTorBoxReadyB = (b.url != null || b.isTorBoxCached) ? 1 : 0;
+        if (isTorBoxReadyA != isTorBoxReadyB) {
+          return isTorBoxReadyB.compareTo(isTorBoxReadyA); // Prioritize TorBox direct/cached (1) over uncached (0)
         }
         if (kIsWeb) {
           final titleA = '${a.title} ${a.filename}'.toLowerCase();
@@ -414,10 +414,10 @@ class _DetailPageState extends State<DetailPage> {
     // Fallback: best available
     if (streams.isNotEmpty) {
       streams.sort((a, b) {
-        final isDebridA = a.url != null ? 1 : 0;
-        final isDebridB = b.url != null ? 1 : 0;
-        if (isDebridA != isDebridB) {
-          return isDebridB.compareTo(isDebridA); // Prioritize Debrid (1) over P2P (0)
+        final isTorBoxReadyA = (a.url != null || a.isTorBoxCached) ? 1 : 0;
+        final isTorBoxReadyB = (b.url != null || b.isTorBoxCached) ? 1 : 0;
+        if (isTorBoxReadyA != isTorBoxReadyB) {
+          return isTorBoxReadyB.compareTo(isTorBoxReadyA); // Prioritize TorBox direct/cached (1) over uncached (0)
         }
         if (kIsWeb) {
           final titleA = '${a.title} ${a.filename}'.toLowerCase();

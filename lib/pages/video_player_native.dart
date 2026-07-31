@@ -415,16 +415,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (Platform.isAndroid) {
         // Enable hardware decoding via Android MediaCodec
         await native.setProperty('hwdec', 'mediacodec');
-        await native.setProperty('vd-lavc-dr', 'yes');
-        await native.setProperty('demuxer-max-bytes', '200000000'); // 200MB cache
-        await native.setProperty('demuxer-max-back-bytes', '50000000'); // 50MB back buffer
       } else {
         // Enable GPU hardware decoding on Windows / macOS / Linux
         await native.setProperty('hwdec', 'auto-safe');
-        await native.setProperty('vd-lavc-dr', 'yes');
-        await native.setProperty('demuxer-max-bytes', '200000000'); // 200MB cache
-        await native.setProperty('demuxer-max-back-bytes', '50000000'); // 50MB back buffer
       }
+      await native.setProperty('vd-lavc-dr', 'yes');
+
+      // Expand demuxer cache to 500MB max bytes and 100MB back buffer
+      await native.setProperty('demuxer-max-bytes', '500000000'); // 500MB cache
+      await native.setProperty('demuxer-max-back-bytes', '100000000'); // 100MB back buffer
+      await native.setProperty('demuxer-readahead-secs', '120'); // Prefetch up to 120s
+
+      // Prevent constant true/false buffering oscillation on HLS / slow CDNs:
+      // Require MPV to accumulate at least 3 seconds of buffer before unpausing
+      await native.setProperty('cache-pause', 'yes');
+      await native.setProperty('cache-pause-wait', '3');
+      await native.setProperty('demuxer-hysteresis-secs', '10');
+
+      // Increase stream buffer chunk size for network sockets
+      await native.setProperty('stream-buffer-size', '4194304'); // 4MB socket buffer
     } catch (e) {
       debugPrint('[VideoPlayer] Error optimizing native mpv performance: $e');
     }

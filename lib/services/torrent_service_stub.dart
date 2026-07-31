@@ -58,6 +58,8 @@ class TorrentService {
         getEffectiveTorrentioUrl(),
         thepiratebayBaseUrl,
         meteorBaseUrl,
+        knightcrawlerBaseUrl,
+        mediafusionBaseUrl,
       ];
 
       final isTorBoxActive = TorBoxService().isConfigured;
@@ -65,15 +67,44 @@ class TorrentService {
       final futures = addonBaseUrls.map((base) => _fetchFromAddonWeb(base, path, isTorBoxActive));
       final allResults = await Future.wait(futures);
 
-      final results = <TorrentStream>[];
+      List<TorrentStream> results = [];
       for (final streams in allResults) {
         results.addAll(streams);
+      }
+
+      if (isTorBoxActive) {
+        final rawHashes = results
+            .where((s) => s.url == null && s.infoHash.isNotEmpty)
+            .map((s) => s.infoHash)
+            .toList();
+
+        final cachedSet = await TorBoxService().checkCachedHashes(rawHashes);
+
+        results = results.map((stream) {
+          final isCached = stream.url != null || cachedSet.contains(stream.infoHash.toLowerCase());
+          String updatedSource = stream.source;
+          if (stream.url == null && updatedSource.isNotEmpty) {
+            updatedSource = isCached
+                ? '$updatedSource (TorBox Instant)'
+                : '$updatedSource (TorBox Cloud)';
+          }
+          return stream.copyWith(
+            isTorBoxCached: isCached,
+            source: updatedSource,
+          );
+        }).toList();
       }
 
       results.sort((a, b) {
         final qA = _qualityRank(a.quality);
         final qB = _qualityRank(b.quality);
         if (qA != qB) return qA.compareTo(qB);
+
+        final isTorBoxReadyA = (a.url != null || a.isTorBoxCached) ? 1 : 0;
+        final isTorBoxReadyB = (b.url != null || b.isTorBoxCached) ? 1 : 0;
+        if (isTorBoxReadyA != isTorBoxReadyB) {
+          return isTorBoxReadyB.compareTo(isTorBoxReadyA);
+        }
 
         // Prioritize web-compatible formats (H.264 MP4/WebM) over unsupported browser formats (MKV/HEVC/10bit)
         final titleA = '${a.title} ${a.filename}'.toLowerCase();

@@ -147,17 +147,42 @@ class TorrentService {
         }
       }
 
-      final results = byKey.values.toList();
+      List<TorrentStream> results = byKey.values.toList();
+
+      // Check TorBox cache status for raw streams if TorBox is configured
+      if (TorBoxService().isConfigured) {
+        final rawHashes = results
+            .where((s) => s.url == null && s.infoHash.isNotEmpty)
+            .map((s) => s.infoHash)
+            .toList();
+
+        final cachedSet = await TorBoxService().checkCachedHashes(rawHashes);
+
+        results = results.map((stream) {
+          final isCached = stream.url != null || cachedSet.contains(stream.infoHash.toLowerCase());
+          String updatedSource = stream.source;
+          if (stream.url == null && updatedSource.isNotEmpty) {
+            updatedSource = isCached
+                ? '$updatedSource (TorBox Instant)'
+                : '$updatedSource (TorBox Cloud)';
+          }
+          return stream.copyWith(
+            isTorBoxCached: isCached,
+            source: updatedSource,
+          );
+        }).toList();
+      }
+
       results.sort((a, b) {
         final qA = _qualityRank(a.quality);
         final qB = _qualityRank(b.quality);
         if (qA != qB) return qA.compareTo(qB);
         
-        // Prioritize debrid streams (url != null) over P2P streams
-        final isDebridA = a.url != null ? 1 : 0;
-        final isDebridB = b.url != null ? 1 : 0;
-        if (isDebridA != isDebridB) {
-          return isDebridB.compareTo(isDebridA); // 1 (debrid) comes before 0 (P2P)
+        // Prioritize TorBox direct/cached streams over uncached streams
+        final isTorBoxReadyA = (a.url != null || a.isTorBoxCached) ? 1 : 0;
+        final isTorBoxReadyB = (b.url != null || b.isTorBoxCached) ? 1 : 0;
+        if (isTorBoxReadyA != isTorBoxReadyB) {
+          return isTorBoxReadyB.compareTo(isTorBoxReadyA);
         }
 
         return b.seeders.compareTo(a.seeders);

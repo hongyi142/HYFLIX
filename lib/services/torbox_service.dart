@@ -23,8 +23,38 @@ class TorBoxService {
   Future<Set<String>> checkCachedHashes(List<String> hashes) async {
     if (!isConfigured || hashes.isEmpty) return {};
 
+    final cleanHashes = hashes
+        .where((h) => h.isNotEmpty)
+        .map((h) => h.toLowerCase())
+        .toSet()
+        .toList();
+    if (cleanHashes.isEmpty) return {};
+
+    final cachedSet = <String>{};
+    final batchFutures = <Future<Set<String>>>[];
+
+    for (int i = 0; i < cleanHashes.length; i += 20) {
+      final end = (i + 20 < cleanHashes.length) ? i + 20 : cleanHashes.length;
+      final batch = cleanHashes.sublist(i, end);
+      batchFutures.add(_checkCachedBatch(batch));
+    }
+
     try {
-      final queryHash = hashes.take(20).join(',');
+      final results = await Future.wait(batchFutures);
+      for (final res in results) {
+        cachedSet.addAll(res);
+      }
+    } catch (e) {
+      debugPrint('[TorBoxService] checkCachedHashes error: $e');
+    }
+
+    return cachedSet;
+  }
+
+  Future<Set<String>> _checkCachedBatch(List<String> batch) async {
+    final cachedSet = <String>{};
+    try {
+      final queryHash = batch.join(',');
       final url = Uri.parse('$_apiBase/torrents/checkcached?hash=$queryHash');
       final res = await http.get(url, headers: {
         'Authorization': 'Bearer $torboxApiKey',
@@ -34,7 +64,6 @@ class TorBoxService {
         final body = json.decode(res.body) as Map<String, dynamic>;
         if (body['success'] == true && body['data'] != null) {
           final data = body['data'];
-          final cachedSet = <String>{};
           if (data is Map<String, dynamic>) {
             data.forEach((hash, value) {
               if (value != null && value != false) {
@@ -48,13 +77,12 @@ class TorBoxService {
               }
             }
           }
-          return cachedSet;
         }
       }
     } catch (e) {
-      debugPrint('[TorBoxService] checkcached failed: $e');
+      debugPrint('[TorBoxService] _checkCachedBatch failed: $e');
     }
-    return {};
+    return cachedSet;
   }
 
   /// Resolve a [TorrentStream] (with magnetUri/infoHash) into a direct HTTPS streaming URL.

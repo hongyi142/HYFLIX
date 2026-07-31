@@ -9,6 +9,7 @@ class TorrentStream {
   final bool isHDR;
   final String filename;
   final String source;
+  final bool isTorBoxCached;
 
   const TorrentStream({
     required this.infoHash,
@@ -21,6 +22,7 @@ class TorrentStream {
     required this.isHDR,
     required this.filename,
     this.source = '',
+    this.isTorBoxCached = false,
   });
 
   String get magnetUri =>
@@ -53,6 +55,7 @@ class TorrentStream {
     bool? isHDR,
     String? filename,
     String? source,
+    bool? isTorBoxCached,
   }) {
     return TorrentStream(
       infoHash: infoHash ?? this.infoHash,
@@ -65,6 +68,7 @@ class TorrentStream {
       isHDR: isHDR ?? this.isHDR,
       filename: filename ?? this.filename,
       source: source ?? this.source,
+      isTorBoxCached: isTorBoxCached ?? this.isTorBoxCached,
     );
   }
 }
