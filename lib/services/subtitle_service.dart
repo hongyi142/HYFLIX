@@ -97,6 +97,25 @@ class SubtitleService {
     return _extractEpisodeNumber(text);
   }
 
+  static String normalizeLanguage(String lang) {
+    final lower = lang.toLowerCase().trim();
+    if (lower == 'zh' ||
+        lower == 'zh-cn' ||
+        lower == 'zh-tw' ||
+        lower == 'zh-hk' ||
+        lower == 'chinese' ||
+        lower == 'chi' ||
+        lower == 'cn' ||
+        lower == 'tc' ||
+        lower == 'sc') {
+      return 'ZH';
+    }
+    if (lower == 'en' || lower == 'eng' || lower == 'english') {
+      return 'EN';
+    }
+    return lang.toUpperCase();
+  }
+
   // ─── SubDL search (with pagination) ────────────────────────────
   static Future<List<SubtitleItem>> _searchSubDL({
     required String query,
@@ -115,7 +134,7 @@ class SubtitleService {
       while (page <= totalPages) {
         final queryParams = {
           'api_key': subdlApiKey,
-          'languages': 'EN',
+          'languages': 'EN,ZH,ZH-CN,ZH-TW,CHI,CN',
           'subs_per_page': '30',
           'page': page.toString(),
         };
@@ -158,7 +177,8 @@ class SubtitleService {
           final releaseName = (item['release_name'] as String?) ?? '';
           final name = (item['name'] as String?) ?? '';
           final fileName = releaseName.isNotEmpty ? releaseName : (name.isNotEmpty ? name : 'Subtitle');
-          final language = (item['language'] as String?) ?? (item['lang'] as String?) ?? 'EN';
+          final rawLanguage = (item['language'] as String?) ?? (item['lang'] as String?) ?? (item['language_code'] as String?) ?? 'EN';
+          final language = normalizeLanguage(rawLanguage);
 
           // Use API's structured fields for accurate match classification
           final apiSeason = (item['season'] as num?)?.toInt();
@@ -237,7 +257,7 @@ class SubtitleService {
 
     try {
       final queryParams = <String, String>{
-        'languages': 'en',
+        'languages': 'en,zh,zh-cn,zh-tw',
       };
 
       if (tmdbId != null) {
@@ -283,7 +303,8 @@ class SubtitleService {
         final attributes = entry['attributes'] as Map<String, dynamic>? ?? {};
         final releaseName = (attributes['release'] as String?) ?? '';
         final files = attributes['files'] as List<dynamic>? ?? [];
-        final lang = attributes['language'] as String? ?? 'en';
+        final rawLang = attributes['language'] as String? ?? 'en';
+        final lang = normalizeLanguage(rawLang);
 
         if (files.isEmpty) continue;
         final file = files.first as Map<String, dynamic>;
