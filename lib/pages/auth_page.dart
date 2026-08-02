@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 import '../services/auth_service.dart';
@@ -17,6 +18,11 @@ class _AuthPageState extends State<AuthPage> {
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+
+  final _nameFocusNode = FocusNode();
+  final _emailFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
+
   bool _loading = false;
   String? _error;
 
@@ -25,6 +31,9 @@ class _AuthPageState extends State<AuthPage> {
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
+    _nameFocusNode.dispose();
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -117,8 +126,9 @@ class _AuthPageState extends State<AuthPage> {
 
                   // ── Display Name (signup only) ──────────────
                   if (!_isLogin) ...[
-                    _buildField(
+                    _buildTvField(
                       controller: _nameController,
+                      focusNode: _nameFocusNode,
                       hint: 'Display Name',
                       icon: LucideIcons.user,
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
@@ -128,8 +138,9 @@ class _AuthPageState extends State<AuthPage> {
                   ],
 
                   // ── Email ──────────────────────────────────
-                  _buildField(
+                  _buildTvField(
                     controller: _emailController,
+                    focusNode: _emailFocusNode,
                     hint: 'Email',
                     icon: LucideIcons.mail,
                     keyboardType: TextInputType.emailAddress,
@@ -143,8 +154,9 @@ class _AuthPageState extends State<AuthPage> {
                   const SizedBox(height: 16),
 
                   // ── Password ───────────────────────────────
-                  _buildField(
+                  _buildTvField(
                     controller: _passwordController,
+                    focusNode: _passwordFocusNode,
                     hint: 'Password',
                     icon: LucideIcons.lock,
                     obscure: true,
@@ -225,20 +237,9 @@ class _AuthPageState extends State<AuthPage> {
                   const SizedBox(height: 20),
 
                   // ── Toggle ─────────────────────────────────
-                  GestureDetector(
+                  _TvToggleLink(
+                    isLogin: _isLogin,
                     onTap: () => setState(() { _isLogin = !_isLogin; _error = null; }),
-                    child: RichText(
-                      text: TextSpan(
-                        text: _isLogin ? "Don't have an account? " : 'Already have an account? ',
-                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-                        children: [
-                          TextSpan(
-                            text: _isLogin ? 'Sign Up' : 'Sign In',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ],
               ),
@@ -249,8 +250,9 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
-  Widget _buildField({
+  Widget _buildTvField({
     required TextEditingController controller,
+    required FocusNode focusNode,
     required String hint,
     required IconData icon,
     TextInputType? keyboardType,
@@ -258,40 +260,224 @@ class _AuthPageState extends State<AuthPage> {
     String? Function(String?)? validator,
     void Function(String)? onFieldSubmitted,
   }) {
-    return TextFormField(
+    return _TvFieldWrapper(
       controller: controller,
+      focusNode: focusNode,
+      hint: hint,
+      icon: icon,
       keyboardType: keyboardType,
-      obscureText: obscure,
+      obscure: obscure,
       validator: validator,
       onFieldSubmitted: onFieldSubmitted,
-      style: const TextStyle(color: Colors.white, fontSize: 14),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: AppTheme.textSecondary),
-        prefixIcon: Icon(icon, color: AppTheme.textSecondary, size: 18),
-        filled: true,
-        fillColor: AppTheme.cardDark,
-        border: OutlineInputBorder(
+    );
+  }
+}
+
+class _TvFieldWrapper extends StatefulWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hint;
+  final IconData icon;
+  final TextInputType? keyboardType;
+  final bool obscure;
+  final String? Function(String?)? validator;
+  final void Function(String)? onFieldSubmitted;
+
+  const _TvFieldWrapper({
+    required this.controller,
+    required this.focusNode,
+    required this.hint,
+    required this.icon,
+    this.keyboardType,
+    this.obscure = false,
+    this.validator,
+    this.onFieldSubmitted,
+  });
+
+  @override
+  State<_TvFieldWrapper> createState() => _TvFieldWrapperState();
+}
+
+class _TvFieldWrapperState extends State<_TvFieldWrapper> {
+  bool _isFocused = false;
+  bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_onFocusChange);
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_onFocusChange);
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (!widget.focusNode.hasFocus && _isEditing) {
+      setState(() {
+        _isEditing = false;
+      });
+    }
+    setState(() {
+      _isFocused = widget.focusNode.hasFocus;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: widget.focusNode,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+        // Pressing OK / Select / Enter when focused activates editing (opens keyboard)
+        if (!_isEditing &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+             event.logicalKey == LogicalKeyboardKey.enter ||
+             event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+             event.logicalKey == LogicalKeyboardKey.space ||
+             event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          setState(() {
+            _isEditing = true;
+          });
+          return KeyEventResult.handled;
+        }
+
+        // Pressing Back / Escape when editing exits editing mode (closes keyboard)
+        if (_isEditing &&
+            (event.logicalKey == LogicalKeyboardKey.escape ||
+             event.logicalKey == LogicalKeyboardKey.goBack ||
+             event.logicalKey == LogicalKeyboardKey.gameButtonB)) {
+          setState(() {
+            _isEditing = false;
+          });
+          return KeyEventResult.handled;
+        }
+
+        return KeyEventResult.ignored;
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+          boxShadow: _isFocused
+              ? [BoxShadow(color: AppTheme.accent.withOpacity(0.4), blurRadius: 12)]
+              : null,
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+        child: TextFormField(
+          controller: widget.controller,
+          keyboardType: widget.keyboardType,
+          obscureText: widget.obscure,
+          validator: widget.validator,
+          onFieldSubmitted: (val) {
+            setState(() {
+              _isEditing = false;
+            });
+            if (widget.onFieldSubmitted != null) {
+              widget.onFieldSubmitted!(val);
+            }
+          },
+          readOnly: !_isEditing,
+          showCursor: _isEditing,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: widget.hint,
+            hintStyle: const TextStyle(color: AppTheme.textSecondary),
+            prefixIcon: Icon(
+              widget.icon,
+              color: _isFocused ? AppTheme.accent : AppTheme.textSecondary,
+              size: 18,
+            ),
+            filled: true,
+            fillColor: _isFocused
+                ? AppTheme.cardDark.withOpacity(0.9)
+                : AppTheme.cardDark,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: _isFocused
+                  ? const BorderSide(color: AppTheme.accent, width: 2)
+                  : BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTheme.accent),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          ),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.accent, width: 1.5),
+      ),
+    );
+  }
+}
+
+class _TvToggleLink extends StatefulWidget {
+  final bool isLogin;
+  final VoidCallback onTap;
+
+  const _TvToggleLink({
+    required this.isLogin,
+    required this.onTap,
+  });
+
+  @override
+  State<_TvToggleLink> createState() => _TvToggleLinkState();
+}
+
+class _TvToggleLinkState extends State<_TvToggleLink> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return FocusableActionDetector(
+      onShowFocusHighlight: (hasFocus) => setState(() => _isFocused = hasFocus),
+      onShowHoverHighlight: (hasHover) => setState(() => _isFocused = hasHover),
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            widget.onTap();
+            return null;
+          },
         ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.accent),
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: _isFocused ? AppTheme.accent.withOpacity(0.15) : Colors.transparent,
+            border: _isFocused ? Border.all(color: AppTheme.accent, width: 1) : null,
+          ),
+          child: RichText(
+            text: TextSpan(
+              text: widget.isLogin ? "Don't have an account? " : 'Already have an account? ',
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              children: [
+                TextSpan(
+                  text: widget.isLogin ? 'Sign Up' : 'Sign In',
+                  style: TextStyle(
+                    color: _isFocused ? AppTheme.accent : Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.accent, width: 1.5),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     );
   }
