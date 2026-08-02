@@ -63,13 +63,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
   
-  // Panel auto-focus nodes
-  final FocusNode _playPauseFocusNode = FocusNode();
-  final FocusNode _topBarBackFocusNode = FocusNode();
-  final FocusNode _subtitleFirstFocusNode = FocusNode();
-  final FocusNode _episodeFirstFocusNode = FocusNode();
-  final FocusNode _audioFirstFocusNode = FocusNode();
-  final FocusNode _settingsFirstFocusNode = FocusNode();
 
   bool _torrentSupported = true;
   int _subDelayOffsetMs = 0;
@@ -157,8 +150,38 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   // Timer to auto-hide player controls after inactivity
   Timer? _hideControlsTimer;
 
-  // FocusNode for TV D-pad handling
+  // FocusNodes for TV D-pad handling
   final FocusNode _playerFocusNode = FocusNode();
+  final FocusNode _topBarBackFocusNode = FocusNode();
+  final FocusNode _topBarWifiFocusNode = FocusNode();
+  final FocusNode _topBarSettingsFocusNode = FocusNode();
+  final FocusNode _topBarSubtitleFocusNode = FocusNode();
+  final FocusNode _topBarAudioFocusNode = FocusNode();
+  final FocusNode _topBarEpisodesFocusNode = FocusNode();
+  final FocusNode _playPauseFocusNode = FocusNode();
+
+  // Side panel focus nodes
+  final FocusNode _subtitleFirstFocusNode = FocusNode();
+  final FocusNode _settingsFirstFocusNode = FocusNode();
+  final FocusNode _episodeFirstFocusNode = FocusNode();
+  final FocusNode _audioFirstFocusNode = FocusNode();
+
+  bool _isSelectKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.gameButtonA;
+  }
+
+  bool _isBackKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.gameButtonB;
+  }
+
+  bool get _isAnyPanelOpen =>
+      _showSubtitles || _showEpisodes || _showStats || _showAudioTracks || _showSettings;
 
   /// Effective episode count: uses episodes list length if available,
   /// otherwise falls back to episodeCount param (for torrent content).
@@ -513,68 +536,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   void _listenPlaying() {
-    // NOTE: We deliberately do NOT auto-hide controls or move focus here.
-    // The D-pad state machine (onKeyEvent) handles all controls visibility
-    // and focus management explicitly. Any automatic state changes here would
-    // race with the explicit D-pad handlers and cause focus to be stolen.
     _playingSub = _player.stream.playing.listen((playing) {
       if (!mounted) return;
-      // Intentionally empty — state managed via D-pad controls state machine.
     });
-  }
-
-  void _handleDpadSeekKeyEvent(KeyEvent e, Duration dur) {
-    if (dur.inMilliseconds <= 0) return;
-    final isLeft = e.logicalKey == LogicalKeyboardKey.arrowLeft;
-
-    if (e is KeyDownEvent || e is KeyRepeatEvent) {
-      if (!_isScrubbing) {
-        _wasPlayingBeforeScrub = _player.state.playing;
-        _player.pause();
-        _originalPosition = _player.state.position;
-        _scrubValue = dur.inMilliseconds > 0 
-            ? _originalPosition.inMilliseconds / dur.inMilliseconds 
-            : 0.0;
-        _currentScrubKey = e.logicalKey;
-        setState(() {
-          _isScrubbing = true;
-          _showControls = true;
-        });
-      }
-
-      // 5 seconds jump per tap/repeat (5000ms / dur.inMilliseconds)
-      final stepFraction = 5000 / dur.inMilliseconds;
-      setState(() {
-        _scrubValue = isLeft 
-            ? (_scrubValue - stepFraction).clamp(0.0, 1.0) 
-            : (_scrubValue + stepFraction).clamp(0.0, 1.0);
-      });
-      _scheduleHideControls();
-    } else if (e is KeyUpEvent) {
-      if (e.logicalKey == _currentScrubKey) {
-        final targetMs = (_scrubValue * dur.inMilliseconds).round();
-        _player.seek(Duration(milliseconds: targetMs));
-        
-        setState(() {
-          _isScrubbing = false;
-          _currentScrubKey = null;
-        });
-
-        if (_wasPlayingBeforeScrub) {
-          _player.play();
-          setState(() {
-            _showControls = false;
-          });
-          _playerFocusNode.requestFocus();
-        } else {
-          // If paused, keep controls visible and focus the Play/Pause button
-          setState(() {
-            _showControls = true;
-          });
-          _playPauseFocusNode.requestFocus();
-        }
-      }
-    }
   }
 
   void _listenPosition() {
@@ -700,7 +664,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _selectedAudioTrack = track;
       _showAudioTracks = false;
     });
-    _playPauseFocusNode.requestFocus();
   }
 
   void _playNextEpisode() {
@@ -1004,7 +967,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           ),
         );
       }
-      _playPauseFocusNode.requestFocus();
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1012,7 +974,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      _playPauseFocusNode.requestFocus();
     }
   }
 
@@ -1041,7 +1002,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
     _openMedia(ep.url);
     _loadIntroTimestamp();
-    _playerFocusNode.requestFocus();
   }
 
   Future<void> _toggleFullScreen() async {
@@ -1058,12 +1018,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void _scheduleHideControls() {
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
-      // Only auto-hide controls when the player is playing (not paused)
-      // and we are not in the middle of a D-pad scrub.
       if (mounted && _showControls && !_isScrubbing && _player.state.playing) {
         setState(() => _showControls = false);
-        // Return keyboard focus to root so the state machine works correctly.
-        _playerFocusNode.requestFocus();
       }
     });
   }
@@ -1072,9 +1028,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     setState(() => _showControls = !_showControls);
     if (_showControls) {
       _scheduleHideControls();
-      _playPauseFocusNode.requestFocus();
-    } else {
-      _playerFocusNode.requestFocus();
     }
   }
 
@@ -1117,12 +1070,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       debugPrint('[VideoPlayer] Error disposing player: $e');
     }
     _playerFocusNode.dispose();
-    _playPauseFocusNode.dispose();
     _topBarBackFocusNode.dispose();
+    _topBarWifiFocusNode.dispose();
+    _topBarSettingsFocusNode.dispose();
+    _topBarSubtitleFocusNode.dispose();
+    _topBarAudioFocusNode.dispose();
+    _topBarEpisodesFocusNode.dispose();
+    _playPauseFocusNode.dispose();
     _subtitleFirstFocusNode.dispose();
+    _settingsFirstFocusNode.dispose();
     _episodeFirstFocusNode.dispose();
     _audioFirstFocusNode.dispose();
-    _settingsFirstFocusNode.dispose();
     _hideControlsTimer?.cancel();
     super.dispose();
   }
@@ -1173,19 +1131,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (_isScrubbing) {
       setState(() {
         _isScrubbing = false;
-        _currentScrubKey = null;
       });
       if (_wasPlayingBeforeScrub) {
         _player.play();
         setState(() {
           _showControls = false;
         });
-        _playerFocusNode.requestFocus();
       } else {
         setState(() {
           _showControls = true;
         });
-        _playPauseFocusNode.requestFocus();
       }
       return true;
     }
@@ -1199,7 +1154,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         _showControls = true;
       });
       _scheduleHideControls();
-      _playPauseFocusNode.requestFocus();
       return true;
     }
     if (_showControls) {
@@ -1207,7 +1161,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _player.play();
       _hideControlsTimer?.cancel();
       setState(() => _showControls = false);
-      _playerFocusNode.requestFocus();
       return true;
     }
     return false;
@@ -1221,9 +1174,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showAudioTracks = false;
       _showSettings = false;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _subtitleFirstFocusNode.requestFocus();
-    });
+    _subtitleFirstFocusNode.requestFocus();
   }
 
   void _openEpisodePanel() {
@@ -1234,9 +1185,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showAudioTracks = false;
       _showSettings = false;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _episodeFirstFocusNode.requestFocus();
-    });
+    _episodeFirstFocusNode.requestFocus();
   }
 
   void _openAudioTrackPanel() {
@@ -1247,9 +1196,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showStats = false;
       _showSettings = false;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _audioFirstFocusNode.requestFocus();
-    });
+    _audioFirstFocusNode.requestFocus();
   }
 
   void _openSettingsPanel() {
@@ -1260,9 +1207,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showStats = false;
       _showAudioTracks = false;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _settingsFirstFocusNode.requestFocus();
-    });
+    _settingsFirstFocusNode.requestFocus();
   }
 
   void _openStatsPanel() {
@@ -1344,96 +1289,137 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         }
       },
       child: KeyboardListener(
-      focusNode: _playerFocusNode,
-      autofocus: true,
-      onKeyEvent: (e) {
-        final primaryFocus = FocusManager.instance.primaryFocus;
-        final isPlayerFocused = primaryFocus == _playerFocusNode || primaryFocus == null;
-
-        // 1. Handle D-pad Left/Right scrubbing/seeking in both states:
-        //    (Only if player background or play button is focused, meaning no settings panel has focus).
-        final isLeft = e.logicalKey == LogicalKeyboardKey.arrowLeft;
-        final isRight = e.logicalKey == LogicalKeyboardKey.arrowRight;
-        final canScrub = primaryFocus == _playerFocusNode || primaryFocus == _playPauseFocusNode || primaryFocus == null;
-        if ((isLeft || isRight) && canScrub) {
-          _handleDpadSeekKeyEvent(e, _player.state.duration);
-          return;
-        }
-
-        // We ignore other event types for non-scrubbing actions
-        if (e is! KeyDownEvent) return;
-
-        // 2. State 1: Media is Playing (Controls are Hidden)
-        if (!_showControls) {
-          if (e.logicalKey == LogicalKeyboardKey.arrowUp) {
-            // Pause, show controls, and focus top config bar
-            _player.pause();
-            setState(() {
-              _showControls = true;
-            });
-            _scheduleHideControls();
-            _topBarBackFocusNode.requestFocus();
+        focusNode: _playerFocusNode,
+        autofocus: true,
+        onKeyEvent: (event) {
+          // If any side panel (Subtitles, Episodes, Settings, Stats, Audio) is open:
+          // D-pad controls belong exclusively to the panel!
+          // Ignore all player media actions (scrubbing, play/pause, top-bar focus resets).
+          // ONLY handle Back/Esc key to close the panel and return to controls overlay!
+          if (_isAnyPanelOpen) {
+            if (event is KeyDownEvent && _isBackKey(event.logicalKey)) {
+              if (!_handleBackPress()) {
+                _exitPlayer();
+              }
+              setState(() {});
+            }
             return;
           }
-          if (e.logicalKey == LogicalKeyboardKey.arrowDown) {
-            // Temporarily show progress bar overlay for 3 seconds without pausing or shifting focus
-            setState(() {
-              _showControls = true;
-            });
-            _scheduleHideControls();
+
+          // 1. D-pad Left / Right scrubbing (Active when controls are hidden OR when currently scrubbing)
+          if (!_showControls || _isScrubbing) {
+            final isLeft = event.logicalKey == LogicalKeyboardKey.arrowLeft;
+            final isRight = event.logicalKey == LogicalKeyboardKey.arrowRight;
+            
+            if (isLeft || isRight) {
+              final dur = _player.state.duration;
+              if (dur.inMilliseconds > 0) {
+                if (event is KeyDownEvent || event is KeyRepeatEvent) {
+                  if (!_isScrubbing) {
+                    _wasPlayingBeforeScrub = _player.state.playing;
+                    _player.pause();
+                    _originalPosition = _player.state.position;
+                    _scrubValue = dur.inMilliseconds > 0 
+                        ? (_originalPosition.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0) 
+                        : 0.0;
+                    _currentScrubKey = event.logicalKey;
+                    setState(() {
+                      _isScrubbing = true;
+                      _showControls = true;
+                    });
+                  }
+
+                  // 5 seconds jump per tap or repeat tick
+                  final stepFraction = 5000 / dur.inMilliseconds;
+                  setState(() {
+                    _scrubValue = isLeft 
+                        ? (_scrubValue - stepFraction).clamp(0.0, 1.0) 
+                        : (_scrubValue + stepFraction).clamp(0.0, 1.0);
+                  });
+                  _scheduleHideControls();
+                  return;
+                } else if (event is KeyUpEvent) {
+                  if (_isScrubbing && event.logicalKey == _currentScrubKey) {
+                    final targetMs = (_scrubValue * dur.inMilliseconds).round();
+                    _player.seek(Duration(milliseconds: targetMs));
+
+                    setState(() {
+                      _isScrubbing = false;
+                      _currentScrubKey = null;
+                    });
+
+                    if (_wasPlayingBeforeScrub) {
+                      _player.play();
+                      setState(() {
+                        _showControls = false;
+                      });
+                    } else {
+                      setState(() {
+                        _showControls = true;
+                      });
+                    }
+                    return;
+                  }
+                }
+              }
+            }
+          }
+
+          if (event is! KeyDownEvent) return;
+
+          // 2. OK Button: Toggle Play / Pause & show/hide controls overlay UI
+          if (_isSelectKey(event.logicalKey)) {
+            if (!_showControls) {
+              // Controls hidden (video playing) -> pause, display controls overlay UI & highlight back button
+              _player.pause();
+              setState(() {
+                _showControls = true;
+              });
+              _topBarBackFocusNode.requestFocus();
+              _scheduleHideControls();
+            } else {
+              // Check if any Top Bar icon or Center Play/Pause button has focus
+              final isOverlayButtonFocused = _topBarBackFocusNode.hasFocus ||
+                  _topBarWifiFocusNode.hasFocus ||
+                  _topBarSettingsFocusNode.hasFocus ||
+                  _topBarSubtitleFocusNode.hasFocus ||
+                  _topBarAudioFocusNode.hasFocus ||
+                  _topBarEpisodesFocusNode.hasFocus ||
+                  _playPauseFocusNode.hasFocus;
+
+              // Only toggle play/pause if focus is NOT on an overlay button
+              if (!isOverlayButtonFocused) {
+                _player.playOrPause();
+                if (_player.state.playing) {
+                  _scheduleHideControls();
+                } else {
+                  _hideControlsTimer?.cancel();
+                }
+                setState(() {});
+              }
+            }
             return;
           }
-          if (e.logicalKey == LogicalKeyboardKey.select ||
-              e.logicalKey == LogicalKeyboardKey.enter ||
-              e.logicalKey == LogicalKeyboardKey.numpadEnter ||
-              e.logicalKey == LogicalKeyboardKey.space) {
-            // Pause, show controls, and focus center play button
-            _player.pause();
-            setState(() {
-              _showControls = true;
-            });
-            _scheduleHideControls();
-            _playPauseFocusNode.requestFocus();
+
+          // 3. Back Button: Close panel or exit player back to detail page
+          if (_isBackKey(event.logicalKey)) {
+            if (!_handleBackPress()) {
+              _exitPlayer();
+            }
             return;
           }
-        } else {
-          // 3. State 2: Media is Paused (Controls are Visible)
-          // If background has raw focus, handle Up/Down and OK keys
-          if (isPlayerFocused) {
-            if (e.logicalKey == LogicalKeyboardKey.arrowUp) {
+
+          // 4. D-pad Up: Move focus to overlay back button when controls are visible / media is paused
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            if (_showControls || !_player.state.playing) {
               _topBarBackFocusNode.requestFocus();
               return;
             }
-            if (e.logicalKey == LogicalKeyboardKey.arrowDown) {
-              _playPauseFocusNode.requestFocus();
-              return;
-            }
-            if (e.logicalKey == LogicalKeyboardKey.select ||
-                e.logicalKey == LogicalKeyboardKey.enter ||
-                e.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                e.logicalKey == LogicalKeyboardKey.space) {
-              _player.playOrPause();
-              _scheduleHideControls();
-              return;
-            }
           }
-        }
-
-        // 4. Global fallback keys (Escape / Space / Skip Intro)
-        if (e.logicalKey == LogicalKeyboardKey.escape) {
-          if (!_handleBackPress()) {
-            _exitPlayer();
-          }
-        } else if (e.logicalKey == LogicalKeyboardKey.space) {
-          _player.playOrPause();
-          _scheduleHideControls();
-        } else if (e.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
-          if (_introTimestamp == null) { _recordIntro(); } else { _skipIntro(); }
-        }
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
             fit: StackFit.expand,
             children: [
               // IgnorePointer ensures the Video widget never absorbs taps;
@@ -1567,9 +1553,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               AnimatedOpacity(
                 opacity: _showControls ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 250),
-                child: IgnorePointer(
-                  ignoring: !_showControls,
-                  child: _buildControls(context, currentEpName, hasEpisodes),
+                child: ExcludeFocus(
+                  excluding: !_showControls,
+                  child: IgnorePointer(
+                    ignoring: !_showControls,
+                    child: _buildControls(context, currentEpName, hasEpisodes),
+                  ),
                 ),
               ),
 
@@ -1626,7 +1615,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 top: 0, bottom: 0,
                 right: _showSubtitles ? 0 : -300,
                 width: 300,
-                child: _buildSubtitlePanel(),
+                child: ExcludeFocus(
+                  excluding: !_showSubtitles,
+                  child: FocusScope(
+                    child: _buildSubtitlePanel(),
+                  ),
+                ),
               ),
 
               // Audio track panel (slides from right)
@@ -1636,7 +1630,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 top: 0, bottom: 0,
                 right: _showAudioTracks ? 0 : -300,
                 width: 300,
-                child: _buildAudioTrackPanel(),
+                child: ExcludeFocus(
+                  excluding: !_showAudioTracks,
+                  child: FocusScope(
+                    child: _buildAudioTrackPanel(),
+                  ),
+                ),
               ),
 
               // Episode panel (slides from right)
@@ -1647,7 +1646,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   top: 0, bottom: 0,
                   right: _showEpisodes ? 0 : -300,
                   width: 300,
-                  child: _buildEpisodePanel(),
+                  child: ExcludeFocus(
+                    excluding: !_showEpisodes,
+                    child: FocusScope(
+                      child: _buildEpisodePanel(),
+                    ),
+                  ),
                 ),
 
               // Stats panel (slides from top-right)
@@ -1657,7 +1661,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 top: _showStats ? 70 : -600,
                 right: 20,
                 width: 280,
-                child: _buildStatsPanel(),
+                child: ExcludeFocus(
+                  excluding: !_showStats,
+                  child: FocusScope(
+                    child: _buildStatsPanel(),
+                  ),
+                ),
               ),
 
               // Settings panel (slides from right)
@@ -1667,7 +1676,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 top: 0, bottom: 0,
                 right: _showSettings ? 0 : -300,
                 width: 300,
-                child: _buildSettingsPanel(),
+                child: ExcludeFocus(
+                  excluding: !_showSettings,
+                  child: FocusScope(
+                    child: _buildSettingsPanel(),
+                  ),
+                ),
               ),
             ],
           ),
@@ -1908,6 +1922,47 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     ),
   );
 
+  Widget _buildTopBarItem({
+    required FocusNode focusNode,
+    required VoidCallback onTap,
+    required Widget child,
+    required Color backgroundColor,
+    FocusNode? onRight,
+    FocusNode? onLeft,
+  }) {
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight && onRight != null) {
+          onRight.requestFocus();
+          return KeyEventResult.handled;
+        }
+
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft && onLeft != null) {
+          onLeft.requestFocus();
+          return KeyEventResult.handled;
+        }
+
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          if (!_isAnyPanelOpen) {
+            _playPauseFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        }
+
+        return KeyEventResult.ignored;
+      },
+      child: HoverButton(
+        focusNode: focusNode,
+        onTap: onTap,
+        backgroundColor: backgroundColor,
+        child: child,
+      ),
+    );
+  }
+
   Widget _buildControls(BuildContext context, String epName, bool hasEpisodes) {
     return Container(
       decoration: BoxDecoration(
@@ -1923,85 +1978,89 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           // Top bar
           Positioned(
             top: 32, left: 20, right: 20,
-            child: Focus(
-              onKeyEvent: (node, event) {
-                // Only intercept D-pad Down when the overlay is visible.
-                // When controls are hidden, let events bubble to the root KeyboardListener.
-                if (_showControls && event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                  _playPauseFocusNode.requestFocus();
-                  return KeyEventResult.handled;
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Row(
-                children: [
-                  HoverButton(
-                    focusNode: _topBarBackFocusNode,
-                    onTap: _exitPlayer,
-                    backgroundColor: Colors.black54,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 22),
-                    ),
+            child: Row(
+              children: [
+                _buildTopBarItem(
+                  focusNode: _topBarBackFocusNode,
+                  onTap: _exitPlayer,
+                  backgroundColor: Colors.black54,
+                  onRight: _topBarWifiFocusNode,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(LucideIcons.arrowLeft, color: Colors.white, size: 22),
                   ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(epName,
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 16),
+                // Network stats icon
+                _buildTopBarItem(
+                  focusNode: _topBarWifiFocusNode,
+                  onTap: _openStatsPanel,
+                  backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
+                  onLeft: _topBarBackFocusNode,
+                  onRight: _topBarSettingsFocusNode,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(LucideIcons.wifi, color: Colors.white, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                _buildTopBarItem(
+                  focusNode: _topBarSettingsFocusNode,
+                  onTap: _openSettingsPanel,
+                  backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
+                  onLeft: _topBarWifiFocusNode,
+                  onRight: _topBarSubtitleFocusNode,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(LucideIcons.sliders, color: Colors.white, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                _buildTopBarItem(
+                  focusNode: _topBarSubtitleFocusNode,
+                  onTap: _openSubtitlePanel,
+                  backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
+                  onLeft: _topBarSettingsFocusNode,
+                  onRight: _audioTracks.length > 1 ? _topBarAudioFocusNode : (hasEpisodes ? _topBarEpisodesFocusNode : null),
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
+                  ),
+                ),
+                if (_audioTracks.length > 1) ...[
                   const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(epName,
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                  const SizedBox(width: 16),
-                  // Network stats icon
-                  HoverButton(
-                    onTap: _openStatsPanel,
-                    backgroundColor: _showStats ? AppTheme.accent : Colors.black54,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: const Icon(LucideIcons.wifi, color: Colors.white, size: 20),
+                  _buildTopBarItem(
+                    focusNode: _topBarAudioFocusNode,
+                    onTap: _openAudioTrackPanel,
+                    backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
+                    onLeft: _topBarSubtitleFocusNode,
+                    onRight: hasEpisodes ? _topBarEpisodesFocusNode : null,
+                    child: const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Icon(LucideIcons.volume2, color: Colors.white, size: 20),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  HoverButton(
-                    onTap: _openSettingsPanel,
-                    backgroundColor: _showSettings ? AppTheme.accent : Colors.black54,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: const Icon(LucideIcons.sliders, color: Colors.white, size: 20),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  HoverButton(
-                    onTap: _openSubtitlePanel,
-                    backgroundColor: _showSubtitles ? AppTheme.accent : Colors.black54,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: const Icon(LucideIcons.subtitles, color: Colors.white, size: 20),
-                    ),
-                  ),
-                  if (_audioTracks.length > 1) ...[
-                    const SizedBox(width: 16),
-                    HoverButton(
-                      onTap: _openAudioTrackPanel,
-                      backgroundColor: _showAudioTracks ? AppTheme.accent : Colors.black54,
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: const Icon(LucideIcons.volume2, color: Colors.white, size: 20),
-                      ),
-                    ),
-                  ],
-                  if (hasEpisodes) ...[
-                    const SizedBox(width: 16),
-                    HoverButton(
-                      onTap: _openEpisodePanel,
-                      backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: const Icon(LucideIcons.list, color: Colors.white, size: 20),
-                      ),
-                    ),
-                  ],
                 ],
-              ),
+                if (hasEpisodes) ...[
+                  const SizedBox(width: 16),
+                  _buildTopBarItem(
+                    focusNode: _topBarEpisodesFocusNode,
+                    onTap: _openEpisodePanel,
+                    backgroundColor: _showEpisodes ? AppTheme.accent : Colors.black54,
+                    onLeft: _audioTracks.length > 1 ? _topBarAudioFocusNode : _topBarSubtitleFocusNode,
+                    child: const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Icon(LucideIcons.list, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
 
@@ -2010,11 +2069,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             Center(
               child: Focus(
                 onKeyEvent: (node, event) {
-                  // Only intercept D-pad Up when the overlay is visible.
-                  // When controls are hidden, let events bubble to the root KeyboardListener.
                   if (_showControls && event is KeyDownEvent) {
                     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                       _topBarBackFocusNode.requestFocus();
+                      return KeyEventResult.handled;
+                    }
+                    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                      _playerFocusNode.requestFocus();
                       return KeyEventResult.handled;
                     }
                   }
@@ -2027,9 +2088,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     return HoverButton(
                       focusNode: _playPauseFocusNode,
                       onTap: () {
+                        final wasPlaying = _player.state.playing;
                         _player.playOrPause();
-                        _scheduleHideControls();
-                        setState(() {});
+                        if (!wasPlaying) {
+                          setState(() {
+                            _showControls = false;
+                          });
+                          _playerFocusNode.requestFocus();
+                        } else {
+                          _hideControlsTimer?.cancel();
+                          setState(() {
+                            _showControls = true;
+                          });
+                        }
                       },
                       backgroundColor: Colors.transparent,
                       child: ClipOval(
@@ -2448,22 +2519,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 4),
-        SliderTheme(
-          data: SliderThemeData(
-            trackHeight: 3,
-            thumbColor: AppTheme.accent,
-            activeTrackColor: AppTheme.accent,
-            inactiveTrackColor: Colors.white12,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-          ),
-          child: Slider(
-            value: value.clamp(min, max),
-            min: min,
-            max: max,
-            onChanged: onChanged,
-          ),
+        const SizedBox(height: 2),
+        _DpadSlider(
+          value: value,
+          min: min,
+          max: max,
+          onChanged: onChanged,
         ),
       ],
     );
@@ -3256,6 +3317,135 @@ class _FocusableTileWrapperState extends State<_FocusableTileWrapper> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: widget.builder(context, _isFocused),
+      ),
+    );
+  }
+}
+
+class _DpadSlider extends StatefulWidget {
+  final double value;
+  final double min;
+  final double max;
+  final ValueChanged<double> onChanged;
+
+  const _DpadSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DpadSlider> createState() => _DpadSliderState();
+}
+
+class _DpadSliderState extends State<_DpadSlider> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final step = (widget.max - widget.min) / 20.0;
+    final fraction = ((widget.value - widget.min) / (widget.max - widget.min)).clamp(0.0, 1.0);
+
+    return Focus(
+      onFocusChange: (focused) {
+        setState(() {
+          _isFocused = focused;
+        });
+      },
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            final newVal = (widget.value - step).clamp(widget.min, widget.max);
+            widget.onChanged(newVal);
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            final newVal = (widget.value + step).clamp(widget.min, widget.max);
+            widget.onChanged(newVal);
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (details) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box != null) {
+            final local = box.globalToLocal(details.globalPosition);
+            final percent = (local.dx / box.size.width).clamp(0.0, 1.0);
+            final newVal = widget.min + percent * (widget.max - widget.min);
+            widget.onChanged(newVal);
+          }
+        },
+        onTapDown: (details) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box != null) {
+            final local = box.globalToLocal(details.globalPosition);
+            final percent = (local.dx / box.size.width).clamp(0.0, 1.0);
+            final newVal = widget.min + percent * (widget.max - widget.min);
+            widget.onChanged(newVal);
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Container(
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              border: _isFocused ? Border.all(color: AppTheme.accent, width: 1.5) : null,
+              color: _isFocused ? AppTheme.accent.withOpacity(0.15) : Colors.transparent,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final fillWidth = width * fraction;
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Background track
+                    Container(
+                      height: 4,
+                      width: width,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        color: Colors.white12,
+                      ),
+                    ),
+                    // Active track
+                    Container(
+                      height: 4,
+                      width: fillWidth,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        color: AppTheme.accent,
+                      ),
+                    ),
+                    // Thumb
+                    Positioned(
+                      left: (fillWidth - 6).clamp(0.0, width - 12),
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isFocused ? Colors.white : AppTheme.accent,
+                          boxShadow: _isFocused
+                              ? [BoxShadow(color: AppTheme.accent.withOpacity(0.8), blurRadius: 6)]
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
       ),
     );
   }
