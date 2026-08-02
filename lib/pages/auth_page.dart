@@ -329,8 +329,15 @@ class _TvFieldWrapperState extends State<_TvFieldWrapper> {
     setState(() {
       _isEditing = true;
     });
-    _fieldFocusNode.requestFocus();
-    SystemChannels.textInput.invokeMethod('TextInput.show');
+    // Defer focus + keyboard show to the next frame so Flutter first rebuilds
+    // the TextFormField with readOnly: false — otherwise the IME show request
+    // is silently ignored because EditableText is still in read-only mode.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_isEditing && mounted) {
+        _fieldFocusNode.requestFocus();
+        SystemChannels.textInput.invokeMethod('TextInput.show');
+      }
+    });
   }
 
   void _stopEditing() {
