@@ -301,6 +301,7 @@ class _TvFieldWrapper extends StatefulWidget {
 class _TvFieldWrapperState extends State<_TvFieldWrapper> {
   bool _isFocused = false;
   bool _isEditing = false;
+  final FocusNode _fieldFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -311,18 +312,33 @@ class _TvFieldWrapperState extends State<_TvFieldWrapper> {
   @override
   void dispose() {
     widget.focusNode.removeListener(_onFocusChange);
+    _fieldFocusNode.dispose();
     super.dispose();
   }
 
   void _onFocusChange() {
     if (!widget.focusNode.hasFocus && _isEditing) {
-      setState(() {
-        _isEditing = false;
-      });
+      _stopEditing();
     }
     setState(() {
       _isFocused = widget.focusNode.hasFocus;
     });
+  }
+
+  void _startEditing() {
+    setState(() {
+      _isEditing = true;
+    });
+    _fieldFocusNode.requestFocus();
+    SystemChannels.textInput.invokeMethod('TextInput.show');
+  }
+
+  void _stopEditing() {
+    setState(() {
+      _isEditing = false;
+    });
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+    widget.focusNode.requestFocus();
   }
 
   @override
@@ -339,9 +355,7 @@ class _TvFieldWrapperState extends State<_TvFieldWrapper> {
              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
              event.logicalKey == LogicalKeyboardKey.space ||
              event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          setState(() {
-            _isEditing = true;
-          });
+          _startEditing();
           return KeyEventResult.handled;
         }
 
@@ -350,73 +364,77 @@ class _TvFieldWrapperState extends State<_TvFieldWrapper> {
             (event.logicalKey == LogicalKeyboardKey.escape ||
              event.logicalKey == LogicalKeyboardKey.goBack ||
              event.logicalKey == LogicalKeyboardKey.gameButtonB)) {
-          setState(() {
-            _isEditing = false;
-          });
+          _stopEditing();
           return KeyEventResult.handled;
         }
 
         return KeyEventResult.ignored;
       },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: _isFocused
-              ? [BoxShadow(color: AppTheme.accent.withOpacity(0.4), blurRadius: 12)]
-              : null,
-        ),
-        child: TextFormField(
-          controller: widget.controller,
-          keyboardType: widget.keyboardType,
-          obscureText: widget.obscure,
-          validator: widget.validator,
-          onFieldSubmitted: (val) {
-            setState(() {
-              _isEditing = false;
-            });
-            if (widget.onFieldSubmitted != null) {
-              widget.onFieldSubmitted!(val);
-            }
-          },
-          readOnly: !_isEditing,
-          showCursor: _isEditing,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: widget.hint,
-            hintStyle: const TextStyle(color: AppTheme.textSecondary),
-            prefixIcon: Icon(
-              widget.icon,
-              color: _isFocused ? AppTheme.accent : AppTheme.textSecondary,
-              size: 18,
+      child: GestureDetector(
+        onTap: () {
+          if (!_isEditing) {
+            _startEditing();
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: _isFocused
+                ? [BoxShadow(color: AppTheme.accent.withOpacity(0.4), blurRadius: 12)]
+                : null,
+          ),
+          child: TextFormField(
+            focusNode: _fieldFocusNode,
+            controller: widget.controller,
+            keyboardType: widget.keyboardType,
+            obscureText: widget.obscure,
+            validator: widget.validator,
+            onFieldSubmitted: (val) {
+              _stopEditing();
+              if (widget.onFieldSubmitted != null) {
+                widget.onFieldSubmitted!(val);
+              }
+            },
+            readOnly: !_isEditing,
+            showCursor: _isEditing,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              hintStyle: const TextStyle(color: AppTheme.textSecondary),
+              prefixIcon: Icon(
+                widget.icon,
+                color: _isFocused ? AppTheme.accent : AppTheme.textSecondary,
+                size: 18,
+              ),
+              filled: true,
+              fillColor: _isFocused
+                  ? AppTheme.cardDark.withOpacity(0.9)
+                  : AppTheme.cardDark,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: _isFocused
+                    ? const BorderSide(color: AppTheme.accent, width: 2)
+                    : BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+              ),
+              errorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.accent),
+              ),
+              focusedErrorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             ),
-            filled: true,
-            fillColor: _isFocused
-                ? AppTheme.cardDark.withOpacity(0.9)
-                : AppTheme.cardDark,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: _isFocused
-                  ? const BorderSide(color: AppTheme.accent, width: 2)
-                  : BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.accent, width: 2),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.accent),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.accent, width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
         ),
       ),
