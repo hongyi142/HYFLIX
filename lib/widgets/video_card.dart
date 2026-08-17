@@ -111,6 +111,14 @@ class _VideoCardState extends State<VideoCard> {
       onShowFocusHighlight: (hasFocus) {
         if (hasFocus) {
           _onEnter();
+          try {
+            Scrollable.ensureVisible(
+              context,
+              alignment: 0.5,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOut,
+            );
+          } catch (_) {}
         } else {
           _onExit();
         }
@@ -125,7 +133,12 @@ class _VideoCardState extends State<VideoCard> {
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (intent) {
-            // Handle DPAD selection similar to tap
+            _handleTap();
+            return null;
+          },
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (intent) {
             _handleTap();
             return null;
           },

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'desktop_init.dart';
 import 'services/media_init.dart';
 import 'core/theme.dart';
@@ -14,6 +15,9 @@ final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<v
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Force traditional focus highlight mode so focus rings are ALWAYS visible on TV/Projector
+  FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional;
 
   await initDesktopWindow();
 
@@ -57,6 +61,14 @@ class _HyflixAppState extends State<HyflixApp> {
       title: 'HYFLIX',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
+      shortcuts: {
+        ...WidgetsApp.defaultShortcuts,
+        const SingleActivator(LogicalKeyboardKey.select): const ActivateIntent(),
+        const SingleActivator(LogicalKeyboardKey.gameButtonA): const ActivateIntent(),
+        const SingleActivator(LogicalKeyboardKey.enter): const ActivateIntent(),
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): const ActivateIntent(),
+        const SingleActivator(LogicalKeyboardKey.space): const ActivateIntent(),
+      },
       navigatorObservers: [routeObserver],
       home: _isLoggedIn ? const SplashPage() : const AuthPage(),
     );

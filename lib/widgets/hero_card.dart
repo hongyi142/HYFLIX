@@ -42,6 +42,12 @@ class _HeroSectionState extends State<HeroSection> {
       _preloadTmdb();
     }
     _startAutoCarousel();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _playButtonFocusNode.canRequestFocus) {
+        _playButtonFocusNode.requestFocus();
+      }
+    });
   }
 
   void _onFocusChange() {

@@ -95,6 +95,14 @@ class _MovieCardState extends State<MovieCard> {
       onShowFocusHighlight: (hasFocus) {
         if (hasFocus) {
           _onEnter();
+          try {
+            Scrollable.ensureVisible(
+              context,
+              alignment: 0.5,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOut,
+            );
+          } catch (_) {}
         } else {
           _onExit();
         }
@@ -108,6 +116,12 @@ class _MovieCardState extends State<MovieCard> {
       },
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            DetailPage.show(context, widget.content, initialTmdb: _tmdbResult);
+            return null;
+          },
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
           onInvoke: (intent) {
             DetailPage.show(context, widget.content, initialTmdb: _tmdbResult);
             return null;

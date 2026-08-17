@@ -56,3 +56,4 @@ app.*.map.json
 /hyflix-macos.dmg
 /hyflix-web.zip
 /hyflix-android-tv.apk
+dist/

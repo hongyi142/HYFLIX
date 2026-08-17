@@ -301,9 +301,15 @@ class _ProfileAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final photo = AuthService.photoBase64;
     return FocusableActionDetector(
-      onShowFocusHighlight: (hasFocus) { /* Optional: add focus ring */ },
+      onShowFocusHighlight: (hasFocus) {},
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            onTap();
+            return null;
+          },
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
           onInvoke: (intent) {
             onTap();
             return null;
@@ -403,6 +409,12 @@ class _NavLinkState extends State<_NavLink> {
             return null;
           },
         ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (intent) {
+            if (widget.onTap != null) widget.onTap!();
+            return null;
+          },
+        ),
       },
       child: GestureDetector(
         onTap: widget.onTap,
@@ -457,6 +469,20 @@ class _NavIconState extends State<_NavIcon> {
     return FocusableActionDetector(
       onShowFocusHighlight: (hasFocus) => setState(() => _isHovered = hasFocus),
       onShowHoverHighlight: (hasHover) => setState(() => _isHovered = hasHover),
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (intent) {
+            if (widget.onTap != null) widget.onTap!();
+            return null;
+          },
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (intent) {
+            if (widget.onTap != null) widget.onTap!();
+            return null;
+          },
+        ),
+      },
       child: IconButton(
         icon: Icon(
           widget.icon,
