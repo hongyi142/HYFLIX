@@ -17,6 +17,7 @@ import '../services/user_service.dart';
 import '../config/app_config.dart';
 import '../widgets/buttons.dart';
 import '../widgets/stream_picker_sheet.dart';
+import '../widgets/download_picker_modal.dart';
 
 
 class DetailPage extends StatefulWidget {
@@ -731,6 +732,21 @@ class _DetailPageState extends State<DetailPage> {
       episodeName: episodeName,
       m3u8Url: directUrl,
       thumbnailUrl: tmdb?.posterUrl ?? widget.content.thumbnailUrl,
+    );
+  }
+
+  void _openDownloadModal() {
+    showDownloadPickerModal(
+      context: context,
+      content: widget.content,
+      tmdb: _tmdb,
+      isNonChineseContent: _isNonChineseContent,
+      initialSource: _selectedSource,
+      initialEpisodes: _sourceEpisodes ?? widget.content.episodes,
+      torrentSeasonCount: _torrentSeasonCount,
+      selectedSeason: _selectedSeason,
+      cachedTorrentStreams: _torrentStreamsByEpisode,
+      selectedQuality: _selectedQuality,
     );
   }
 
@@ -1777,7 +1793,7 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                       ),
                       HoverButton(
-                        onTap: () => _handleDownload(0),
+                        onTap: _openDownloadModal,
                         backgroundColor: const Color(0x662F3640),
                         child: const Padding(
                           padding: EdgeInsets.symmetric(
