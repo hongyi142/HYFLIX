@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart';
 import '../models/download_item.dart';
+import 'web_download.dart';
 
 export '../models/download_item.dart';
 
-/// No-op DownloadService for web platform where downloads are not supported.
+/// Web-compatible DownloadService that triggers browser downloads for direct file URLs.
 class DownloadService extends ChangeNotifier {
   static final DownloadService _instance = DownloadService._internal();
   factory DownloadService() => _instance;
@@ -28,7 +29,12 @@ class DownloadService extends ChangeNotifier {
     required String episodeName,
     required String m3u8Url,
     String? thumbnailUrl,
-  }) async {}
+  }) async {
+    final cleanTitle = contentTitle.replaceAll(RegExp(r'[^\w\s\.-]'), '').replaceAll(' ', '_');
+    final cleanEp = episodeName.replaceAll(RegExp(r'[^\w\s\.-]'), '').replaceAll(' ', '_');
+    final fileName = '${cleanTitle}_$cleanEp.mp4';
+    triggerBrowserDownload(m3u8Url, fileName);
+  }
 
   Future<void> cancelDownload(String contentId, int episodeIndex) async {}
 
@@ -41,7 +47,16 @@ class DownloadService extends ChangeNotifier {
     required String episodeName,
     required String m3u8Url,
     String? thumbnailUrl,
-  }) async {}
+  }) async {
+    await startDownload(
+      contentId: contentId,
+      contentTitle: contentTitle,
+      episodeIndex: episodeIndex,
+      episodeName: episodeName,
+      m3u8Url: m3u8Url,
+      thumbnailUrl: thumbnailUrl,
+    );
+  }
 
   Future<int> getDownloadSize(String contentId, int episodeIndex) async => 0;
 }

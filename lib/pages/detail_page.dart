@@ -10,11 +10,13 @@ import '../pages/video_player_screen.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
 import '../services/torrent_service.dart';
+import '../services/torbox_service.dart';
 import '../services/watchlist_service.dart';
 import '../services/tmdb_service.dart';
 import '../services/user_service.dart';
 import '../config/app_config.dart';
 import '../widgets/buttons.dart';
+import '../widgets/stream_picker_sheet.dart';
 
 
 class DetailPage extends StatefulWidget {
@@ -597,7 +599,25 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _handleDownload(int episodeIndex) {
+    if (_selectedSource == _torrentSource) {
+      _handleTorrentDownload(episodeIndex);
+      return;
+    }
+
     final episodes = _sourceEpisodes ?? widget.content.episodes;
+    if (episodes.isEmpty) {
+      final contentId = _tmdb?.id?.toString() ?? widget.content.title;
+      _downloadService.startDownload(
+        contentId: contentId,
+        contentTitle: _tmdb?.englishTitle ?? widget.content.title,
+        episodeIndex: episodeIndex,
+        episodeName: widget.content.title,
+        m3u8Url: widget.content.m3u8Url,
+        thumbnailUrl: _tmdb?.posterUrl ?? widget.content.thumbnailUrl,
+      );
+      return;
+    }
+
     if (episodeIndex < 0 || episodeIndex >= episodes.length) return;
     final ep = episodes[episodeIndex];
     final contentId = _tmdb?.id?.toString() ?? widget.content.title;
@@ -620,6 +640,97 @@ class _DetailPageState extends State<DetailPage> {
       episodeName: ep.name.isNotEmpty ? ep.name : 'Episode ${episodeIndex + 1}',
       m3u8Url: ep.url,
       thumbnailUrl: _tmdb?.posterUrl ?? widget.content.thumbnailUrl,
+    );
+  }
+
+  Future<void> _handleTorrentDownload(int episodeIndex) async {
+    final tmdb = _tmdb;
+    final episodeNum = _torrentEpisodeCount <= 1 ? 0 : episodeIndex + 1;
+    final contentId = tmdb?.id?.toString() ?? widget.content.title;
+    final contentTitle = tmdb?.englishTitle ?? widget.content.title;
+
+    final existing = _downloadService.getDownload(contentId, episodeIndex);
+    if (existing?.status == DownloadStatus.downloading) {
+      _downloadService.cancelDownload(contentId, episodeIndex);
+      return;
+    }
+    if (existing?.status == DownloadStatus.completed) {
+      _downloadService.deleteDownload(contentId, episodeIndex);
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Resolving TorBox torrent stream...'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    if (!_torrentStreamsByEpisode.containsKey(episodeNum)) {
+      await _fetchEpisodeStreams(episodeNum);
+    }
+
+    final streams = _torrentStreamsByEpisode[episodeNum] ?? [];
+    if (streams.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No torrent streams found for download.')),
+        );
+      }
+      return;
+    }
+
+    TorrentStream? picked = _getStreamForSelection(episodeNum);
+    if (picked == null || streams.length > 1) {
+      picked = await showStreamPicker(
+        context,
+        streams,
+        title: 'Select Torrent Stream to Download',
+      );
+    }
+    if (picked == null || !mounted) return;
+
+    String? directUrl = picked.url;
+    if (directUrl == null || directUrl.isEmpty) {
+      if (TorBoxService().isConfigured) {
+        directUrl = await TorBoxService().resolveStream(picked);
+      }
+    }
+
+    if (directUrl == null || directUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to resolve TorBox download URL.')),
+        );
+      }
+      return;
+    }
+
+    final episodeName = _torrentEpisodeCount > 1
+        ? 'S${_selectedSeason}E${episodeIndex + 1}'
+        : 'Movie';
+
+    if (kIsWeb) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download started in browser for $contentTitle ($episodeName)')),
+        );
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloading $contentTitle ($episodeName)... Check My List > Downloads')),
+        );
+      }
+    }
+
+    await _downloadService.startDownload(
+      contentId: contentId,
+      contentTitle: contentTitle,
+      episodeIndex: episodeIndex,
+      episodeName: episodeName,
+      m3u8Url: directUrl,
+      thumbnailUrl: tmdb?.posterUrl ?? widget.content.thumbnailUrl,
     );
   }
 
@@ -959,70 +1070,50 @@ class _DetailPageState extends State<DetailPage> {
               // Season dropdown for multi-season TV shows
               if (!isMovie && _torrentSeasonCount > 1) ...[
                 const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.cardDark,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: DropdownButton<int>(
-                    value: (_selectedSeason > 0 && _selectedSeason <= _torrentSeasonCount)
-                        ? _selectedSeason
-                        : 1,
-                    dropdownColor: AppTheme.cardDark,
-                    underline: const SizedBox(),
-                    isDense: true,
-                    items: List.generate(_torrentSeasonCount, (i) => i + 1)
-                        .map((s) => DropdownMenuItem(
-                              value: s,
-                              child: Text(
-                                'Season $s',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  decoration: TextDecoration.none,
-                                ),
+                FocusableDropdown<int>(
+                  value: (_selectedSeason > 0 && _selectedSeason <= _torrentSeasonCount)
+                      ? _selectedSeason
+                      : 1,
+                  items: List.generate(_torrentSeasonCount, (i) => i + 1)
+                      .map((s) => DropdownMenuItem(
+                            value: s,
+                            child: Text(
+                              'Season $s',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                decoration: TextDecoration.none,
                               ),
-                            ))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) _changeTorrentSeason(v);
-                    },
-                  ),
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) _changeTorrentSeason(v);
+                  },
                 ),
               ],
               const SizedBox(width: 12),
               // Quality selector (dropdown if multiple, label if single)
               if (_availableQualities.isNotEmpty)
                 _availableQualities.length > 1
-                    ? FocusableWrapper(
-                        isDropdown: true,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          child: DropdownButton<String>(
-                            value: _selectedQuality,
-                            dropdownColor: AppTheme.cardDark,
-                            underline: const SizedBox(),
-                            isDense: true,
-                            items: _availableQualities
-                                .map((q) => DropdownMenuItem(
-                                      value: q,
-                                      child: Text(
-                                        q,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          decoration: TextDecoration.none,
-                                        ),
-                                      ),
-                                    ))
-                                .toList(),
-                            onChanged: (v) {
-                              if (v != null) setState(() => _selectedQuality = v);
-                            },
-                          ),
-                        ),
+                    ? FocusableDropdown<String>(
+                        value: _selectedQuality,
+                        items: _availableQualities
+                            .map((q) => DropdownMenuItem(
+                                  value: q,
+                                  child: Text(
+                                    q,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      decoration: TextDecoration.none,
+                                    ),
+                                  ),
+                                ))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedQuality = v);
+                        },
                       )
                     : Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1044,33 +1135,24 @@ class _DetailPageState extends State<DetailPage> {
               // Encoder/source selector (dropdown if multiple, label if single)
               if (_availableEncoders.isNotEmpty && _selectedEncoder.isNotEmpty)
                 _availableEncoders.length > 1
-                    ? FocusableWrapper(
-                        isDropdown: true,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          child: DropdownButton<String>(
-                            value: _selectedEncoder,
-                            dropdownColor: AppTheme.cardDark,
-                            underline: const SizedBox(),
-                            isDense: true,
-                            items: _availableEncoders
-                                .map((e) => DropdownMenuItem(
-                                      value: e,
-                                      child: Text(
-                                        e,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          decoration: TextDecoration.none,
-                                        ),
-                                      ),
-                                    ))
-                                .toList(),
-                            onChanged: (v) {
-                              if (v != null) setState(() => _selectedEncoder = v);
-                            },
-                          ),
-                        ),
+                    ? FocusableDropdown<String>(
+                        value: _selectedEncoder,
+                        items: _availableEncoders
+                            .map((e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(
+                                    e,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      decoration: TextDecoration.none,
+                                    ),
+                                  ),
+                                ))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedEncoder = v);
+                        },
                       )
                     : Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1231,6 +1313,8 @@ class _DetailPageState extends State<DetailPage> {
                   ],
                 ],
                 const Spacer(),
+                _buildDownloadButton(0),
+                const SizedBox(width: 4),
                 const Icon(LucideIcons.playCircle, color: AppTheme.textSecondary, size: 22),
               ],
             ),
@@ -1271,8 +1355,8 @@ class _DetailPageState extends State<DetailPage> {
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: layout.isPhone
-                ? _buildEpisodeTilePhone(epNum, epName, epOverview, stillUrl, stream)
-                : _buildEpisodeTileDesktop(epNum, epName, epOverview, stillUrl, stream),
+                ? _buildEpisodeTilePhone(index, epNum, epName, epOverview, stillUrl, stream)
+                : _buildEpisodeTileDesktop(index, epNum, epName, epOverview, stillUrl, stream),
           ),
         ),
       ),
@@ -1280,7 +1364,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Widget _buildEpisodeTilePhone(
-    int epNum, String epName, String epOverview, String stillUrl, TorrentStream? stream,
+    int index, int epNum, String epName, String epOverview, String stillUrl, TorrentStream? stream,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1297,6 +1381,8 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
             const Spacer(),
+            _buildDownloadButton(index),
+            const SizedBox(width: 4),
             const Icon(LucideIcons.playCircle, color: AppTheme.textSecondary, size: 22),
           ],
         ),
@@ -1346,7 +1432,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Widget _buildEpisodeTileDesktop(
-    int epNum, String epName, String epOverview, String stillUrl, TorrentStream? stream,
+    int index, int epNum, String epName, String epOverview, String stillUrl, TorrentStream? stream,
   ) {
     return Row(
       children: [
@@ -1411,6 +1497,8 @@ class _DetailPageState extends State<DetailPage> {
           ),
         ),
         const SizedBox(width: 8),
+        _buildDownloadButton(index),
+        const SizedBox(width: 4),
         const Icon(LucideIcons.playCircle, color: AppTheme.textSecondary, size: 22),
       ],
     );
@@ -1688,6 +1776,36 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                         ),
                       ),
+                      HoverButton(
+                        onTap: () => _handleDownload(0),
+                        backgroundColor: const Color(0x662F3640),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 28,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                LucideIcons.download,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Download',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       _actionButton(LucideIcons.thumbsUp, ''),
                     ],
                   ),
@@ -1883,40 +2001,26 @@ class _DetailPageState extends State<DetailPage> {
               ),
               const SizedBox(width: 8),
               if (hasSeasons)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.cardDark,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: DropdownButton<int>(
-                    value: seasons.contains(_selectedSeason)
-                        ? _selectedSeason
-                        : (seasons.isNotEmpty ? seasons.first : null),
-                    dropdownColor: AppTheme.cardDark,
-                    underline: const SizedBox(),
-                    isDense: true,
-                    items: seasons
-                        .map(
-                          (s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(
-                              'Season $s',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                decoration: TextDecoration.none,
-                              ),
+                FocusableDropdown<int>(
+                  value: seasons.contains(_selectedSeason)
+                      ? _selectedSeason
+                      : (seasons.isNotEmpty ? seasons.first : null),
+                  items: seasons
+                      .map(
+                        (s) => DropdownMenuItem(
+                          value: s,
+                          child: Text(
+                            'Season $s',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              decoration: TextDecoration.none,
                             ),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setState(() => _selectedSeason = v ?? 1),
-                  ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedSeason = v ?? 1),
                 )
               else
                 Container(
@@ -1939,58 +2043,44 @@ class _DetailPageState extends State<DetailPage> {
                 ),
               const SizedBox(width: 8),
               // Source picker
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.cardDark,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white24),
-                ),
-                child: DropdownButton<VideoSource>(
-                  value: _selectedSource,
-                  dropdownColor: AppTheme.cardDark,
-                  underline: const SizedBox(),
-                  isDense: true,
-                  items: [
-                    if (_isNonChineseContent)
-                      const DropdownMenuItem(
-                        value: _torrentSource,
-                        child: Text(
-                          'Torrent',
-                          style: TextStyle(
-                            color: AppTheme.accent,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            decoration: TextDecoration.none,
-                          ),
-                        ),
-                      ),
-                    ...ApiService.sources.map(
-                      (s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(
-                          s.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            decoration: TextDecoration.none,
-                          ),
+              FocusableDropdown<VideoSource>(
+                value: _selectedSource,
+                items: [
+                  if (_isNonChineseContent)
+                    const DropdownMenuItem(
+                      value: _torrentSource,
+                      child: Text(
+                        'Torrent',
+                        style: TextStyle(
+                          color: AppTheme.accent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.none,
                         ),
                       ),
                     ),
-                  ],
-                  onChanged: (v) {
-                    if (v == null) return;
-                    if (v == _torrentSource) {
-                      _retryTorrent();
-                    } else {
-                      _switchSource(v);
-                    }
-                  },
-                ),
+                  ...ApiService.sources.map(
+                    (s) => DropdownMenuItem(
+                      value: s,
+                      child: Text(
+                        s.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          decoration: TextDecoration.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  if (v == _torrentSource) {
+                    _retryTorrent();
+                  } else {
+                    _switchSource(v);
+                  }
+                },
               ),
               if (_isLoadingEpisodes) ...[
                 const SizedBox(width: 8),
@@ -2284,6 +2374,12 @@ class _FocusableWrapperState extends State<FocusableWrapper> {
                   return null;
                 },
               ),
+              ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+                onInvoke: (intent) {
+                  widget.onTap!();
+                  return null;
+                },
+              ),
             }
           : null,
       child: GestureDetector(
@@ -2303,6 +2399,82 @@ class _FocusableWrapperState extends State<FocusableWrapper> {
             ),
           ),
           child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+class FocusableDropdown<T> extends StatefulWidget {
+  final T? value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final double borderRadius;
+
+  const FocusableDropdown({
+    super.key,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.borderRadius = 8,
+  });
+
+  @override
+  State<FocusableDropdown<T>> createState() => _FocusableDropdownState<T>();
+}
+
+class _FocusableDropdownState<T> extends State<FocusableDropdown<T>> {
+  final FocusNode _focusNode = FocusNode();
+  bool _isFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (mounted) {
+      setState(() => _isFocused = _focusNode.hasFocus);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      decoration: BoxDecoration(
+        color: _isFocused
+            ? AppTheme.accent.withOpacity(0.15)
+            : AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(widget.borderRadius),
+        border: Border.all(
+          color: _isFocused ? AppTheme.accent : Colors.white24,
+          width: _isFocused ? 1.5 : 1.0,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          focusNode: _focusNode,
+          value: widget.value,
+          dropdownColor: AppTheme.cardDark,
+          focusColor: Colors.transparent,
+          isDense: true,
+          icon: Icon(
+            LucideIcons.chevronDown,
+            size: 16,
+            color: _isFocused ? AppTheme.accent : Colors.white70,
+          ),
+          items: widget.items,
+          onChanged: widget.onChanged,
         ),
       ),
     );

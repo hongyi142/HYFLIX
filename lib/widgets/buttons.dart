@@ -37,6 +37,12 @@ class _HoverButtonState extends State<HoverButton> {
             return null;
           },
         ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (intent) {
+            widget.onTap();
+            return null;
+          },
+        ),
       },
       child: GestureDetector(
         onTap: widget.onTap,

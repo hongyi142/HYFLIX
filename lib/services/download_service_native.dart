@@ -224,9 +224,8 @@ class DownloadService extends ChangeNotifier {
       // 1. Resolve the actual m3u8 URL from the API URL
       final m3u8Url = await _resolveStreamUrl(dio, apiUrl);
       if (m3u8Url == null) {
-        debugPrint('[Download] ERROR: Could not resolve stream URL from: $apiUrl');
-        _updateItem(contentId, episodeIndex,
-            status: DownloadStatus.failed);
+        debugPrint('[Download] Non-m3u8 stream detected, running direct download: $apiUrl');
+        await _runDirectFileDownload(contentId, episodeIndex, apiUrl, cancelToken, dio);
         return;
       }
 
@@ -247,9 +246,8 @@ class DownloadService extends ChangeNotifier {
       debugPrint('[Download] Playlist: ${playlistBody.length} chars');
 
       if (playlistBody.isEmpty || !playlistBody.contains('#EXTM3U')) {
-        debugPrint('[Download] ERROR: Invalid m3u8 response');
-        _updateItem(contentId, episodeIndex,
-            status: DownloadStatus.failed);
+        debugPrint('[Download] Response is not m3u8 playlist, attempting direct file download: $resolvedUrl');
+        await _runDirectFileDownload(contentId, episodeIndex, resolvedUrl, cancelToken, dio);
         return;
       }
 
@@ -397,6 +395,77 @@ class DownloadService extends ChangeNotifier {
           status: DownloadStatus.failed);
     } finally {
       _cancelTokens.remove(key);
+    }
+  }
+
+  Future<void> _runDirectFileDownload(
+    String contentId,
+    int episodeIndex,
+    String downloadUrl,
+    CancelToken cancelToken,
+    Dio dio,
+  ) async {
+    try {
+      debugPrint('[Download] Running direct file download from: $downloadUrl');
+      final dir = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${dir.path}/downloads');
+      if (!downloadDir.existsSync()) {
+        downloadDir.createSync(recursive: true);
+      }
+
+      String ext = '.mp4';
+      final cleanUrl = downloadUrl.toLowerCase();
+      if (cleanUrl.contains('.mkv')) {
+        ext = '.mkv';
+      } else if (cleanUrl.contains('.ts')) {
+        ext = '.ts';
+      } else if (cleanUrl.contains('.avi')) {
+        ext = '.avi';
+      } else if (cleanUrl.contains('.webm')) {
+        ext = '.webm';
+      }
+
+      final filePath = '${downloadDir.path}/${contentId}_$episodeIndex$ext';
+      final stopwatch = Stopwatch()..start();
+
+      await dio.download(
+        downloadUrl,
+        filePath,
+        cancelToken: cancelToken,
+        onReceiveProgress: (received, total) {
+          if (cancelToken.isCancelled) return;
+          final progress = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
+          final elapsed = stopwatch.elapsedMilliseconds / 1000.0;
+          final speed = elapsed > 0 ? received / elapsed : 0.0;
+          final remainingBytes = total > received ? total - received : 0;
+          final etaSeconds = speed > 0 ? (remainingBytes / speed).round() : 0;
+
+          _updateItem(
+            contentId,
+            episodeIndex,
+            progress: progress,
+            downloadedBytes: received,
+            totalBytes: total > 0 ? total : received,
+            speed: speed,
+            etaSeconds: etaSeconds,
+          );
+        },
+      );
+
+      _updateItem(
+        contentId,
+        episodeIndex,
+        status: DownloadStatus.completed,
+        progress: 1.0,
+        filePath: filePath,
+        speed: 0,
+        etaSeconds: 0,
+      );
+      debugPrint('[Download] SUCCESS direct download: $filePath');
+    } catch (e) {
+      if (e is DioException && e.type == DioExceptionType.cancel) return;
+      debugPrint('[Download] Direct download error: $e');
+      _updateItem(contentId, episodeIndex, status: DownloadStatus.failed);
     }
   }
 

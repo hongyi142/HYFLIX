@@ -6,8 +6,9 @@ import '../services/torrent_service.dart';
 /// Returns the selected TorrentStream, or null if dismissed.
 Future<TorrentStream?> showStreamPicker(
   BuildContext context,
-  List<TorrentStream> streams,
-) {
+  List<TorrentStream> streams, {
+  String title = 'Select Stream',
+}) {
   return showModalBottomSheet<TorrentStream>(
     context: context,
     backgroundColor: AppTheme.cardDark,
@@ -15,14 +16,15 @@ Future<TorrentStream?> showStreamPicker(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (_) => _StreamPickerSheet(streams: streams),
+    builder: (_) => _StreamPickerSheet(streams: streams, title: title),
   );
 }
 
 class _StreamPickerSheet extends StatelessWidget {
   final List<TorrentStream> streams;
+  final String title;
 
-  const _StreamPickerSheet({required this.streams});
+  const _StreamPickerSheet({required this.streams, required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -38,9 +40,9 @@ class _StreamPickerSheet extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
             child: Row(
               children: [
-                const Text(
-                  'Select Stream',
-                  style: TextStyle(
+                Text(
+                  title,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
                     fontWeight: FontWeight.bold,

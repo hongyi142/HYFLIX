@@ -255,9 +255,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   VoidCallback? _bufListener;
   VoidCallback? _arListener;
 
+  final FocusNode _playerFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
+    _playerFocusNode.requestFocus();
     _currentEpIndex = widget.initialEpisodeIndex;
     _currentUrl = widget.videoUrl;
     _initPlayer(_currentUrl!);
@@ -317,7 +320,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         if (mounted) setState(() {});
       };
       _playListener = () {
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        if (ctrl.isPlaying.value) {
+          if (_showControls && !_showEpisodes) {
+            _scheduleHideControls();
+          }
+        } else {
+          _hideControlsTimer?.cancel();
+          if (!_showControls) {
+            setState(() => _showControls = true);
+          }
+        }
+        setState(() {});
       };
       _bufListener = () {
         if (mounted) setState(() {});
@@ -392,8 +406,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   void _togglePlayPause() {
-    _controller?.playOrPause();
-    _scheduleHideControls();
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    final wasPlaying = ctrl.isPlaying.value;
+    ctrl.playOrPause();
+    if (!wasPlaying) {
+      setState(() => _showControls = false);
+      _playerFocusNode.requestFocus();
+    } else {
+      _hideControlsTimer?.cancel();
+      setState(() => _showControls = true);
+    }
   }
 
   void _seekRelative(int seconds) {
@@ -409,10 +432,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   void _scheduleHideControls() {
     _hideControlsTimer?.cancel();
-    setState(() => _showControls = true);
-    _hideControlsTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _controller?.isPlaying.value == true) {
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _showControls && !_isSeeking && !_showEpisodes && _controller?.isPlaying.value == true) {
         setState(() => _showControls = false);
+        _playerFocusNode.requestFocus();
       }
     });
   }
@@ -456,6 +479,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _removeListeners();
     _controller?.dispose();
     _controller = null;
+    _playerFocusNode.dispose();
     super.dispose();
   }
 
@@ -472,7 +496,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         if (!didPop) _exitPlayer();
       },
       child: KeyboardListener(
-        focusNode: FocusNode()..requestFocus(),
+        focusNode: _playerFocusNode,
         autofocus: true,
         onKeyEvent: (e) {
           if (e is KeyDownEvent) {

@@ -538,6 +538,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void _listenPlaying() {
     _playingSub = _player.stream.playing.listen((playing) {
       if (!mounted) return;
+      if (playing) {
+        if (_showControls && !_isAnyPanelOpen) {
+          _scheduleHideControls();
+        }
+      } else {
+        _hideControlsTimer?.cancel();
+        if (!_showControls) {
+          setState(() => _showControls = true);
+        }
+      }
+      setState(() {});
     });
   }
 
@@ -1018,8 +1029,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void _scheduleHideControls() {
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _showControls && !_isScrubbing && _player.state.playing) {
+      if (mounted && _showControls && !_isScrubbing && !_isAnyPanelOpen && _player.state.playing) {
         setState(() => _showControls = false);
+        _playerFocusNode.requestFocus();
       }
     });
   }
@@ -1042,6 +1054,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _statsTimer?.cancel();
       _audioTracksSub?.cancel();
       _streamInfoSub?.cancel();
+      _playingSub?.cancel();
     } catch (e) {
       debugPrint('[VideoPlayer] Error cancelling subscriptions: $e');
     }
@@ -1096,6 +1109,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _positionSub?.cancel();
     _audioTracksSub?.cancel();
     _streamInfoSub?.cancel();
+    _playingSub?.cancel();
 
     // Capture player state before disposal
     final position = _player.state.position;
@@ -1161,6 +1175,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _player.play();
       _hideControlsTimer?.cancel();
       setState(() => _showControls = false);
+      _playerFocusNode.requestFocus();
       return true;
     }
     return false;
@@ -1367,35 +1382,46 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
           if (event is! KeyDownEvent) return;
 
-          // 2. OK Button: Toggle Play / Pause & show/hide controls overlay UI
+          // 2. OK Button / Space bar: Toggle Play / Pause & show/hide controls overlay UI
           if (_isSelectKey(event.logicalKey)) {
+            final isOverlayButtonFocused = _topBarBackFocusNode.hasFocus ||
+                _topBarWifiFocusNode.hasFocus ||
+                _topBarSettingsFocusNode.hasFocus ||
+                _topBarSubtitleFocusNode.hasFocus ||
+                _topBarAudioFocusNode.hasFocus ||
+                _topBarEpisodesFocusNode.hasFocus ||
+                _playPauseFocusNode.hasFocus;
+
+            final isSpaceKey = event.logicalKey == LogicalKeyboardKey.space;
+
+            // If any overlay button (including center play/pause) is focused,
+            // let the button's own ActivateIntent handle it to avoid a double-toggle.
+            if (isOverlayButtonFocused && !isSpaceKey) {
+              return;
+            }
+
             if (!_showControls) {
-              // Controls hidden (video playing) -> pause, display controls overlay UI & highlight back button
+              // Controls hidden (video playing) -> pause & show controls overlay
               _player.pause();
               setState(() {
                 _showControls = true;
               });
-              _topBarBackFocusNode.requestFocus();
-              _scheduleHideControls();
             } else {
-              // Check if any Top Bar icon or Center Play/Pause button has focus
-              final isOverlayButtonFocused = _topBarBackFocusNode.hasFocus ||
-                  _topBarWifiFocusNode.hasFocus ||
-                  _topBarSettingsFocusNode.hasFocus ||
-                  _topBarSubtitleFocusNode.hasFocus ||
-                  _topBarAudioFocusNode.hasFocus ||
-                  _topBarEpisodesFocusNode.hasFocus ||
-                  _playPauseFocusNode.hasFocus;
-
-              // Only toggle play/pause if focus is NOT on an overlay button
-              if (!isOverlayButtonFocused) {
-                _player.playOrPause();
-                if (_player.state.playing) {
-                  _scheduleHideControls();
-                } else {
-                  _hideControlsTimer?.cancel();
-                }
-                setState(() {});
+              // Controls visible -> toggle play/pause
+              final wasPlaying = _player.state.playing;
+              _player.playOrPause();
+              if (!wasPlaying) {
+                // Resumed playback -> hide controls immediately and return focus to player
+                setState(() {
+                  _showControls = false;
+                });
+                _playerFocusNode.requestFocus();
+              } else {
+                // Paused -> cancel hide timer and keep controls visible
+                _hideControlsTimer?.cancel();
+                setState(() {
+                  _showControls = true;
+                });
               }
             }
             return;
@@ -1952,6 +1978,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           return KeyEventResult.ignored;
         }
 
+        if (_isSelectKey(event.logicalKey) && event.logicalKey != LogicalKeyboardKey.space) {
+          onTap();
+          return KeyEventResult.handled;
+        }
+
         return KeyEventResult.ignored;
       },
       child: HoverButton(
@@ -2076,6 +2107,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     }
                     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
                       _playerFocusNode.requestFocus();
+                      return KeyEventResult.handled;
+                    }
+                    if (_isSelectKey(event.logicalKey)) {
+                      final wasPlaying = _player.state.playing;
+                      _player.playOrPause();
+                      if (!wasPlaying) {
+                        setState(() {
+                          _showControls = false;
+                        });
+                        _playerFocusNode.requestFocus();
+                      } else {
+                        _hideControlsTimer?.cancel();
+                        setState(() {
+                          _showControls = true;
+                        });
+                      }
                       return KeyEventResult.handled;
                     }
                   }
