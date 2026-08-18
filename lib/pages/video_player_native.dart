@@ -261,9 +261,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         final native = _player.platform as NativePlayer;
         await _optimizeMpvPerformance(native);
         await native.setProperty('network-timeout', '60');
-        await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await native.setProperty('cache-secs', '60');
-        await native.setProperty('demuxer-readahead-secs', '60');
+        await native.setProperty('user-agent', 'Mozilla/5.0 (Linux; Android 9; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+        if (Platform.isAndroid) {
+          await native.setProperty('cache-secs', '25');
+          await native.setProperty('demuxer-readahead-secs', '25');
+        } else {
+          await native.setProperty('cache-secs', '60');
+          await native.setProperty('demuxer-readahead-secs', '60');
+        }
       } catch (e) {
         debugPrint('[VideoPlayer] Failed to configure mpv: $e');
       }
@@ -337,9 +342,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         final native = _player.platform as NativePlayer;
         await _optimizeMpvPerformance(native);
         await native.setProperty('network-timeout', '60');
-        await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await native.setProperty('cache-secs', '60');
-        await native.setProperty('demuxer-readahead-secs', '60');
+        await native.setProperty('user-agent', 'Mozilla/5.0 (Linux; Android 9; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+        if (Platform.isAndroid) {
+          await native.setProperty('cache-secs', '25');
+          await native.setProperty('demuxer-readahead-secs', '25');
+        } else {
+          await native.setProperty('cache-secs', '60');
+          await native.setProperty('demuxer-readahead-secs', '60');
+        }
       } catch (e) {
         debugPrint('[VideoPlayer] Failed to configure mpv: $e');
       }
@@ -401,10 +411,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       await _optimizeMpvPerformance(native);
       // Default is 5s; torrent HTTP server can block up to 60s waiting for pieces
       await native.setProperty('network-timeout', '60');
-      // Keep 60s of video cached ahead of the playhead
-      await native.setProperty('cache-secs', '60');
-      // Demuxer readahead window — mpv prefetches data this far ahead
-      await native.setProperty('demuxer-readahead-secs', '60');
+      if (Platform.isAndroid) {
+        await native.setProperty('cache-secs', '25');
+        await native.setProperty('demuxer-readahead-secs', '25');
+      } else {
+        // Keep 60s of video cached ahead of the playhead
+        await native.setProperty('cache-secs', '60');
+        // Demuxer readahead window — mpv prefetches data this far ahead
+        await native.setProperty('demuxer-readahead-secs', '60');
+      }
       debugPrint('[VideoPlayer] Configured mpv for torrent streaming');
     } catch (e) {
       debugPrint('[VideoPlayer] Failed to configure mpv for torrent: $e');
@@ -436,27 +451,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _optimizeMpvPerformance(NativePlayer native) async {
     try {
       if (Platform.isAndroid) {
-        // Enable hardware decoding via Android MediaCodec
-        await native.setProperty('hwdec', 'mediacodec');
+        // Use auto-safe so it tries hardware decoding but falls back gracefully on low-end chips
+        await native.setProperty('hwdec', 'auto-safe');
+        // Memory tuning for low-RAM Android devices / Projectors (e.g. Lumos 1GB RAM)
+        await native.setProperty('demuxer-max-bytes', '33554432');     // 32MB cache
+        await native.setProperty('demuxer-max-back-bytes', '8388608');  // 8MB back buffer
+        await native.setProperty('demuxer-readahead-secs', '25');       // 25s prefetch
+        // Downmix audio to stereo 2.0 (ensures 5.1/7.1 EAC3/DTS streams play smoothly on projector speakers)
+        await native.setProperty('audio-channels', 'stereo');
+        // Small stream buffer size for low memory
+        await native.setProperty('stream-buffer-size', '524288');       // 512KB socket buffer
       } else {
         // Enable GPU hardware decoding on Windows / macOS / Linux
         await native.setProperty('hwdec', 'auto-safe');
+        await native.setProperty('demuxer-max-bytes', '500000000'); // 500MB cache
+        await native.setProperty('demuxer-max-back-bytes', '100000000'); // 100MB back buffer
+        await native.setProperty('demuxer-readahead-secs', '120'); // Prefetch up to 120s
+        await native.setProperty('stream-buffer-size', '4194304'); // 4MB socket buffer
       }
       await native.setProperty('vd-lavc-dr', 'yes');
 
-      // Expand demuxer cache to 500MB max bytes and 100MB back buffer
-      await native.setProperty('demuxer-max-bytes', '500000000'); // 500MB cache
-      await native.setProperty('demuxer-max-back-bytes', '100000000'); // 100MB back buffer
-      await native.setProperty('demuxer-readahead-secs', '120'); // Prefetch up to 120s
-
       // Prevent constant true/false buffering oscillation on HLS / slow CDNs:
-      // Require MPV to accumulate at least 3 seconds of buffer before unpausing
+      // Require MPV to accumulate at least 2 seconds of buffer before unpausing
       await native.setProperty('cache-pause', 'yes');
-      await native.setProperty('cache-pause-wait', '3');
-      await native.setProperty('demuxer-hysteresis-secs', '10');
-
-      // Increase stream buffer chunk size for network sockets
-      await native.setProperty('stream-buffer-size', '4194304'); // 4MB socket buffer
+      await native.setProperty('cache-pause-wait', '2');
+      await native.setProperty('demuxer-hysteresis-secs', '5');
     } catch (e) {
       debugPrint('[VideoPlayer] Error optimizing native mpv performance: $e');
     }
@@ -470,14 +489,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       final native = _player.platform as NativePlayer;
       await _optimizeMpvPerformance(native);
 
-      // Configure mpv timeout for VOD streams. Chinese VOD CDNs can be slow
-      // so we raise the network timeout. We do NOT set cache-secs or
-      // demuxer-readahead-secs here — mpv's defaults (120s / 150s) are much
-      // more generous than the 30s we were using, and that was causing
-      // stuttering on Chinese VOD streams.
+      // Configure mpv timeout for VOD streams.
       if (widget.torrentStream == null) {
         await native.setProperty('network-timeout', '60');
-        await native.setProperty('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await native.setProperty('user-agent', 'Mozilla/5.0 (Linux; Android 9; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
       }
 
       await _player.open(Media(url));

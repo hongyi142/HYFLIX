@@ -272,6 +272,20 @@
       margin-bottom: 6px;
     }
 
+    .card-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #ff9800;
+      background: rgba(255, 152, 0, 0.12);
+      border: 1px solid rgba(255, 152, 0, 0.25);
+      border-radius: 20px;
+      padding: 3px 10px;
+      margin-bottom: 10px;
+    }
+
     .card-file {
       font-size: 13px;
       color: var(--text-muted);
@@ -520,8 +534,17 @@
 
     const PLATFORMS = [
       {
-        id: 'android', name: 'Android',
+        id: 'android', name: 'Android Mobile',
         icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 3.26 6 5.01 6 7h12c0-1.99-.97-3.75-2.47-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z"/></svg>',
+      },
+      {
+        id: 'android-tv', name: 'Android TV',
+        icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>',
+      },
+      {
+        id: 'projector', name: 'Projector Edition',
+        badge: 'Lumos & 32-bit TV',
+        icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6H5c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-5 7c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm6 3h-2v-1h2v1zm0-3h-2v-1h2v1zm0-3h-2V9h2v1zM6 15H4v-2h2v2zm0-4H4V9h2v2z"/></svg>',
       },
       {
         id: 'windows', name: 'Windows',
@@ -534,10 +557,6 @@
       {
         id: 'ios', name: 'iPhone / iPad',
         icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 1h-8C6.12 1 5 2.12 5 3.5v17C5 21.88 6.12 23 7.5 23h8c1.38 0 2.5-1.12 2.5-2.5v-17C18 2.12 16.88 1 15.5 1zm-4 21c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5-4H7V4h9v14z"/></svg>',
-      },
-      {
-        id: 'android-tv', name: 'Android TV',
-        icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>',
       },
       {
         id: 'apple-tv', name: 'Apple TV',
@@ -561,6 +580,18 @@
         fileSize: 134343084,
         downloadUrl: 'https://github.com/hongyi142/HYFLIX/releases/download/v1.1.6/hyflix-android.apk'
       },
+      'android-tv': {
+        enabled: true,
+        fileName: 'hyflix-android-tv.apk',
+        fileSize: 134343084,
+        downloadUrl: 'https://github.com/hongyi142/HYFLIX/releases/download/v1.1.6/hyflix-android-tv.apk'
+      },
+      projector: {
+        enabled: true,
+        fileName: 'hyflix-projector.apk',
+        fileSize: 134343084,
+        downloadUrl: 'https://github.com/hongyi142/HYFLIX/releases/download/v1.1.6/hyflix-projector.apk'
+      },
       windows: {
         enabled: true,
         fileName: 'hyflix-windows.zip',
@@ -578,12 +609,6 @@
         fileName: '',
         fileSize: 0,
         downloadUrl: '#'
-      },
-      'android-tv': {
-        enabled: true,
-        fileName: 'hyflix-android-tv.apk',
-        fileSize: 134343084,
-        downloadUrl: 'https://github.com/hongyi142/HYFLIX/releases/download/v1.1.6/hyflix-android-tv.apk'
       },
       'apple-tv': {
         enabled: false,
@@ -608,12 +633,14 @@
         const fileName = state.fileName || '';
         const fileSize = formatSize(state.fileSize);
         const url = state.downloadUrl || '#';
+        const badgeHtml = p.badge ? `<div class="card-badge">${p.badge}</div>` : '';
 
         html += `
           <div class="card">
             <div class="card-glow"></div>
             <div class="card-icon">${p.icon}</div>
             <div class="card-platform">${p.name}</div>
+            ${badgeHtml}
             <div class="card-file">${fileName}</div>
             <div class="card-size">${fileSize || '&nbsp;'}</div>
             <a class="btn" href="${url}" target="_blank" rel="noopener">
@@ -694,12 +721,19 @@
         if (data.assets && Array.isArray(data.assets)) {
           let foundAndroid = false;
           let foundAndroidTv = false;
+          let foundProjector = false;
           let foundWindows = false;
           let foundMacos = false;
 
           data.assets.forEach(asset => {
             const name = asset.name.toLowerCase();
-            if (name.endsWith('.apk') && name.includes('android-tv')) {
+            if (name.endsWith('.apk') && (name.includes('projector') || name.includes('lumos') || name.includes('armeabi-v7a'))) {
+              dynamicConfig['projector'].enabled = true;
+              dynamicConfig['projector'].fileName = asset.name;
+              dynamicConfig['projector'].fileSize = asset.size;
+              dynamicConfig['projector'].downloadUrl = asset.browser_download_url;
+              foundProjector = true;
+            } else if (name.endsWith('.apk') && name.includes('android-tv')) {
               dynamicConfig['android-tv'].enabled = true;
               dynamicConfig['android-tv'].fileName = asset.name;
               dynamicConfig['android-tv'].fileSize = asset.size;
@@ -726,7 +760,18 @@
             }
           });
 
-          if (foundAndroid || foundAndroidTv || foundWindows || foundMacos) {
+          // If no specific projector release is detected yet, fallback to Android TV APK
+          if (!foundProjector && (foundAndroidTv || foundAndroid)) {
+            const fallbackUrl = dynamicConfig['android-tv'].downloadUrl || dynamicConfig.android.downloadUrl;
+            const fallbackSize = dynamicConfig['android-tv'].fileSize || dynamicConfig.android.fileSize;
+            dynamicConfig['projector'].enabled = true;
+            dynamicConfig['projector'].fileName = 'hyflix-projector.apk';
+            dynamicConfig['projector'].fileSize = fallbackSize;
+            dynamicConfig['projector'].downloadUrl = fallbackUrl;
+            foundProjector = true;
+          }
+
+          if (foundAndroid || foundAndroidTv || foundProjector || foundWindows || foundMacos) {
             renderCards(dynamicConfig);
             return;
           }

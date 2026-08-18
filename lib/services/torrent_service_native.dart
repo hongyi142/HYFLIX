@@ -32,11 +32,12 @@ class TorrentService {
       );
 
       // Apply streaming-optimized configuration
-      LibtorrentFlutter.instance.configureSession(const BtConfig(
-        cacheSize: 256 * 1024 * 1024,       // 256MB cache for smooth playback
+      final isAndroid = Platform.isAndroid;
+      LibtorrentFlutter.instance.configureSession(BtConfig(
+        cacheSize: isAndroid ? 32 * 1024 * 1024 : 256 * 1024 * 1024, // 32MB on Android to prevent OOM on 1GB devices
         readerReadAhead: 95,                  // (stored but unused by serve_range)
-        preloadCache: 40,                     // preload 40% of cache on start
-        connectionsLimit: 80,                 // 80 concurrent piece requests (default 25)
+        preloadCache: isAndroid ? 25 : 40,    // preload cache on start
+        connectionsLimit: isAndroid ? 35 : 80,// Lower concurrent connections on Android
         torrentDisconnectTimeout: 120,        // keep alive 2 minutes
         forceEncrypt: false,                  // allow both encrypted and plain
         disableTcp: false,                    // keep TCP
