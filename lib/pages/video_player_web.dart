@@ -401,6 +401,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _showSubtitles = false;
       _selectedSub = null;
       _availableSubs = [];
+      _isFullSeasonSubsLoaded = false;
     });
     _initPlayer(ep.url);
   }
@@ -984,17 +985,27 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   bool _showSubtitles = false;
   bool _loadingSubs = false;
+  bool _isFullSeasonSubsLoaded = false;
   List<SubtitleItem> _availableSubs = [];
   SubtitleItem? _selectedSub;
   bool _downloadingSeason = false;
   int _subDelayOffsetMs = 0;
   String? _loadedSrtContent;
 
-  Future<void> _fetchSubtitles() async {
-    if (mounted) setState(() => _loadingSubs = true);
+  Future<void> _fetchSubtitles({bool fullSeason = false}) async {
+    if (_loadingSubs) return;
+    if (mounted) {
+      setState(() {
+        _loadingSubs = true;
+        if (fullSeason) _isFullSeasonSubsLoaded = true;
+      });
+    }
     try {
       final currentEpisode = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
-      final epNum = widget.episodeNumber ?? (widget.episodes.isNotEmpty ? _currentEpIndex + 1 : null);
+      final epNum = widget.episodeNumber ??
+          (widget.episodes.isNotEmpty
+              ? _currentEpIndex + 1
+              : (_effectiveEpisodeCount > 1 ? _currentEpIndex + 1 : null));
       final subs = await SubtitleService.searchSubtitles(
         widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title,
         tmdbId: widget.tmdbId,
@@ -1002,6 +1013,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         episodeNumber: epNum,
         episodeName: currentEpisode?.name,
         isTvShow: widget.isTvShow,
+        searchFullSeason: fullSeason,
       );
 
       // Load locally stored subtitles
@@ -1072,7 +1084,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       );
       
       if (saved.isNotEmpty) {
-        await _fetchSubtitles();
+        await _fetchSubtitles(fullSeason: _isFullSeasonSubsLoaded);
         
         final matchingLocal = await SubtitleService.findMatchingLocalSubtitle(
           tmdbId: widget.tmdbId!,
@@ -1166,7 +1178,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             backgroundColor: AppTheme.accent,
           ),
         );
-        await _fetchSubtitles();
+        await _fetchSubtitles(fullSeason: _isFullSeasonSubsLoaded);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1230,7 +1242,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           backgroundColor: AppTheme.accent,
         ),
       );
-      await _fetchSubtitles();
+      await _fetchSubtitles(fullSeason: _isFullSeasonSubsLoaded);
     }
   }
 
@@ -1276,9 +1288,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('No subtitles found',
+                      const Text('No subtitles found for this episode',
                           style: TextStyle(color: AppTheme.textSecondary)),
                       const SizedBox(height: 12),
+                      if (widget.isTvShow && !_isFullSeasonSubsLoaded) ...[
+                        OutlinedButton.icon(
+                          onPressed: () => _fetchSubtitles(fullSeason: true),
+                          icon: const Icon(LucideIcons.search, size: 16, color: AppTheme.accent),
+                          label: Text(
+                            widget.seasonNumber != null
+                                ? 'Search All Season ${widget.seasonNumber} Subtitles'
+                                : 'Search All Subtitles',
+                            style: const TextStyle(color: AppTheme.accent),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppTheme.accent),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       TextButton.icon(
                         onPressed: _importSubtitles,
                         icon: const Icon(LucideIcons.upload, size: 16),
@@ -1292,8 +1320,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: _availableSubs.length + 1,
+                  itemCount: _availableSubs.length + 1 + (widget.isTvShow && !_isFullSeasonSubsLoaded ? 1 : 0),
                   itemBuilder: (context, i) {
+                    if (i == _availableSubs.length + 1) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                        child: Center(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _fetchSubtitles(fullSeason: true),
+                            icon: const Icon(LucideIcons.search, size: 16, color: AppTheme.accent),
+                            label: Text(
+                              widget.seasonNumber != null
+                                  ? 'Search All Season ${widget.seasonNumber} Subtitles'
+                                  : 'Search All Subtitles',
+                              style: const TextStyle(color: AppTheme.accent, fontSize: 13),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: AppTheme.accent),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
                     final sub = i > 0 ? _availableSubs[i - 1] : null;
                     return GestureDetector(
                       onTap: () {

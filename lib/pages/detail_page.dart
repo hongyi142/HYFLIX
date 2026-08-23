@@ -524,6 +524,7 @@ class _DetailPageState extends State<DetailPage> {
           posterUrl: poster,
           torrentStream: picked,
           seekToSeconds: seekToSeconds,
+          episodeNumber: episodeNum,
           episodeCount: _torrentEpisodeCount,
           videoSourceName: 'Torrent',
         ),

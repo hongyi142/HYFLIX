@@ -93,6 +93,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   List<SubtitleItem> _availableSubs = [];
   SubtitleItem? _selectedSub;
   bool _loadingSubs = false;
+  bool _isFullSeasonSubsLoaded = false;
   DateTime? _startTime;
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<Duration>? _positionSub;
@@ -274,7 +275,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
 
       _openMedia(stream.url!, seekToSeconds: widget.seekToSeconds);
-      _fetchSubtitles();
       return;
     }
 
@@ -355,7 +355,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
 
       _openMedia(url, seekToSeconds: widget.seekToSeconds);
-      _fetchSubtitles();
       return;
     }
 
@@ -400,7 +399,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     await _configureMpvForTorrent();
     _openMedia(url, seekToSeconds: widget.seekToSeconds);
-    _fetchSubtitles();
   }
 
   /// Configure mpv for torrent streaming — increase timeouts and enable
@@ -845,11 +843,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return pos >= 0 ? pos + 1 : globalIndex + 1;
   }
 
-  Future<void> _fetchSubtitles() async {
-    if (mounted) setState(() => _loadingSubs = true);
+  Future<void> _fetchSubtitles({bool fullSeason = false}) async {
+    if (_loadingSubs) return;
+    if (mounted) {
+      setState(() {
+        _loadingSubs = true;
+        if (fullSeason) _isFullSeasonSubsLoaded = true;
+      });
+    }
     try {
       final currentEpisode = widget.episodes.isNotEmpty ? widget.episodes[_currentEpIndex] : null;
-      final epNum = widget.episodeNumber ?? _episodeNumberInSeason(_currentEpIndex);
+      final epNum = widget.episodeNumber ??
+          (widget.episodes.isNotEmpty
+              ? _episodeNumberInSeason(_currentEpIndex)
+              : (_effectiveEpisodeCount > 1 ? _currentEpIndex + 1 : null));
       final subs = await SubtitleService.searchSubtitles(
         _currentTitle ?? '',
         tmdbId: widget.tmdbId,
@@ -857,6 +864,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         episodeNumber: epNum,
         episodeName: currentEpisode?.name,
         isTvShow: widget.isTvShow,
+        searchFullSeason: fullSeason,
       );
 
       // Load locally stored subtitles (native only)
@@ -928,7 +936,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       
       if (saved.isNotEmpty) {
         // Refresh subtitle list so local subtitles are shown
-        await _fetchSubtitles();
+        await _fetchSubtitles(fullSeason: _isFullSeasonSubsLoaded);
         
         // Find the matching local subtitle for this episode
         final matchingLocal = await SubtitleService.findMatchingLocalSubtitle(
@@ -1025,6 +1033,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _selectedSub = null;
       _selectedAudioTrack = null;
       _availableSubs = [];
+      _isFullSeasonSubsLoaded = false;
     });
     _openMedia(ep.url);
     _loadIntroTimestamp();
@@ -2387,10 +2396,26 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('No subtitles found',
+                    const Text('No subtitles found for this episode',
                         style: TextStyle(color: AppTheme.textSecondary)),
+                    const SizedBox(height: 12),
+                    if (widget.isTvShow && !_isFullSeasonSubsLoaded) ...[
+                      OutlinedButton.icon(
+                        onPressed: () => _fetchSubtitles(fullSeason: true),
+                        icon: const Icon(LucideIcons.search, size: 16, color: AppTheme.accent),
+                        label: Text(
+                          widget.seasonNumber != null
+                              ? 'Search All Season ${widget.seasonNumber} Subtitles'
+                              : 'Search All Subtitles',
+                          style: const TextStyle(color: AppTheme.accent),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppTheme.accent),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     if (!kIsWeb) ...[
-                      const SizedBox(height: 12),
                       TextButton.icon(
                         onPressed: _importSubtitles,
                         icon: const Icon(LucideIcons.upload, size: 16),
@@ -2405,8 +2430,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: _availableSubs.length + 1,
+                itemCount: _availableSubs.length + 1 + (widget.isTvShow && !_isFullSeasonSubsLoaded ? 1 : 0),
                 itemBuilder: (context, i) {
+                    if (i == _availableSubs.length + 1) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                        child: Center(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _fetchSubtitles(fullSeason: true),
+                            icon: const Icon(LucideIcons.search, size: 16, color: AppTheme.accent),
+                            label: Text(
+                              widget.seasonNumber != null
+                                  ? 'Search All Season ${widget.seasonNumber} Subtitles'
+                                  : 'Search All Subtitles',
+                              style: const TextStyle(color: AppTheme.accent, fontSize: 13),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: AppTheme.accent),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
                     final sub = i > 0 ? _availableSubs[i - 1] : null;
                     return _FocusableTileWrapper(
                       focusNode: i == 0 ? _subtitleFirstFocusNode : null,
@@ -3028,7 +3074,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           ),
         );
         // Refresh subtitle list to include newly saved local files
-        await _fetchSubtitles();
+        await _fetchSubtitles(fullSeason: _isFullSeasonSubsLoaded);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -3095,7 +3141,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           backgroundColor: AppTheme.accent,
         ),
       );
-      await _fetchSubtitles();
+      await _fetchSubtitles(fullSeason: _isFullSeasonSubsLoaded);
     }
   }
 

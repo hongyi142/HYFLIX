@@ -131,7 +131,7 @@ class SubtitleService {
       var page = 1;
       var totalPages = 1;
 
-      while (page <= totalPages) {
+      while (page <= (episodeNum != null ? 1 : totalPages)) {
         final queryParams = {
           'api_key': subdlApiKey,
           'languages': 'EN,ZH,ZH-CN,ZH-TW,CHI,CN',
@@ -187,21 +187,28 @@ class SubtitleService {
           final apiEpFrom = (item['episode_from'] as num?)?.toInt();
           final apiEpEnd = (item['episode_end'] as num?)?.toInt();
 
+          final matchType = _classifyFromApiFields(
+            apiSeason: apiSeason,
+            apiEpisode: apiEpisode,
+            apiFullSeason: apiFullSeason,
+            apiEpFrom: apiEpFrom,
+            apiEpEnd: apiEpEnd,
+            targetSeason: effectiveSeason,
+            targetEpisode: episodeNum != null ? int.tryParse(episodeNum) : null,
+          );
+
+          // Skip if query was for a specific episode and this subtitle belongs to another episode
+          if (episodeNum != null && matchType == null) {
+            continue;
+          }
+
           allItems.add(SubtitleItem(
             id: 'sdl_${url.hashCode}',
             fileName: fileName,
             language: language,
             downloadUrl: downloadUrl,
             source: 'subdl',
-            matchType: _classifyFromApiFields(
-              apiSeason: apiSeason,
-              apiEpisode: apiEpisode,
-              apiFullSeason: apiFullSeason,
-              apiEpFrom: apiEpFrom,
-              apiEpEnd: apiEpEnd,
-              targetSeason: effectiveSeason,
-              targetEpisode: episodeNum != null ? int.tryParse(episodeNum) : null,
-            ),
+            matchType: matchType ?? SubtitleMatchType.seasonFallback,
           ));
         }
 
@@ -215,7 +222,7 @@ class SubtitleService {
   }
 
   /// Classify subtitle match type using API's structured metadata.
-  static SubtitleMatchType _classifyFromApiFields({
+  static SubtitleMatchType? _classifyFromApiFields({
     int? apiSeason,
     int? apiEpisode,
     bool apiFullSeason = false,
@@ -230,7 +237,7 @@ class SubtitleService {
     // Has explicit episode info from API
     if (apiEpisode != null && targetEpisode != null) {
       if (apiEpisode == targetEpisode) return SubtitleMatchType.exactEpisode;
-      return SubtitleMatchType.seasonFallback; // different episode
+      return null; // different episode
     }
 
     // Episode range (e.g., episodes 1-10)
@@ -238,7 +245,7 @@ class SubtitleService {
       if (targetEpisode >= apiEpFrom && targetEpisode <= apiEpEnd) {
         return SubtitleMatchType.exactEpisode;
       }
-      return SubtitleMatchType.seasonFallback;
+      return null; // different episode range
     }
 
     // No episode info from API — season-level fallback
@@ -409,29 +416,33 @@ class SubtitleService {
     int? episodeNumber,
     String? episodeName,
     bool isTvShow = false,
+    bool searchFullSeason = false,
   }) async {
     final effectiveSeason = seasonNumber ??
         (episodeName != null ? _extractSeasonFromEpisodeName(episodeName) : _extractSeasonFromEpisodeName(query));
     final episodeNum = episodeNumber?.toString() ??
         (episodeName != null ? _extractEpisodeNumber(episodeName) : _extractEpisodeFromQuery(query));
-    print('[SubtitleService] searchSubtitles entry: query="$query", tmdbId=$tmdbId, season=$seasonNumber, episode=$episodeNumber, effectiveSeason=$effectiveSeason, episodeNum=$episodeNum');
-    final cacheKey = '${tmdbId ?? query}_s${effectiveSeason ?? ''}';
+    print('[SubtitleService] searchSubtitles entry: query="$query", tmdbId=$tmdbId, season=$seasonNumber, episode=$episodeNumber, effectiveSeason=$effectiveSeason, episodeNum=$episodeNum, searchFullSeason=$searchFullSeason');
+    
+    final cacheKey = searchFullSeason
+        ? '${tmdbId ?? query}_s${effectiveSeason ?? ''}_all'
+        : '${tmdbId ?? query}_s${effectiveSeason ?? ''}_e${episodeNum ?? ''}';
     if (_cache.containsKey(cacheKey)) return _cache[cacheKey]!;
 
-    // Always search by season only — most subtitle APIs don't reliably filter
-    // by episode number, so we fetch all season subtitles and tag/sort client-side.
+    // If searchFullSeason is false and episodeNum is available, query API for this specific episode only.
+    // If searchFullSeason is true, fetch all subtitles for the season.
     final results = await _doSearch(
       query,
       tmdbId: tmdbId,
       effectiveSeason: effectiveSeason,
-      episodeNum: episodeNum, // used for client-side tagging only
+      episodeNum: episodeNum,
       isTvShow: isTvShow,
-      sendEpisodeToApi: false,
+      sendEpisodeToApi: !searchFullSeason && episodeNum != null,
     );
 
-    // Fallback: no season filter if we got nothing
-    if (results.isEmpty && effectiveSeason != null) {
-      final fallbackKey = '${tmdbId ?? query}_';
+    // Fallback: if full season search was requested and gave nothing, try without season filter
+    if (results.isEmpty && effectiveSeason != null && searchFullSeason) {
+      final fallbackKey = '${tmdbId ?? query}_all';
       if (!_cache.containsKey(fallbackKey)) {
         final fallback = await _doSearch(
           query,
@@ -495,22 +506,32 @@ class SubtitleService {
       }
     }
 
-    // Tag all subtitles with match quality — never exclude, let the user choose
+    // Tag all subtitles with match quality
     if (effectiveSeason != null || episodeNum != null) {
       final epInt = episodeNum != null ? int.tryParse(episodeNum) : null;
       final tagged = <SubtitleItem>[];
       for (final s in merged) {
-        // SubDL items already have API-based classification — keep it.
+        // SubDL items already have API-based classification.
         // OpenSubtitles items need filename-based classification.
-        SubtitleMatchType matchType = s.matchType;
+        SubtitleMatchType? matchType = s.matchType;
         if (s.source == 'subdl' && matchType == SubtitleMatchType.seasonFallback) {
           final filenameMatch = classifyMatch(s.fileName, effectiveSeason, epInt);
           if (filenameMatch != null) {
             matchType = filenameMatch;
+          } else if (sendEpisodeToApi && epInt != null) {
+            // Filename explicitly mentions a different episode — skip in single-episode mode
+            continue;
           }
         } else if (s.source != 'subdl') {
-          matchType = classifyMatch(s.fileName, effectiveSeason, epInt)
-              ?? SubtitleMatchType.seasonFallback;
+          final filenameMatch = classifyMatch(s.fileName, effectiveSeason, epInt);
+          if (filenameMatch != null) {
+            matchType = filenameMatch;
+          } else if (sendEpisodeToApi && epInt != null) {
+            // Explicitly wrong episode — skip in single-episode mode
+            continue;
+          } else {
+            matchType = SubtitleMatchType.seasonFallback;
+          }
         }
         tagged.add(SubtitleItem(
           id: s.id,
