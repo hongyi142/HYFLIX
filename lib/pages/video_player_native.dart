@@ -200,7 +200,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _currentEpIndex = widget.initialEpisodeIndex;
     _currentTitle = widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title;
     _player = Player();
-    _controller = VideoController(_player);
+    _controller = VideoController(
+      _player,
+      configuration: const VideoControllerConfiguration(
+        enableHardwareAcceleration: true,
+      ),
+    );
 
     if (widget.torrentStream != null) {
       _startTorrentPlayback();
@@ -449,16 +454,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _optimizeMpvPerformance(NativePlayer native) async {
     try {
       if (Platform.isAndroid) {
-        // Use auto-safe so it tries hardware decoding but falls back gracefully on low-end chips
-        await native.setProperty('hwdec', 'auto-safe');
-        // Memory tuning for low-RAM Android devices / Projectors (e.g. Lumos 1GB RAM)
-        await native.setProperty('demuxer-max-bytes', '33554432');     // 32MB cache
-        await native.setProperty('demuxer-max-back-bytes', '8388608');  // 8MB back buffer
-        await native.setProperty('demuxer-readahead-secs', '25');       // 25s prefetch
-        // Downmix audio to stereo 2.0 (ensures 5.1/7.1 EAC3/DTS streams play smoothly on projector speakers)
+        // Universal Android Hardware Decoding via MediaCodec (all Android TV / Box / Phone models)
+        await native.setProperty('hwdec', 'mediacodec');
+        await native.setProperty('hwdec-codecs', 'all');
+
+        // Demuxer & buffer tuning for Android TV / Projectors
+        // 64MB demuxer cache and 16MB back-buffer to prevent buffer underruns
+        await native.setProperty('demuxer-max-bytes', '67108864');     // 64MB cache
+        await native.setProperty('demuxer-max-back-bytes', '16777216');  // 16MB back buffer
+        await native.setProperty('demuxer-readahead-secs', '30');       // 30s prefetch
+        // Downmix audio to stereo 2.0 (ensures 5.1/7.1 EAC3/DTS streams play smoothly on TV/projector speakers)
         await native.setProperty('audio-channels', 'stereo');
-        // Small stream buffer size for low memory
-        await native.setProperty('stream-buffer-size', '524288');       // 512KB socket buffer
+        // Increase stream socket buffer size to 2MB to prevent CDN network starvation
+        await native.setProperty('stream-buffer-size', '2097152');       // 2MB socket buffer
+
+        // Disable cache-pause oscillation on Android TV to prevent freeze-loops on network dips
+        await native.setProperty('cache-pause', 'no');
       } else {
         // Enable GPU hardware decoding on Windows / macOS / Linux
         await native.setProperty('hwdec', 'auto-safe');
@@ -466,14 +477,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         await native.setProperty('demuxer-max-back-bytes', '100000000'); // 100MB back buffer
         await native.setProperty('demuxer-readahead-secs', '120'); // Prefetch up to 120s
         await native.setProperty('stream-buffer-size', '4194304'); // 4MB socket buffer
-      }
-      await native.setProperty('vd-lavc-dr', 'yes');
+        await native.setProperty('vd-lavc-dr', 'yes');
 
-      // Prevent constant true/false buffering oscillation on HLS / slow CDNs:
-      // Require MPV to accumulate at least 2 seconds of buffer before unpausing
-      await native.setProperty('cache-pause', 'yes');
-      await native.setProperty('cache-pause-wait', '2');
-      await native.setProperty('demuxer-hysteresis-secs', '5');
+        // Prevent constant true/false buffering oscillation on HLS / slow CDNs:
+        // Require MPV to accumulate at least 2 seconds of buffer before unpausing
+        await native.setProperty('cache-pause', 'yes');
+        await native.setProperty('cache-pause-wait', '2');
+        await native.setProperty('demuxer-hysteresis-secs', '5');
+      }
     } catch (e) {
       debugPrint('[VideoPlayer] Error optimizing native mpv performance: $e');
     }

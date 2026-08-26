@@ -10,7 +10,12 @@ class PreviewPlayer {
 
   Future<void> init(String url) async {
     final player = Player();
-    final controller = VideoController(player);
+    final controller = VideoController(
+      player,
+      configuration: const VideoControllerConfiguration(
+        enableHardwareAcceleration: true,
+      ),
+    );
     await player.open(Media(url));
     await player.setVolume(0);
     _player = player;
