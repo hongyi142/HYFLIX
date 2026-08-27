@@ -13,11 +13,13 @@ import 'services/download_service.dart';
 import 'services/api_service.dart';
 import 'services/watchlist_service.dart';
 
+import 'config/memory_profile.dart';
+
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
 /// Custom HttpOverrides to handle legacy Android (e.g. Android 6.0 Marshmallow / Lumos Projector)
 /// where modern Root CA certificates (like Let's Encrypt ISRG Root X1) may be outdated or missing.
-class _HyflixHttpOverrides extends HttpOverrides {
+class HyflixHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
@@ -28,8 +30,11 @@ class _HyflixHttpOverrides extends HttpOverrides {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Initialize Standard Memory Profile
+  MemoryProfile.init(isProjector: false);
+
   if (!kIsWeb) {
-    HttpOverrides.global = _HyflixHttpOverrides();
+    HttpOverrides.global = HyflixHttpOverrides();
   }
 
   // Force traditional focus highlight mode so focus rings are ALWAYS visible on TV/Projector

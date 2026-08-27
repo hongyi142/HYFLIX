@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
 import '../core/proxy_url.dart';
 import '../core/theme.dart';
+import '../config/memory_profile.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
 import '../services/tmdb_service.dart';
@@ -150,6 +151,7 @@ class _HeroSectionState extends State<HeroSection> {
                   Image.network(
                     proxyImageUrl(banner),
                     fit: BoxFit.cover,
+                    cacheWidth: MemoryProfile.current.heroBackdropCacheWidth,
                     errorBuilder: (_, __, ___) =>
                         Container(color: AppTheme.cardLight),
                   ),

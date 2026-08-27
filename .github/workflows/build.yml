@@ -28,14 +28,20 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
         
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build Standard APK
+        run: flutter build apk --release --target lib/main.dart
         
-      - name: Prepare Release APKs
+      - name: Prepare Standard APKs
         run: |
           mkdir -p build/dist
           cp build/app/outputs/flutter-apk/app-release.apk build/dist/hyflix-android.apk
           cp build/app/outputs/flutter-apk/app-release.apk build/dist/hyflix-android-tv.apk
+
+      - name: Build Projector (Low-Memory) APK
+        run: flutter build apk --release --target lib/main_projector.dart
+
+      - name: Prepare Projector APK
+        run: |
           cp build/app/outputs/flutter-apk/app-release.apk build/dist/hyflix-projector.apk
 
       - name: Upload APKs to Artifacts
@@ -48,8 +54,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: v1.1.8
-          name: HyFLIX v1.1.8
+          tag_name: v1.1.9
+          name: HyFLIX v1.1.9
           files: |
             build/dist/hyflix-android.apk
             build/dist/hyflix-android-tv.apk
@@ -93,8 +99,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: v1.1.8
-          name: HyFLIX v1.1.8
+          tag_name: v1.1.9
+          name: HyFLIX v1.1.9
           files: |
             build/macos/Build/Products/Release/HyFLIX.dmg
           token: ${{ secrets.GITHUB_TOKEN }}

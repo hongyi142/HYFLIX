@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
+import '../config/memory_profile.dart';
 import '../models/torrent_stream.dart';
 import 'torbox_service.dart';
 
@@ -31,26 +32,27 @@ class TorrentService {
         pollInterval: const Duration(milliseconds: 200),
       );
 
-      // Apply streaming-optimized configuration
-      final isAndroid = Platform.isAndroid;
+      // Apply streaming-optimized configuration based on MemoryProfile
+      final profile = MemoryProfile.current;
       LibtorrentFlutter.instance.configureSession(BtConfig(
-        cacheSize: isAndroid ? 32 * 1024 * 1024 : 256 * 1024 * 1024, // 32MB on Android to prevent OOM on 1GB devices
-        readerReadAhead: 95,                  // (stored but unused by serve_range)
-        preloadCache: isAndroid ? 25 : 40,    // preload cache on start
-        connectionsLimit: isAndroid ? 35 : 80,// Lower concurrent connections on Android
-        torrentDisconnectTimeout: 120,        // keep alive 2 minutes
-        forceEncrypt: false,                  // allow both encrypted and plain
-        disableTcp: false,                    // keep TCP
-        disableUtp: false,                    // keep uTP (avoids ISP throttling)
-        disableUpload: false,                 // uploading helps tit-for-tat
-        disableDht: false,                    // DHT for peer discovery
-        disableUpnp: false,                   // UPnP for port forwarding
-        enableIpv6: true,                     // more peers via IPv6
-        responsiveMode: true,                 // aggressive streaming mode
+        cacheSize: profile.torrentMaxCacheBytes, // Profile-driven cache (20MB Projector, 32MB Android, 256MB Desktop)
+        readerReadAhead: 95,                     // (stored but unused by serve_range)
+        preloadCache: profile.torrentPreloadCacheCount, // preload cache on start
+        connectionsLimit: profile.torrentConnectionsLimit, // Concurrent connections based on RAM budget
+        torrentDisconnectTimeout: 120,           // keep alive 2 minutes
+        forceEncrypt: false,                     // allow both encrypted and plain
+        disableTcp: false,                       // keep TCP
+        disableUtp: false,                       // keep uTP (avoids ISP throttling)
+        disableUpload: false,                    // uploading helps tit-for-tat
+        disableDht: false,                       // DHT for peer discovery
+        disableUpnp: false,                      // UPnP for port forwarding
+        enableIpv6: true,                        // more peers via IPv6
+        responsiveMode: true,                    // aggressive streaming mode
       ));
 
       _initialized = true;
-      debugPrint('[TorrentService] Libtorrent initialized with streaming-optimized config');
+      debugPrint('[TorrentService] Libtorrent initialized (cache=${profile.torrentMaxCacheBytes ~/ (1024 * 1024)}MB, '
+          'connections=${profile.torrentConnectionsLimit})');
     } catch (e, st) {
       debugPrint('[TorrentService] Init failed: $e\n$st');
     }
@@ -355,23 +357,24 @@ class TorrentService {
       // startStream() handles piece prioritization internally (head/tail priority,
       // sequential serving via serve_range).
 
+      final profile = MemoryProfile.current;
       final streamInfo = engine.startStream(
         torrentId,
         fileIndex: stream.fileIdx,
-        maxCacheBytes: 256 * 1024 * 1024, // 256MB piece cache
+        maxCacheBytes: profile.torrentMaxCacheBytes, // Profile-driven piece cache (20MB on Projector)
       );
       _activeStreamId = streamInfo.id;
 
-      // Tune per-stream cache for aggressive preloading
+      // Tune per-stream cache for streaming
       engine.setCacheSettings(
         streamInfo.id,
-        capacity: 256 * 1024 * 1024,
-        readAheadPct: 90,
-        connectionsLimit: 120,
+        capacity: profile.torrentMaxCacheBytes,
+        readAheadPct: profile.isProjector ? 70 : 90,
+        connectionsLimit: profile.torrentConnectionsLimit,
       );
 
-      // Preload 32MB head+tail (doubled from 16MB for 4K streams)
-      engine.preloadStream(streamInfo.id, preloadBytes: 32 * 1024 * 1024);
+      // Preload head+tail (4MB on Projector to conserve RAM, 16/32MB otherwise)
+      engine.preloadStream(streamInfo.id, preloadBytes: profile.torrentPreloadBytes);
 
       final url = streamInfo.url;
       debugPrint('[TorrentService] Stream started: $url (streamId=${streamInfo.id})');

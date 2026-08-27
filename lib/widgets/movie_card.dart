@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/proxy_url.dart';
 import '../core/theme.dart';
+import '../config/memory_profile.dart';
 import '../models/content_model.dart';
 import '../pages/detail_page.dart';
 import '../services/tmdb_service.dart';
@@ -54,18 +55,22 @@ class _MovieCardState extends State<MovieCard> {
 
   void _onEnter() {
     setState(() => _isHovered = true);
-    _hoverTimer?.cancel();
-    _hoverTimer = Timer(const Duration(milliseconds: 1200), _startPreview);
+    if (MemoryProfile.current.enableVideoPreviews) {
+      _hoverTimer?.cancel();
+      _hoverTimer = Timer(const Duration(milliseconds: 1200), _startPreview);
+    }
   }
 
   void _onExit() {
     setState(() => _isHovered = false);
     _hoverTimer?.cancel();
-    _stopPreview();
+    if (MemoryProfile.current.enableVideoPreviews) {
+      _stopPreview();
+    }
   }
 
   Future<void> _startPreview() async {
-    if (kIsWeb || !_isHovered || widget.content.m3u8Url.isEmpty) return;
+    if (kIsWeb || !MemoryProfile.current.enableVideoPreviews || !_isHovered || widget.content.m3u8Url.isEmpty) return;
     await _preview.init(widget.content.m3u8Url);
     if (mounted && _isHovered && _preview.controller != null) {
       setState(() => _showPreview = true);
@@ -164,9 +169,17 @@ class _MovieCardState extends State<MovieCard> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.network(proxyImageUrl(displayPoster), fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(color: AppTheme.cardLight,
-                                child: const Center(child: Icon(LucideIcons.image, color: AppTheme.textSecondary)))),
+                        Image.network(
+                          proxyImageUrl(displayPoster),
+                          fit: BoxFit.cover,
+                          cacheWidth: MemoryProfile.current.posterImageCacheWidth,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: AppTheme.cardLight,
+                            child: const Center(
+                              child: Icon(LucideIcons.image, color: AppTheme.textSecondary),
+                            ),
+                          ),
+                        ),
                         // Video preview on hover
                         if (_showPreview && _preview.controller != null)
                           AnimatedOpacity(

@@ -17,6 +17,7 @@ import '../services/user_service.dart';
 import '../services/torrent_service.dart';
 import '../services/torbox_service.dart';
 import '../config/app_config.dart';
+import '../config/memory_profile.dart';
 import '../widgets/buttons.dart';
 import 'fullscreen_stub.dart'
     if (dart.library.html) 'fullscreen_web.dart';
@@ -199,6 +200,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _startTime = DateTime.now();
     _currentEpIndex = widget.initialEpisodeIndex;
     _currentTitle = widget.originalTitle.isNotEmpty ? widget.originalTitle : widget.title;
+
+    // In low-memory projector mode, immediately purge Flutter image cache to maximize RAM for video decoding
+    if (MemoryProfile.current.isProjector) {
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      debugPrint('[VideoPlayer] Low memory mode: Cleared background image cache');
+    }
+
     _player = Player();
     _controller = VideoController(
       _player,
@@ -268,9 +277,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         await _optimizeMpvPerformance(native);
         await native.setProperty('network-timeout', '60');
         await native.setProperty('user-agent', 'Mozilla/5.0 (Linux; Android 9; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+        final profile = MemoryProfile.current;
         if (Platform.isAndroid) {
-          await native.setProperty('cache-secs', '25');
-          await native.setProperty('demuxer-readahead-secs', '25');
+          await native.setProperty('cache-secs', profile.mpvDemuxerReadaheadSecs.toString());
+          await native.setProperty('demuxer-readahead-secs', profile.mpvDemuxerReadaheadSecs.toString());
         } else {
           await native.setProperty('cache-secs', '60');
           await native.setProperty('demuxer-readahead-secs', '60');
@@ -348,9 +358,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         await _optimizeMpvPerformance(native);
         await native.setProperty('network-timeout', '60');
         await native.setProperty('user-agent', 'Mozilla/5.0 (Linux; Android 9; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+        final profile = MemoryProfile.current;
         if (Platform.isAndroid) {
-          await native.setProperty('cache-secs', '25');
-          await native.setProperty('demuxer-readahead-secs', '25');
+          await native.setProperty('cache-secs', profile.mpvDemuxerReadaheadSecs.toString());
+          await native.setProperty('demuxer-readahead-secs', profile.mpvDemuxerReadaheadSecs.toString());
         } else {
           await native.setProperty('cache-secs', '60');
           await native.setProperty('demuxer-readahead-secs', '60');
@@ -414,9 +425,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       await _optimizeMpvPerformance(native);
       // Default is 5s; torrent HTTP server can block up to 60s waiting for pieces
       await native.setProperty('network-timeout', '60');
+      final profile = MemoryProfile.current;
       if (Platform.isAndroid) {
-        await native.setProperty('cache-secs', '25');
-        await native.setProperty('demuxer-readahead-secs', '25');
+        await native.setProperty('cache-secs', profile.mpvDemuxerReadaheadSecs.toString());
+        await native.setProperty('demuxer-readahead-secs', profile.mpvDemuxerReadaheadSecs.toString());
       } else {
         // Keep 60s of video cached ahead of the playhead
         await native.setProperty('cache-secs', '60');
@@ -453,20 +465,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   Future<void> _optimizeMpvPerformance(NativePlayer native) async {
     try {
+      final profile = MemoryProfile.current;
       if (Platform.isAndroid) {
         // Universal Android Hardware Decoding via MediaCodec (all Android TV / Box / Phone models)
         await native.setProperty('hwdec', 'mediacodec');
         await native.setProperty('hwdec-codecs', 'all');
 
-        // Demuxer & buffer tuning for Android TV / Projectors
-        // 64MB demuxer cache and 16MB back-buffer to prevent buffer underruns
-        await native.setProperty('demuxer-max-bytes', '67108864');     // 64MB cache
-        await native.setProperty('demuxer-max-back-bytes', '16777216');  // 16MB back buffer
-        await native.setProperty('demuxer-readahead-secs', '30');       // 30s prefetch
+        // Demuxer & buffer tuning driven by MemoryProfile
+        await native.setProperty('demuxer-max-bytes', profile.mpvDemuxerMaxBytes.toString());
+        await native.setProperty('demuxer-max-back-bytes', profile.mpvDemuxerMaxBackBytes.toString());
+        await native.setProperty('demuxer-readahead-secs', profile.mpvDemuxerReadaheadSecs.toString());
         // Downmix audio to stereo 2.0 (ensures 5.1/7.1 EAC3/DTS streams play smoothly on TV/projector speakers)
         await native.setProperty('audio-channels', 'stereo');
-        // Increase stream socket buffer size to 2MB to prevent CDN network starvation
-        await native.setProperty('stream-buffer-size', '2097152');       // 2MB socket buffer
+        // Socket buffer size
+        await native.setProperty('stream-buffer-size', profile.mpvStreamBufferSize.toString());
 
         // Disable cache-pause oscillation on Android TV to prevent freeze-loops on network dips
         await native.setProperty('cache-pause', 'no');
