@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -260,6 +261,69 @@ class _AuthPageState extends State<AuthPage> {
     String? Function(String?)? validator,
     void Function(String)? onFieldSubmitted,
   }) {
+    if (kIsWeb) {
+      return ListenableBuilder(
+        listenable: focusNode,
+        builder: (context, _) {
+          final isFocused = focusNode.hasFocus;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: isFocused
+                  ? [BoxShadow(color: AppTheme.accent.withOpacity(0.4), blurRadius: 12)]
+                  : null,
+            ),
+            child: TextFormField(
+              focusNode: focusNode,
+              controller: controller,
+              keyboardType: keyboardType,
+              obscureText: obscure,
+              validator: validator,
+              onFieldSubmitted: onFieldSubmitted,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                prefixIcon: Icon(
+                  icon,
+                  color: isFocused ? AppTheme.accent : AppTheme.textSecondary,
+                  size: 18,
+                ),
+                filled: true,
+                fillColor: isFocused
+                    ? AppTheme.cardDark.withOpacity(0.9)
+                    : AppTheme.cardDark,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: isFocused
+                      ? const BorderSide(color: AppTheme.accent, width: 2)
+                      : BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.accent),
+                ),
+                focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     return _TvFieldWrapper(
       controller: controller,
       focusNode: focusNode,
