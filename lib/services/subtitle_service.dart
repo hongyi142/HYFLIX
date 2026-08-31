@@ -549,6 +549,206 @@ class SubtitleService {
     return merged;
   }
 
+  /// Helper to check if a file extension is a supported subtitle format (.srt, .ass, .ssa, .vtt)
+  static bool isSupportedSubtitleFile(String filename) {
+    final lower = filename.toLowerCase();
+    return lower.endsWith('.srt') ||
+        lower.endsWith('.ass') ||
+        lower.endsWith('.ssa') ||
+        lower.endsWith('.vtt');
+  }
+
+  /// Convert subtitle text from ASS, SSA, or VTT format to clean SRT format.
+  /// If the text is already SRT, it is returned unmodified.
+  static String convertToSrt(String content, {String? fileName}) {
+    final lowerName = (fileName ?? '').toLowerCase();
+    if (lowerName.endsWith('.ass') ||
+        lowerName.endsWith('.ssa') ||
+        content.contains('[Events]') ||
+        content.contains('[Script Info]')) {
+      final srt = _assToSrt(content);
+      if (srt.isNotEmpty) return srt;
+    } else if (lowerName.endsWith('.vtt') || content.trimLeft().startsWith('WEBVTT')) {
+      final srt = _vttToSrt(content);
+      if (srt.isNotEmpty) return srt;
+    }
+    return content;
+  }
+
+  /// Convert ASS / SSA subtitle format to SRT format
+  static String _assToSrt(String assContent) {
+    final lines = assContent.split(RegExp(r'\r?\n'));
+    bool eventsFound = false;
+    Map<String, int> formatIndices = {};
+    final srtEntries = <(String, String, String)>[];
+
+    for (final rawLine in lines) {
+      final line = rawLine.trim();
+      if (line.toLowerCase().startsWith('[events]')) {
+        eventsFound = true;
+        continue;
+      }
+      if (!eventsFound) continue;
+
+      if (line.toLowerCase().startsWith('format:')) {
+        final headers = line.substring(7).split(',').map((h) => h.trim().toLowerCase()).toList();
+        formatIndices = {for (var i = 0; i < headers.length; i++) headers[i]: i};
+        continue;
+      }
+
+      if (line.toLowerCase().startsWith('dialogue:')) {
+        final commaCount = formatIndices.isNotEmpty ? formatIndices.length - 1 : 9;
+        // Split with limit to preserve commas in the dialogue text
+        final parts = _splitDialogue(line.substring(9).trim(), commaCount);
+        if (parts.isEmpty) continue;
+
+        String startRaw;
+        String endRaw;
+        String textRaw;
+
+        if (formatIndices.containsKey('start') &&
+            formatIndices.containsKey('end') &&
+            formatIndices.containsKey('text') &&
+            parts.length > formatIndices['text']!) {
+          startRaw = parts[formatIndices['start']!].trim();
+          endRaw = parts[formatIndices['end']!].trim();
+          textRaw = parts[formatIndices['text']!].trim();
+        } else if (parts.length >= 10) {
+          startRaw = parts[1].trim();
+          endRaw = parts[2].trim();
+          textRaw = parts[9].trim();
+        } else if (parts.length >= 3) {
+          startRaw = parts[1].trim();
+          endRaw = parts[2].trim();
+          textRaw = parts.last.trim();
+        } else {
+          continue;
+        }
+
+        final startSrt = _formatAssTimeToSrt(startRaw);
+        final endSrt = _formatAssTimeToSrt(endRaw);
+
+        // Strip ASS style overrides (e.g. {\an8}, {\pos(x,y)}, {\c&H...&})
+        var cleanText = textRaw.replaceAll(RegExp(r'\{.*?\}'), '');
+        // Replace ASS line breaks
+        cleanText = cleanText
+            .replaceAll(r'\N', '\n')
+            .replaceAll(r'\n', '\n')
+            .replaceAll(r'\h', ' ')
+            .trim();
+
+        if (cleanText.isNotEmpty) {
+          srtEntries.add((startSrt, endSrt, cleanText));
+        }
+      }
+    }
+
+    if (srtEntries.isEmpty) return '';
+
+    final buf = StringBuffer();
+    for (var i = 0; i < srtEntries.length; i++) {
+      final (s, e, txt) = srtEntries[i];
+      buf.writeln(i + 1);
+      buf.writeln('$s --> $e');
+      buf.writeln(txt);
+      buf.writeln();
+    }
+    return buf.toString();
+  }
+
+  /// Split ASS Dialogue line by up to [limit] commas
+  static List<String> _splitDialogue(String line, int limit) {
+    final result = <String>[];
+    var current = StringBuffer();
+    var count = 0;
+
+    for (var i = 0; i < line.length; i++) {
+      final char = line[i];
+      if (char == ',' && count < limit) {
+        result.add(current.toString());
+        current = StringBuffer();
+        count++;
+      } else {
+        current.write(char);
+      }
+    }
+    result.add(current.toString());
+    return result;
+  }
+
+  /// Convert ASS timestamp (H:MM:SS.cs or H:MM:SS.ms) to SRT format (HH:MM:SS,mmm)
+  static String _formatAssTimeToSrt(String t) {
+    final parts = t.split(':');
+    if (parts.length < 3) return '00:00:00,000';
+
+    final h = (int.tryParse(parts[0]) ?? 0).toString().padLeft(2, '0');
+    final m = (int.tryParse(parts[1]) ?? 0).toString().padLeft(2, '0');
+    final secParts = parts[2].split('.');
+    final s = (int.tryParse(secParts[0]) ?? 0).toString().padLeft(2, '0');
+    final csStr = secParts.length > 1 ? secParts[1] : '0';
+    final ms = int.tryParse(csStr.padRight(3, '0').substring(0, 3)) ?? 0;
+    final msStr = ms.toString().padLeft(3, '0');
+
+    return '$h:$m:$s,$msStr';
+  }
+
+  /// Convert WebVTT format to SRT format
+  static String _vttToSrt(String vttContent) {
+    final lines = vttContent.split(RegExp(r'\r?\n'));
+    final srtEntries = <(String, String, String)>[];
+    var i = 0;
+
+    final timeRegex = RegExp(r'(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})');
+
+    while (i < lines.length) {
+      final line = lines[i].trim();
+      final match = timeRegex.firstMatch(line);
+      if (match != null) {
+        final sh = (match.group(1) ?? '00').padLeft(2, '0');
+        final sm = match.group(2)!.padLeft(2, '0');
+        final ss = match.group(3)!.padLeft(2, '0');
+        final sms = match.group(4)!;
+
+        final eh = (match.group(5) ?? '00').padLeft(2, '0');
+        final em = match.group(6)!.padLeft(2, '0');
+        final es = match.group(7)!.padLeft(2, '0');
+        final ems = match.group(8)!;
+
+        final startSrt = '$sh:$sm:$ss,$sms';
+        final endSrt = '$eh:$em:$es,$ems';
+
+        i++;
+        final textLines = <String>[];
+        while (i < lines.length && lines[i].trim().isNotEmpty) {
+          // Strip HTML / WebVTT cue tags (<v Narrator>, <b>, etc.)
+          final clean = lines[i].replaceAll(RegExp(r'<[^>]+>'), '').trim();
+          if (clean.isNotEmpty) {
+            textLines.add(clean);
+          }
+          i++;
+        }
+
+        if (textLines.isNotEmpty) {
+          srtEntries.add((startSrt, endSrt, textLines.join('\n')));
+        }
+      } else {
+        i++;
+      }
+    }
+
+    if (srtEntries.isEmpty) return '';
+
+    final buf = StringBuffer();
+    for (var idx = 0; idx < srtEntries.length; idx++) {
+      final (s, e, txt) = srtEntries[idx];
+      buf.writeln(idx + 1);
+      buf.writeln('$s --> $e');
+      buf.writeln(txt);
+      buf.writeln();
+    }
+    return buf.toString();
+  }
+
   static Future<String?> fetchSubtitleContent(SubtitleItem item) async {
     if (item.downloadUrl == null) return null;
 
@@ -595,18 +795,21 @@ class SubtitleService {
       if (bytes[0] == 0x50 && bytes[1] == 0x4B) {
         final archive = ZipDecoder().decodeBytes(bytes);
         for (final file in archive) {
-          if (file.isFile && file.name.toLowerCase().endsWith('.srt')) {
-            return utf8.decode(file.content as List<int>, allowMalformed: true);
+          if (file.isFile && isSupportedSubtitleFile(file.name)) {
+            final rawText = utf8.decode(file.content as List<int>, allowMalformed: true);
+            return convertToSrt(rawText, fileName: file.name);
           }
         }
       }
       // GZIP archive
       else if (bytes[0] == 0x1F && bytes[1] == 0x8B) {
-        return utf8.decode(GZipDecoder().decodeBytes(bytes), allowMalformed: true);
+        final rawText = utf8.decode(GZipDecoder().decodeBytes(bytes), allowMalformed: true);
+        return convertToSrt(rawText, fileName: item.fileName);
       }
       // Plain text
       else {
-        return utf8.decode(bytes, allowMalformed: true);
+        final rawText = utf8.decode(bytes, allowMalformed: true);
+        return convertToSrt(rawText, fileName: item.fileName);
       }
     } catch (e) {
       print('Subtitle download error: $e');
@@ -701,8 +904,9 @@ class SubtitleService {
 
   // ─── Local subtitle storage (cross-platform) ───────────────────
 
-  /// Download a season-level ZIP, extract all SRT files, save to local storage.
-  /// Returns the list of saved SubtitleItems (one per episode SRT found).
+  /// Download a season-level ZIP, extract all subtitle files (SRT, ASS, SSA, VTT),
+  /// convert them to standard SRT, and save to local storage.
+  /// Returns the list of saved SubtitleItems (one per episode subtitle found).
   static Future<List<SubtitleItem>> downloadSeasonSubtitles({
     required SubtitleItem item,
     required String tmdbId,
@@ -725,11 +929,14 @@ class SubtitleService {
         final archive = ZipDecoder().decodeBytes(bytes);
         for (final file in archive) {
           if (!file.isFile) continue;
-          final name = file.name.toLowerCase();
-          if (!name.endsWith('.srt')) continue;
+          final name = file.name;
+          if (!isSupportedSubtitleFile(name)) continue;
 
-          final srtContent = utf8.decode(file.content as List<int>, allowMalformed: true);
-          final baseName = file.name.split('/').last.split('\\').last;
+          final rawContent = utf8.decode(file.content as List<int>, allowMalformed: true);
+          final srtContent = convertToSrt(rawContent, fileName: name);
+          final rawBaseName = name.split('/').last.split('\\').last;
+          // Store with .srt extension for consistency
+          final baseName = rawBaseName.replaceAll(RegExp(r'\.(ass|ssa|vtt|srt)$', caseSensitive: false), '') + '.srt';
           
           await SubtitleStorage.instance.saveSubtitle(
             tmdbId: tmdbId,
@@ -751,9 +958,10 @@ class SubtitleService {
           ));
         }
       }
-      // GZIP — single SRT
+      // GZIP — single subtitle
       else if (bytes[0] == 0x1F && bytes[1] == 0x8B) {
-        final srtContent = utf8.decode(GZipDecoder().decodeBytes(bytes), allowMalformed: true);
+        final rawContent = utf8.decode(GZipDecoder().decodeBytes(bytes), allowMalformed: true);
+        final srtContent = convertToSrt(rawContent, fileName: item.fileName);
         final baseName = '${item.fileName}.srt';
         
         await SubtitleStorage.instance.saveSubtitle(
@@ -772,9 +980,10 @@ class SubtitleService {
           localPath: baseName,
         ));
       }
-      // Plain text — single SRT
+      // Plain text — single subtitle
       else {
-        final srtContent = utf8.decode(bytes, allowMalformed: true);
+        final rawContent = utf8.decode(bytes, allowMalformed: true);
+        final srtContent = convertToSrt(rawContent, fileName: item.fileName);
         final baseName = '${item.fileName}.srt';
         
         await SubtitleStorage.instance.saveSubtitle(
@@ -801,7 +1010,7 @@ class SubtitleService {
     }
   }
 
-  /// Import a single .srt file content into local subtitle storage.
+  /// Import a single subtitle file content (.srt, .ass, .ssa, .vtt) into local subtitle storage.
   static Future<SubtitleItem?> importLocalSubtitle({
     required String fileName,
     required String content,
@@ -809,23 +1018,27 @@ class SubtitleService {
     required int season,
   }) async {
     try {
+      final srtContent = convertToSrt(content, fileName: fileName);
+      final rawBaseName = fileName.split('/').last.split('\\').last;
+      final baseName = rawBaseName.replaceAll(RegExp(r'\.(ass|ssa|vtt|srt)$', caseSensitive: false), '') + '.srt';
+
       await SubtitleStorage.instance.saveSubtitle(
         tmdbId: tmdbId,
         season: season,
-        fileName: fileName,
-        content: content,
+        fileName: baseName,
+        content: srtContent,
       );
 
-      final matchType = classifyMatch(fileName, season, null)
+      final matchType = classifyMatch(baseName, season, null)
           ?? SubtitleMatchType.seasonFallback;
 
       return SubtitleItem(
-        id: 'local_${fileName.hashCode}',
-        fileName: fileName,
+        id: 'local_${baseName.hashCode}',
+        fileName: baseName,
         language: 'custom',
         source: 'local',
         matchType: matchType,
-        localPath: fileName,
+        localPath: baseName,
       );
     } catch (e) {
       print('Subtitle import error: $e');
@@ -930,7 +1143,7 @@ class SubtitleService {
     }
   }
 
-  /// Import a ZIP file containing multiple SRTs (batch import).
+  /// Import a ZIP file containing multiple subtitle files (SRT, ASS, SSA, VTT).
   static Future<List<SubtitleItem>> importLocalSubtitleBatch({
     required List<int> zipBytes,
     required String tmdbId,
@@ -944,10 +1157,13 @@ class SubtitleService {
         final archive = ZipDecoder().decodeBytes(zipBytes);
         for (final entry in archive) {
           if (!entry.isFile) continue;
-          if (!entry.name.toLowerCase().endsWith('.srt')) continue;
+          final name = entry.name;
+          if (!isSupportedSubtitleFile(name)) continue;
 
-          final srtContent = utf8.decode(entry.content as List<int>, allowMalformed: true);
-          final baseName = entry.name.split('/').last.split('\\').last;
+          final rawContent = utf8.decode(entry.content as List<int>, allowMalformed: true);
+          final srtContent = convertToSrt(rawContent, fileName: name);
+          final rawBaseName = entry.name.split('/').last.split('\\').last;
+          final baseName = rawBaseName.replaceAll(RegExp(r'\.(ass|ssa|vtt|srt)$', caseSensitive: false), '') + '.srt';
           
           await SubtitleStorage.instance.saveSubtitle(
             tmdbId: tmdbId,

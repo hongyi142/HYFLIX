@@ -3101,7 +3101,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No SRT files found in the download'),
+            content: Text('No subtitle files found in the download'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -3122,7 +3122,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['srt', 'zip'],
+      allowedExtensions: ['srt', 'ass', 'ssa', 'vtt', 'zip'],
       allowMultiple: true,
     );
 
@@ -3144,7 +3144,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           season: widget.seasonNumber!,
         );
         saved.addAll(batch);
-      } else if (ext == 'srt') {
+      } else if (SubtitleService.isSupportedSubtitleFile(path)) {
         final content = await file.readAsString();
         final item = await SubtitleService.importLocalSubtitle(
           fileName: baseName,
