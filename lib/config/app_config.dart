@@ -7,7 +7,7 @@ const String subdlApiKey = '_QFbdnITc00ZzFTFO6KtBJnt81h-pwLi';
 
 // OpenSubtitles API key — register at https://www.opensubtitles.com/en/consumers
 // Free tier: ~100 requests/day. Leave empty string to disable.
-const String openSubtitlesApiKey = '';
+const String openSubtitlesApiKey = 'ixETaiNX2eq0uEkJvM0ri59VyHrudWBC';
 
 // Stremio addon base URLs for torrent stream discovery
 const String torrentioBaseUrl = 'https://torrentio.strem.fun';
