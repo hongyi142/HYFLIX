@@ -763,13 +763,14 @@ class SubtitleService {
           headers: {
             'Api-Key': openSubtitlesApiKey,
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
             'User-Agent': 'HYFLIX v1.0',
           },
           body: json.encode({'file_id': int.tryParse(fileId) ?? fileId}),
         ).timeout(const Duration(seconds: 15));
 
         if (res.statusCode != 200) {
-          print('OpenSubtitles download failed: ${res.statusCode}');
+          print('OpenSubtitles download failed: ${res.statusCode} ${res.body}');
           return null;
         }
 
@@ -781,7 +782,10 @@ class SubtitleService {
       }
 
       print('Downloading subtitle: $downloadUrl');
-      final res = await http.get(Uri.parse(downloadUrl)).timeout(const Duration(seconds: 15));
+      final res = await http.get(
+        Uri.parse(downloadUrl),
+        headers: {'User-Agent': 'HYFLIX v1.0'},
+      ).timeout(const Duration(seconds: 15));
 
       if (res.statusCode != 200) {
         print('Subtitle download failed: ${res.statusCode}');
@@ -915,8 +919,10 @@ class SubtitleService {
     if (item.downloadUrl == null) return [];
 
     try {
-      final res = await http.get(Uri.parse(item.downloadUrl!))
-          .timeout(const Duration(seconds: 30));
+      final res = await http.get(
+        Uri.parse(item.downloadUrl!),
+        headers: {'User-Agent': 'HYFLIX v1.0'},
+      ).timeout(const Duration(seconds: 30));
       if (res.statusCode != 200) return [];
 
       final bytes = res.bodyBytes;
