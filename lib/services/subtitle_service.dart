@@ -116,6 +116,42 @@ class SubtitleService {
     return lang.toUpperCase();
   }
 
+  /// Strips season/episode decorations so "第2季 第5集" or "Show S02E05"
+  /// becomes just "Show" for title-based provider searches.
+  static String cleanSearchTitle(String raw) {
+    var t = raw;
+    t = t.replaceAll(RegExp(r'第\s*\d+\s*季.*$'), '');
+    t = t.replaceAll(RegExp(r'第\s*\d+\s*[集话].*$'), '');
+    t = t.replaceAll(RegExp(r'\s[Ss]\d{1,2}\s*[Ee]\d{1,3}.*$'), '');
+    t = t.replaceAll(RegExp(r'[Ss]\d{1,2}[Ee]\d{1,3}.*$'), '');
+    t = t.replaceAll(RegExp(r'\s+[Ss]eason\s*\d+.*$', caseSensitive: false), '');
+    t = t.split(RegExp(r'\s[-–—]\s')).first;
+    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return t.isEmpty ? raw.trim() : t;
+  }
+
+  /// GET with a short retry for rate limits (429), server errors and timeouts.
+  static Future<http.Response?> _getWithRetry(
+    Uri uri, {
+    Map<String, String>? headers,
+  }) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final res = await http
+            .get(uri, headers: headers)
+            .timeout(const Duration(seconds: 15));
+        if (res.statusCode == 429 || res.statusCode >= 500) {
+          await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
+          continue;
+        }
+        return res;
+      } catch (_) {
+        await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+      }
+    }
+    return null;
+  }
+
   // ─── SubDL search (with pagination) ────────────────────────────
   static Future<List<SubtitleItem>> _searchSubDL({
     required String query,
@@ -131,7 +167,9 @@ class SubtitleService {
       var page = 1;
       var totalPages = 1;
 
-      while (page <= (episodeNum != null ? 1 : totalPages)) {
+      // Always page through results (capped) — with episode filters the
+      // matching subtitle is often not on page 1 for long-running series.
+      while (page <= totalPages && page <= 3) {
         final queryParams = {
           'api_key': subdlApiKey,
           'languages': 'EN,ZH,ZH-CN,ZH-TW,CHI,CN',
@@ -159,11 +197,9 @@ class SubtitleService {
 
         final searchUri = Uri.https('api.subdl.com', '/api/v1/subtitles', queryParams);
         print('[SubDL] Requesting: $searchUri');
-        final res = await http.get(searchUri).timeout(const Duration(seconds: 10));
-        print('[SubDL] Response Code: ${res.statusCode}');
-        print('[SubDL] Response Body: ${res.body.substring(0, res.body.length > 500 ? 500 : res.body.length)}...');
-
-        if (res.statusCode != 200) break;
+        final res = await _getWithRetry(searchUri);
+        print('[SubDL] Response Code: ${res?.statusCode}');
+        if (res == null || res.statusCode != 200) break;
 
         final body = json.decode(res.body) as Map<String, dynamic>;
         if (body['status'] == false) break;
@@ -263,70 +299,87 @@ class SubtitleService {
     if (openSubtitlesApiKey.isEmpty) return [];
 
     try {
-      final queryParams = <String, String>{
-        'languages': 'en,zh,zh-cn,zh-tw',
+      final baseParams = <String, String>{
+        'languages': 'en,zh-cn,zh-tw',
+        'order_by': 'download_count',
+        'order_direction': 'desc',
       };
 
-      if (tmdbId != null) {
-        queryParams['tmdb_id'] = tmdbId;
-      } else {
-        queryParams['query'] = query;
-      }
-
+      // OpenSubtitles wants the *series* id as parent_tmdb_id for episodes;
+      // tmdb_id with type=episode returns almost nothing.
       if (isTvShow) {
-        queryParams['type'] = 'episode';
+        baseParams['type'] = 'episode';
+        if (tmdbId != null) {
+          baseParams['parent_tmdb_id'] = tmdbId;
+        } else {
+          baseParams['query'] = query;
+        }
         if (effectiveSeason != null) {
-          queryParams['season_number'] = effectiveSeason.toString();
+          baseParams['season_number'] = effectiveSeason.toString();
         }
         if (episodeNum != null) {
-          queryParams['episode_number'] = episodeNum;
+          baseParams['episode_number'] = episodeNum;
         }
       } else {
-        queryParams['type'] = 'movie';
+        baseParams['type'] = 'movie';
+        if (tmdbId != null) {
+          baseParams['tmdb_id'] = tmdbId;
+        } else {
+          baseParams['query'] = query;
+        }
       }
 
-      final searchUri = Uri.https('api.opensubtitles.com', '/api/v1/subtitles', queryParams);
-      print('OpenSubtitles search: $searchUri');
-
-      final res = await http.get(
-        searchUri,
-        headers: {
-          'Api-Key': openSubtitlesApiKey,
-          'Content-Type': 'application/json',
-          'User-Agent': 'HYFLIX v1.0',
-        },
-      ).timeout(const Duration(seconds: 10));
-
-      if (res.statusCode != 200) {
-        print('OpenSubtitles search failed: ${res.statusCode}');
-        return [];
-      }
-
-      final body = json.decode(res.body) as Map<String, dynamic>;
-      final data = body['data'] as List<dynamic>? ?? [];
+      final headers = {
+        'Api-Key': openSubtitlesApiKey,
+        'Content-Type': 'application/json',
+        'User-Agent': 'HYFLIX v1.0',
+      };
 
       final items = <SubtitleItem>[];
-      for (final entry in data.take(15)) {
-        final attributes = entry['attributes'] as Map<String, dynamic>? ?? {};
-        final releaseName = (attributes['release'] as String?) ?? '';
-        final files = attributes['files'] as List<dynamic>? ?? [];
-        final rawLang = attributes['language'] as String? ?? 'en';
-        final lang = normalizeLanguage(rawLang);
+      final seenIds = <int>{};
+      // Two pages (up to ~80 results) so episode-level hits aren't cut off.
+      for (var page = 1; page <= 2; page++) {
+        final searchUri = Uri.https(
+          'api.opensubtitles.com',
+          '/api/v1/subtitles',
+          {...baseParams, 'page': '$page'},
+        );
+        final res = await _getWithRetry(searchUri, headers: headers);
+        if (res == null || res.statusCode != 200) {
+          print('OpenSubtitles search failed: ${res?.statusCode}');
+          break;
+        }
 
-        if (files.isEmpty) continue;
-        final file = files.first as Map<String, dynamic>;
-        final fileId = (file['file_id'] as num?)?.toInt();
-        final fileName = releaseName.isNotEmpty ? releaseName : (file['file_name'] as String? ?? 'Subtitle');
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        final data = body['data'] as List<dynamic>? ?? [];
+        final totalPages = (body['total_pages'] as num?)?.toInt() ?? 1;
 
-        if (fileId == null) continue;
+        for (final entry in data) {
+          final attributes = entry['attributes'] as Map<String, dynamic>? ?? {};
+          final releaseName = (attributes['release'] as String?) ?? '';
+          final files = attributes['files'] as List<dynamic>? ?? [];
+          final rawLang = attributes['language'] as String? ?? 'en';
+          final lang = normalizeLanguage(rawLang);
 
-        items.add(SubtitleItem(
-          id: 'os_$fileId',
-          fileName: fileName,
-          language: lang,
-          downloadUrl: fileId.toString(), // Store file_id for download request
-          source: 'opensubtitles',
-        ));
+          if (files.isEmpty) continue;
+          final file = files.first as Map<String, dynamic>;
+          final fileId = (file['file_id'] as num?)?.toInt();
+          final fileName = releaseName.isNotEmpty
+              ? releaseName
+              : (file['file_name'] as String? ?? 'Subtitle');
+
+          if (fileId == null || !seenIds.add(fileId)) continue;
+
+          items.add(SubtitleItem(
+            id: 'os_$fileId',
+            fileName: fileName,
+            language: lang,
+            downloadUrl: fileId.toString(), // Store file_id for download request
+            source: 'opensubtitles',
+          ));
+        }
+
+        if (page >= totalPages) break;
       }
 
       return items;
@@ -424,42 +477,40 @@ class SubtitleService {
         (episodeName != null ? _extractEpisodeNumber(episodeName) : _extractEpisodeFromQuery(query));
     print('[SubtitleService] searchSubtitles entry: query="$query", tmdbId=$tmdbId, season=$seasonNumber, episode=$episodeNumber, effectiveSeason=$effectiveSeason, episodeNum=$episodeNum, searchFullSeason=$searchFullSeason');
     
+    final title = cleanSearchTitle(query);
     final cacheKey = searchFullSeason
-        ? '${tmdbId ?? query}_s${effectiveSeason ?? ''}_all'
-        : '${tmdbId ?? query}_s${effectiveSeason ?? ''}_e${episodeNum ?? ''}';
-    if (_cache.containsKey(cacheKey)) return _cache[cacheKey]!;
+        ? '${tmdbId ?? title}_s${effectiveSeason ?? ''}_all'
+        : '${tmdbId ?? title}_s${effectiveSeason ?? ''}_e${episodeNum ?? ''}';
+    final cached = _cache[cacheKey];
+    if (cached != null && cached.isNotEmpty) return cached;
 
-    // If searchFullSeason is false and episodeNum is available, query API for this specific episode only.
-    // If searchFullSeason is true, fetch all subtitles for the season.
-    final results = await _doSearch(
-      query,
-      tmdbId: tmdbId,
-      effectiveSeason: effectiveSeason,
-      episodeNum: episodeNum,
-      isTvShow: isTvShow,
-      sendEpisodeToApi: !searchFullSeason && episodeNum != null,
-    );
+    // Attempt chain, most precise first:
+    //  1. TMDB id + season/episode
+    //  2. title-only search (provider text match) — covers missing/wrong TMDB ids
+    //  3. season-level without episode filter (packs that cover many episodes)
+    final attempts = <({String? tmdb, bool episodeFilter, int? season})>[
+      (tmdb: tmdbId, episodeFilter: !searchFullSeason && episodeNum != null, season: effectiveSeason),
+      if (tmdbId != null)
+        (tmdb: null, episodeFilter: !searchFullSeason && episodeNum != null, season: effectiveSeason),
+      (tmdb: tmdbId, episodeFilter: false, season: effectiveSeason),
+      if (effectiveSeason != null) (tmdb: null, episodeFilter: false, season: null),
+    ];
 
-    // Fallback: if full season search was requested and gave nothing, try without season filter
-    if (results.isEmpty && effectiveSeason != null && searchFullSeason) {
-      final fallbackKey = '${tmdbId ?? query}_all';
-      if (!_cache.containsKey(fallbackKey)) {
-        final fallback = await _doSearch(
-          query,
-          tmdbId: tmdbId,
-          effectiveSeason: null,
-          episodeNum: episodeNum,
-          isTvShow: isTvShow,
-          sendEpisodeToApi: false,
-        );
-        _cache[fallbackKey] = fallback;
-      }
-      final fallbackResult = _cache[fallbackKey]!;
-      _cache[cacheKey] = fallbackResult;
-      return fallbackResult;
+    var results = <SubtitleItem>[];
+    for (final a in attempts) {
+      results = await _doSearch(
+        title,
+        tmdbId: a.tmdb,
+        effectiveSeason: a.season,
+        episodeNum: episodeNum,
+        isTvShow: isTvShow,
+        sendEpisodeToApi: a.episodeFilter,
+      );
+      if (results.isNotEmpty) break;
     }
 
-    _cache[cacheKey] = results;
+    // Never cache an empty result — a transient failure must not stick.
+    if (results.isNotEmpty) _cache[cacheKey] = results;
     return results;
   }
 

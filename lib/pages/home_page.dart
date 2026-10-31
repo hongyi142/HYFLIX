@@ -142,6 +142,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
     // Load default source preference
     if (AuthService.isLoggedIn) {
       try {
+        await ApiService.ensureCustomSourcesLoaded();
         final sourceName = await UserService.getDefaultSource();
         ApiService.setDefaultSourceByName(sourceName);
       } catch (_) {}

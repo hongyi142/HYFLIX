@@ -9,6 +9,7 @@ import '../config/app_config.dart';
 import '../config/memory_profile.dart';
 import '../models/torrent_stream.dart';
 import 'torbox_service.dart';
+import 'user_service.dart';
 
 export '../models/torrent_stream.dart';
 
@@ -96,10 +97,13 @@ class TorrentService {
       return url;
     }
     
-    if (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY') {
-      return '$torrentioBaseUrl/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy|torbox=$torboxApiKey';
+    // Only attach TorBox to the addon URL when the user is actually in
+    // 'torbox' mode. In 'p2p' mode we want raw infoHashes for libtorrent.
+    final useTorBox = UserService.torrentMode == 'torbox' && TorBoxService().isConfigured;
+    if (useTorBox) {
+      return '$torrentioBaseUrl/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy|torbox=${TorBoxService.apiKey}';
     }
-    
+
     return torrentioBaseUrl;
   }
 
@@ -152,8 +156,8 @@ class TorrentService {
 
       List<TorrentStream> results = byKey.values.toList();
 
-      // Check TorBox cache status for raw streams if TorBox is configured
-      if (TorBoxService().isConfigured) {
+      // Check TorBox cache status for raw streams when in 'torbox' mode
+      if (UserService.torrentMode == 'torbox' && TorBoxService().isConfigured) {
         final rawHashes = results
             .where((s) => s.url == null && s.infoHash.isNotEmpty)
             .map((s) => s.infoHash)
@@ -294,17 +298,30 @@ class TorrentService {
       return (stream.url!, 0);
     }
 
-    // If TorBox is configured, attempt on-demand TorBox API resolution
-    if (TorBoxService().isConfigured) {
-      debugPrint('[TorrentService] TorBox is active. Resolving stream via TorBox API...');
+    // Respect the user's torrent mode: 'off' and 'torbox' never reach the
+    // pure-P2P path. Only 'p2p' streams via libtorrent.
+    final mode = UserService.torrentMode;
+    if (mode == 'off') {
+      debugPrint('[TorrentService] Torrent mode is "off"; not streaming.');
+      return null;
+    }
+    if (mode == 'torbox') {
+      if (!TorBoxService().isConfigured) {
+        debugPrint('[TorrentService] TorBox mode but no API key configured.');
+        return null;
+      }
+      debugPrint('[TorrentService] TorBox mode. Resolving stream via TorBox API...');
       final torboxUrl = await TorBoxService().resolveStream(stream);
       if (torboxUrl != null && torboxUrl.isNotEmpty) {
         debugPrint('[TorrentService] TorBox resolution successful: $torboxUrl');
         return (torboxUrl, 0);
       }
-      debugPrint('[TorrentService] TorBox resolution failed. Skipping P2P fallback because TorBox is active.');
+      debugPrint('[TorrentService] TorBox resolution failed. No P2P fallback in torbox mode.');
       return null;
     }
+
+    // mode == 'p2p': skip TorBox entirely and stream via libtorrent.
+    debugPrint('[TorrentService] P2P mode. Streaming via libtorrent.');
 
     await _ensureInit();
     if (!_initialized) return null;

@@ -263,13 +263,73 @@ class FirestoreService {
 
   // ── Torrent Preference ──────────────────────────────────────────────
 
-  static Future<void> saveEnableTorrent(bool enabled) async {
-    await _patch('$_usersPath.json', {'enableTorrent': enabled});
+  /// Valid torrent modes: 'off' | 'p2p' | 'torbox'.
+  static const Set<String> _torrentModes = {'off', 'p2p', 'torbox'};
+
+  static Future<void> saveTorrentMode(String mode) async {
+    await _patch('$_usersPath.json', {'torrentMode': mode});
   }
 
-  static Future<bool> getEnableTorrent() async {
+  /// Returns the user's torrent mode, migrating from the legacy
+  /// [enableTorrent] boolean if [torrentMode] has never been set.
+  static Future<String> getTorrentMode() async {
     final profile = await getProfile();
-    return (profile?['enableTorrent'] as bool?) ?? !kIsWeb;
+    final mode = profile?['torrentMode'] as String?;
+    if (mode != null && _torrentModes.contains(mode)) return mode;
+
+    // Legacy migration
+    final legacy = profile?['enableTorrent'] as bool?;
+    if (legacy == false) return 'off';
+    if (legacy == true) {
+      final hasKey =
+          ((profile?['torboxApiKey'] as String?) ?? '').isNotEmpty;
+      return (kIsWeb || hasKey) ? 'torbox' : 'p2p';
+    }
+    // No stored preference — mirror the old default (!kIsWeb).
+    return kIsWeb ? 'off' : 'p2p';
+  }
+
+  static Future<void> saveTorBoxApiKey(String key) async {
+    await _patch('$_usersPath.json', {'torboxApiKey': key.trim()});
+  }
+
+  static Future<String> getTorBoxApiKey() async {
+    final profile = await getProfile();
+    return (profile?['torboxApiKey'] as String?) ?? '';
+  }
+
+  // ── Custom VOD Sources ─────────────────────────────────────────────
+
+  /// Save a custom source (add or update) keyed by its sanitized name.
+  static Future<void> saveCustomSource(String name, String baseUrl) async {
+    final safeName = _encodeListName(name.trim());
+    await _put('$_usersPath/customSources/$safeName.json', {
+      'name': name.trim(),
+      'baseUrl': baseUrl.trim(),
+    });
+  }
+
+  /// Remove a custom source by name.
+  static Future<void> removeCustomSource(String name) async {
+    final safeName = _encodeListName(name.trim());
+    await _put('$_usersPath/customSources/$safeName.json', null);
+  }
+
+  /// Get all custom sources. Returns [{name, baseUrl}, ...].
+  static Future<List<Map<String, String>>> getCustomSources() async {
+    final data = await _get('$_usersPath/customSources.json');
+    if (data == null) return [];
+    final out = <Map<String, String>>[];
+    for (final v in data.values) {
+      if (v is Map<String, dynamic>) {
+        final name = (v['name'] as String?) ?? '';
+        final baseUrl = (v['baseUrl'] as String?) ?? '';
+        if (name.isNotEmpty && baseUrl.isNotEmpty) {
+          out.add({'name': name, 'baseUrl': baseUrl});
+        }
+      }
+    }
+    return out;
   }
 
   // ── Low-level REST helpers ───────────────────────────────────────────

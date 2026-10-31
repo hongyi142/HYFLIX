@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/content_model.dart';
 import '../models/episode.dart';
 import 'tmdb_service.dart';
+import 'user_service.dart';
 
 const String _baseUrl =
     'https://hhzyapi.com/api.php/provide/vod/';
@@ -26,7 +27,7 @@ class ApiService {
   String get _activeBaseUrl => defaultSource?.baseUrl ?? _baseUrl;
 
   /// On web, route VOD API requests through a Netlify proxy to bypass CORS.
-  Uri _proxyUri(Uri uri) {
+  static Uri _proxyUri(Uri uri) {
     if (!kIsWeb) return uri;
     final encoded = Uri.encodeComponent(uri.toString());
     return Uri.parse('/api/proxy?url=$encoded');
@@ -187,6 +188,23 @@ class ApiService {
         genreClass.contains('\u56fd\u6f2b');
   }
 
+  static bool _matchesHongKongProviderMetadata(Map<String, dynamic> json) {
+    final area = (json['vod_area'] as String? ?? '').toLowerCase();
+    return area.contains('香港') || area.contains('澳门') || area.contains('港');
+  }
+
+  /// Mainland = mentions 中国/大陆 or Mandarin, and is not HK/Macau-only.
+  static bool _matchesMainlandProviderMetadata(Map<String, dynamic> json) {
+    final area = (json['vod_area'] as String? ?? '').toLowerCase();
+    final lang = (json['vod_lang'] as String? ?? '').toLowerCase();
+    final mainland = area.contains('中国') ||
+        area.contains('大陆') ||
+        lang.contains('普通话') ||
+        lang.contains('国语');
+    final hongKong = _matchesHongKongProviderMetadata(json);
+    return mainland && (!hongKong || area.contains('大陆'));
+  }
+
   static bool _matchesKoreanProviderMetadata(Map<String, dynamic> json) {
     final area = (json['vod_area'] as String? ?? '').toLowerCase();
     final lang = (json['vod_lang'] as String? ?? '').toLowerCase();
@@ -330,8 +348,6 @@ class ApiService {
       score += 15;
     }
 
-    final area = (raw['vod_area'] as String? ?? '').toLowerCase();
-    
     if (tmdb.mediaType == 'movie') {
       if (typeId1 == 1 || typeId == 1 || (typeId != null && typeId >= 5 && typeId <= 11)) {
         score += 20;
@@ -362,9 +378,14 @@ class ApiService {
 
     switch (tmdb.originalLanguage) {
       case 'zh':
-        if (tmdb.originCountries.contains('HK')) {
-          if (area.contains('\u9999\u6e2f') || area.contains('\u6fb3\u95e8')) score += 20;
+        // Region must agree with TMDB origin_country: HK \u2260 mainland.
+        if (TmdbService.isHongKong(tmdb)) {
+          if (_matchesHongKongProviderMetadata(raw)) score += 25;
           else score -= 100; // Strict penalty for HK mismatch
+        } else if (TmdbService.isMainlandChinese(tmdb)) {
+          if (_matchesMainlandProviderMetadata(raw)) score += 25;
+          else if (_matchesHongKongProviderMetadata(raw)) score -= 100;
+          else score -= 60;
         } else {
           if (_matchesChineseProviderMetadata(raw)) score += 20;
           else score -= 100; // Strict penalty for Chinese mismatch
@@ -541,7 +562,7 @@ class ApiService {
           count: count * 3,
         ),
         count: count,
-        cacheKey: 'cache_movies_v5',
+        cacheKey: 'cache_movies_v6',
       );
 
   Future<List<ContentModel>> fetchMatchedTrendingTVSeries({
@@ -552,7 +573,7 @@ class ApiService {
           count: count * 3,
         ),
         count: count,
-        cacheKey: 'cache_tv_series_v5',
+        cacheKey: 'cache_tv_series_v6',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularChineseDramas({
@@ -565,7 +586,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_cn_dramas_v5',
+        cacheKey: 'cache_cn_dramas_v6',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularChineseAnimation({
@@ -578,7 +599,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_cn_anim_v5',
+        cacheKey: 'cache_cn_anim_v6',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularKoreanDramas({
@@ -591,7 +612,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_kr_dramas_v5',
+        cacheKey: 'cache_kr_dramas_v6',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularWesternSeries({
@@ -604,7 +625,7 @@ class ApiService {
           withinDays: withinDays,
         ),
         count: count,
-        cacheKey: 'cache_western_v5',
+        cacheKey: 'cache_western_v6',
       );
 
   Future<List<ContentModel>> fetchMatchedRecentPopularHongKongSeries({
@@ -620,7 +641,7 @@ class ApiService {
         withinDays: withinDays,
       ),
       count: count,
-      cacheKey: 'cache_hk_series_tmdb_v7',
+      cacheKey: 'cache_hk_series_tmdb_v8',
     );
 
     if (tmdbMatches.length >= count) return tmdbMatches;
@@ -641,8 +662,8 @@ class ApiService {
 
     // Cache merged result
     if (prefs != null && merged.isNotEmpty) {
-      prefs.setString('cache_hk_series_v7', json.encode(merged.map((e) => e.toJson()).toList()));
-      prefs.setInt('cache_hk_series_v7_time', DateTime.now().millisecondsSinceEpoch);
+      prefs.setString('cache_hk_series_v8', json.encode(merged.map((e) => e.toJson()).toList()));
+      prefs.setInt('cache_hk_series_v8_time', DateTime.now().millisecondsSinceEpoch);
     }
 
     return merged;
@@ -650,7 +671,7 @@ class ApiService {
 
   Future<List<ContentModel>> _fetchHongKongSeriesFromProvider({int count = 20}) async {
     final prefs = _prefs;
-    const cacheKey = 'cache_hk_provider_v7';
+    const cacheKey = 'cache_hk_provider_v8';
 
     // Check cache (6 hours)
     if (prefs != null) {
@@ -666,8 +687,15 @@ class ApiService {
     }
 
     try {
-      // type 13 = 港澳剧 (Hong Kong/Macau Drama)
-      final items = await _fetch(Uri.parse('$_activeBaseUrl?ac=videolist&t=13&pg=1'));
+      // type 13 = 港澳剧 (Hong Kong/Macau Drama). Providers often file mainland
+      // dramas here too, so keep only entries whose area really is HK/Macau.
+      final raws = await _fetchRaw(Uri.parse('$_activeBaseUrl?ac=videolist&t=13&pg=1'));
+      final items = _groupSeasons(raws
+          .where(_matchesHongKongProviderMetadata)
+          .where((r) => !_matchesMainlandProviderMetadata(r))
+          .map(_fromJson)
+          .where((c) => c.m3u8Url.isNotEmpty && c.thumbnailUrl.isNotEmpty)
+          .toList());
       final results = items.take(count).toList();
 
       if (prefs != null && results.isNotEmpty) {
@@ -720,7 +748,7 @@ class ApiService {
 
   // --- Multi-source support ---
 
-  static const List<VideoSource> sources = [
+  static const List<VideoSource> _builtInSources = [
     VideoSource(
       name: 'JSZY (Jisu)',
       baseUrl: 'https://jszyapi.com/api.php/provide/vod/',
@@ -738,10 +766,129 @@ class ApiService {
       baseUrl: 'https://hhzyapi.com/api.php/provide/vod/',
     ),
     VideoSource(
-      name: 'Wolong (卧龙)',
-      baseUrl: 'https://collect.wolongzyw.com/api.php/provide/vod/',
+      name: 'LZI (量子)',
+      baseUrl: 'https://cj.lziapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'LZCJ (量子备用)',
+      baseUrl: 'https://cj.lzcaiji.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'ZUIDA (最大)',
+      baseUrl: 'https://api.zuidapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'FFZY (非凡)',
+      baseUrl: 'https://cj.ffzyapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'JINYING (金鹰)',
+      baseUrl: 'https://www.jinyingzy.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'GUANGSU (光速)',
+      baseUrl: 'https://api.guangsuapi.com/api.php/provide/vod/',
+    ),
+    VideoSource(
+      name: 'MAOYAN (猫眼)',
+      baseUrl: 'https://api.maoyanapi.top/api.php/provide/vod/',
     ),
   ];
+
+  static final List<VideoSource> _customSources = <VideoSource>[];
+  static bool _customLoaded = false;
+
+  /// Built-in sources followed by the user's custom sources.
+  static List<VideoSource> get sources =>
+      List.unmodifiable([..._builtInSources, ..._customSources]);
+
+  /// Idempotently hydrates [_customSources] from the user's saved profile.
+  static Future<void> ensureCustomSourcesLoaded() async {
+    if (_customLoaded) return;
+    final list = await UserService.getCustomSources();
+    _customSources
+      ..clear()
+      ..addAll(list.map(
+          (m) => VideoSource(name: m['name']!, baseUrl: m['baseUrl']!)));
+    _customLoaded = true;
+  }
+
+  /// Replaces the in-memory custom source list (e.g. after add/remove).
+  static void setCustomSources(List<VideoSource> v) {
+    _customSources
+      ..clear()
+      ..addAll(v);
+    _customLoaded = true;
+  }
+
+  /// Probes a candidate macCMS JSON endpoint.
+  /// Returns {ok, error, latencyMs, itemCount}.
+  static Future<({bool ok, String? error, int latencyMs, int itemCount})>
+      validateSourceUrl(String baseUrl) async {
+    var url = baseUrl.trim();
+    while (url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    final uri = Uri.parse('$url?ac=list&pg=1');
+    final sw = Stopwatch()..start();
+    try {
+      final res = await http
+          .get(_proxyUri(uri))
+          .timeout(const Duration(seconds: 15));
+      sw.stop();
+      if (res.statusCode != 200) {
+        return (
+          ok: false,
+          error: 'HTTP ${res.statusCode}',
+          latencyMs: sw.elapsedMilliseconds,
+          itemCount: 0
+        );
+      }
+      final trimmed = res.body.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('<')) {
+        return (
+          ok: false,
+          error: 'Not a macCMS JSON API',
+          latencyMs: sw.elapsedMilliseconds,
+          itemCount: 0
+        );
+      }
+      final decoded = json.decode(trimmed);
+      if (decoded is! Map<String, dynamic> || decoded['list'] is! List) {
+        return (
+          ok: false,
+          error: 'Not a macCMS JSON API',
+          latencyMs: sw.elapsedMilliseconds,
+          itemCount: 0
+        );
+      }
+      final count = (decoded['list'] as List).length;
+      if (count == 0) {
+        return (
+          ok: false,
+          error: 'Empty catalog',
+          latencyMs: sw.elapsedMilliseconds,
+          itemCount: 0
+        );
+      }
+      return (
+        ok: true,
+        error: null,
+        latencyMs: sw.elapsedMilliseconds,
+        itemCount: decoded['total'] is int
+            ? decoded['total'] as int
+            : int.tryParse('${decoded['total']}') ?? count
+      );
+    } catch (e) {
+      sw.stop();
+      return (
+        ok: false,
+        error: 'Could not reach endpoint',
+        latencyMs: sw.elapsedMilliseconds,
+        itemCount: 0
+      );
+    }
+  }
 
   Future<List<ContentModel>> searchByTitleFromSource(
       String query, VideoSource source) {

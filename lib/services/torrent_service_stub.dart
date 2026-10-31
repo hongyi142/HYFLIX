@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../models/torrent_stream.dart';
 import 'torbox_service.dart';
+import 'user_service.dart';
 
 export '../models/torrent_stream.dart';
 
@@ -31,10 +32,13 @@ class TorrentService {
       return url;
     }
     
-    if (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY') {
-      return '$torrentioBaseUrl/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy|torbox=$torboxApiKey';
+    // On web only TorBox direct-play works. Only attach the torbox param
+    // when the user is in 'torbox' mode with a configured key.
+    final useTorBox = UserService.torrentMode == 'torbox' && TorBoxService().isConfigured;
+    if (useTorBox) {
+      return '$torrentioBaseUrl/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy|torbox=${TorBoxService.apiKey}';
     }
-    
+
     return torrentioBaseUrl;
   }
 
@@ -62,7 +66,8 @@ class TorrentService {
         mediafusionBaseUrl,
       ];
 
-      final isTorBoxActive = TorBoxService().isConfigured;
+      // Only apply TorBox cache-status labeling when in 'torbox' mode.
+      final isTorBoxActive = UserService.torrentMode == 'torbox' && TorBoxService().isConfigured;
 
       final futures = addonBaseUrls.map((base) => _fetchFromAddonWeb(base, path, isTorBoxActive));
       final allResults = await Future.wait(futures);
@@ -204,7 +209,8 @@ class TorrentService {
     if (stream.url != null && stream.url!.isNotEmpty) {
       return (stream.url!, 0);
     }
-    if (TorBoxService().isConfigured) {
+    // Web has no libtorrent; only 'torbox' mode can resolve a raw hash.
+    if (UserService.torrentMode == 'torbox' && TorBoxService().isConfigured) {
       final resolved = await TorBoxService().resolveStream(stream);
       if (resolved != null && resolved.isNotEmpty) {
         return (resolved, 0);

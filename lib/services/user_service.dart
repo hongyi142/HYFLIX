@@ -1,6 +1,11 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'firestore_service.dart';
+import 'torbox_service.dart';
 
 class UserService {
+  /// Synchronous cache of the user's torrent mode ('off' | 'p2p' | 'torbox').
+  /// Hydrated by [loadTorrentSettings]; safe default before hydration.
+  static String torrentMode = kIsWeb ? 'off' : 'p2p';
   static Future<void> createProfile({
     required String email,
     required String displayName,
@@ -118,13 +123,33 @@ class UserService {
     return await FirestoreService.getDefaultSource();
   }
 
-  static Future<void> saveEnableTorrent(bool enabled) async {
-    await FirestoreService.saveEnableTorrent(enabled);
+  /// Hydrates [torrentMode] and [TorBoxService.apiKey] from the user's
+  /// saved settings. Call at splash, settings load, and DetailPage init.
+  static Future<void> loadTorrentSettings() async {
+    torrentMode = await FirestoreService.getTorrentMode();
+    TorBoxService.apiKey = await FirestoreService.getTorBoxApiKey();
   }
 
-  static Future<bool> getEnableTorrent() async {
-    return await FirestoreService.getEnableTorrent();
+  static Future<void> saveTorrentMode(String mode) async {
+    torrentMode = mode;
+    await FirestoreService.saveTorrentMode(mode);
   }
+
+  static Future<void> saveTorBoxApiKey(String key) async {
+    TorBoxService.apiKey = key.trim();
+    await FirestoreService.saveTorBoxApiKey(key);
+  }
+
+  // ── Custom VOD Sources ─────────────────────────────────────────────
+
+  static Future<void> saveCustomSource(String name, String baseUrl) =>
+      FirestoreService.saveCustomSource(name, baseUrl);
+
+  static Future<void> removeCustomSource(String name) =>
+      FirestoreService.removeCustomSource(name);
+
+  static Future<List<Map<String, String>>> getCustomSources() =>
+      FirestoreService.getCustomSources();
 
   // ── Watchlists ───────────────────────────────────────────────────────
 

@@ -424,8 +424,12 @@ class TmdbService {
           'with_original_language': 'ko',
           'without_genres': '16',
         },
+        predicate: (item) => item.originCountries.isEmpty ||
+            item.originCountries.contains('KR'),
       );
 
+  /// Mainland China live-action dramas. Excludes HK/TW origin so they never
+  /// leak into the Hong Kong shelf.
   static Future<List<TmdbResult>> fetchRecentPopularChineseDramas({
     int? page,
     int count = 10,
@@ -440,8 +444,10 @@ class TmdbService {
           'with_original_language': 'zh',
           'without_genres': '16',
         },
+        predicate: (item) => isMainlandChinese(item),
       );
 
+  /// Hong Kong series only: TMDB origin must be HK (and not mainland CN).
   static Future<List<TmdbResult>> fetchRecentPopularHongKongSeries({
     int? page,
     int count = 10,
@@ -456,6 +462,7 @@ class TmdbService {
           'with_origin_country': 'HK',
           'without_genres': '16',
         },
+        predicate: (item) => isHongKong(item),
       );
 
   static Future<List<TmdbResult>> fetchRecentPopularChineseAnimation({
@@ -472,7 +479,21 @@ class TmdbService {
           'with_original_language': 'zh',
           'with_genres': '16',
         },
+        predicate: (item) => isMainlandChinese(item) || item.originCountries.isEmpty,
       );
+
+  /// True when TMDB says the title is mainland-China produced (CN origin, not HK/TW-only).
+  static bool isMainlandChinese(TmdbResult item) {
+    final c = item.originCountries;
+    if (c.isEmpty) return item.originalLanguage == 'zh';
+    return c.contains('CN') && !c.contains('HK') && !c.contains('TW');
+  }
+
+  /// True when TMDB says the title is Hong Kong produced and not mainland.
+  static bool isHongKong(TmdbResult item) {
+    final c = item.originCountries;
+    return c.contains('HK') && !c.contains('CN');
+  }
 
   /// Fetch trending Chinese animations (donghua) from AniList GraphQL API.
   /// Returns TmdbResult-compatible objects for seamless pipeline integration.
@@ -533,6 +554,9 @@ class TmdbService {
       final results = <TmdbResult>[];
       for (final m in media) {
         final map = m as Map<String, dynamic>;
+        // Movies/specials belong to the movie shelves, not the series shelf.
+        final format = map['format'] as String? ?? 'TV';
+        if (format == 'MOVIE' || format == 'SPECIAL' || format == 'MUSIC') continue;
         final title = map['title'] as Map<String, dynamic>;
         final startDate = map['startDate'] as Map<String, dynamic>?;
 

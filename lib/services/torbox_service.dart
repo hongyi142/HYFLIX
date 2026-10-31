@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../config/app_config.dart';
 import '../models/torrent_stream.dart';
 
 /// Service to resolve raw torrent streams (infoHash/magnet) into direct HTTPS
@@ -14,9 +13,13 @@ class TorBoxService {
 
   static const String _apiBase = 'https://api.torbox.app/v1/api';
 
+  /// TorBox API key, hydrated at runtime from the user's saved settings.
+  /// Empty until [UserService.loadTorrentSettings()] runs.
+  static String apiKey = '';
+
   /// Check whether a valid TorBox API key is configured.
   bool get isConfigured =>
-      torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY';
+      apiKey.isNotEmpty && apiKey != 'YOUR_TORBOX_API_KEY';
 
   /// Check which torrent hashes are cached in TorBox.
   /// Returns a Set of cached infoHashes (lowercase).
@@ -57,7 +60,7 @@ class TorBoxService {
       final queryHash = batch.join(',');
       final url = Uri.parse('$_apiBase/torrents/checkcached?hash=$queryHash');
       final res = await http.get(url, headers: {
-        'Authorization': 'Bearer $torboxApiKey',
+        'Authorization': 'Bearer $apiKey',
       }).timeout(const Duration(seconds: 5));
 
       if (res.statusCode == 200) {
@@ -126,7 +129,7 @@ class TorBoxService {
       }
 
       // Guaranteed fallback: Return redirect permalink URL so TorBox handles streaming over HTTPS
-      final permalink = '$_apiBase/torrents/requestdl?token=$torboxApiKey&torrent_id=$torrentId&file_id=$targetFileId&redirect=true';
+      final permalink = '$_apiBase/torrents/requestdl?token=$apiKey&torrent_id=$torrentId&file_id=$targetFileId&redirect=true';
       debugPrint('[TorBoxService] Using TorBox permalink redirect URL: $permalink');
       return permalink;
     } catch (e, st) {
@@ -141,7 +144,7 @@ class TorBoxService {
     final response = await http.post(
       url,
       headers: {
-        'Authorization': 'Bearer $torboxApiKey',
+        'Authorization': 'Bearer $apiKey',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: {'magnet': magnetUri},
@@ -174,7 +177,7 @@ class TorBoxService {
     for (int attempt = 0; attempt < 10; attempt++) {
       try {
         final res = await http.get(url, headers: {
-          'Authorization': 'Bearer $torboxApiKey',
+          'Authorization': 'Bearer $apiKey',
         }).timeout(const Duration(seconds: 8));
 
         if (res.statusCode == 200) {
@@ -248,10 +251,10 @@ class TorBoxService {
   /// Request direct streaming URL via GET /v1/api/torrents/requestdl
   Future<String?> _requestDownloadLink(int torrentId, int fileId) async {
     final url = Uri.parse(
-        '$_apiBase/torrents/requestdl?token=$torboxApiKey&torrent_id=$torrentId&file_id=$fileId&zip=false');
+        '$_apiBase/torrents/requestdl?token=$apiKey&torrent_id=$torrentId&file_id=$fileId&zip=false');
 
     final res = await http.get(url, headers: {
-      'Authorization': 'Bearer $torboxApiKey',
+      'Authorization': 'Bearer $apiKey',
     }).timeout(const Duration(seconds: 10));
 
     if (res.statusCode == 200) {

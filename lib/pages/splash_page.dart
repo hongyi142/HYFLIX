@@ -38,6 +38,8 @@ class _SplashPageState extends State<SplashPage> {
     try {
       // Load language and source preference before fetching content
       if (AuthService.isLoggedIn) {
+        await UserService.loadTorrentSettings();
+        await ApiService.ensureCustomSourcesLoaded();
         final results = await Future.wait([
           UserService.getLanguage(),
           UserService.getDefaultSource(),

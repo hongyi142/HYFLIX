@@ -5,6 +5,7 @@ import '../core/theme.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/tmdb_service.dart';
+import '../services/torbox_service.dart';
 import '../services/user_service.dart';
 import 'home_page.dart';
 
@@ -30,8 +31,18 @@ class _SettingsPageState extends State<SettingsPage> {
   String _language = 'en';
   String _defaultSource = 'HHZY (Luxury)';
   bool _loadingSource = true;
-  bool _enableTorrent = true;
+  String _torrentMode = UserService.torrentMode;
   bool _loadingTorrentSetting = true;
+  bool _savingTorBoxKey = false;
+  final TextEditingController _torBoxKeyController = TextEditingController();
+  final TextEditingController _customSourceNameController =
+      TextEditingController();
+  final TextEditingController _customSourceUrlController =
+      TextEditingController();
+  bool _validatingSource = false;
+  bool _addingSource = false;
+  String? _sourceValidationMessage;
+  bool _sourceValidationOk = false;
   String? _expandedSection;
 
   @override
@@ -42,6 +53,15 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadLanguage();
     _loadDefaultSource();
     _loadTorrentSetting();
+    _hydrateCustomSources();
+  }
+
+  Future<void> _hydrateCustomSources() async {
+    if (!AuthService.isLoggedIn) return;
+    try {
+      await ApiService.ensureCustomSourcesLoaded();
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _loadLanguage() async {
@@ -67,10 +87,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _loadTorrentSetting() async {
     try {
-      final enabled = await UserService.getEnableTorrent();
+      await UserService.loadTorrentSettings();
       if (mounted) {
         setState(() {
-          _enableTorrent = enabled;
+          _torrentMode = UserService.torrentMode;
+          _torBoxKeyController.text = TorBoxService.apiKey;
           _loadingTorrentSetting = false;
         });
       }
@@ -79,10 +100,10 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _saveTorrentSetting(bool enabled) async {
-    setState(() => _enableTorrent = enabled);
+  Future<void> _saveTorrentMode(String mode) async {
+    setState(() => _torrentMode = mode);
     try {
-      await UserService.saveEnableTorrent(enabled);
+      await UserService.saveTorrentMode(mode);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -92,6 +113,32 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _saveTorBoxApiKey() async {
+    setState(() => _savingTorBoxKey = true);
+    try {
+      await UserService.saveTorBoxApiKey(_torBoxKeyController.text);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('TorBox API key saved'),
+            backgroundColor: Color(0xFF1A1A1A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving API key: $e'),
+            backgroundColor: AppTheme.accent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingTorBoxKey = false);
     }
   }
 
@@ -155,6 +202,134 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  bool _nameExists(String name) => ApiService.sources
+      .any((s) => s.name.toLowerCase() == name.trim().toLowerCase());
+
+  Future<void> _validateSource() async {
+    final url = _customSourceUrlController.text.trim();
+    if (url.isEmpty) return;
+    setState(() {
+      _validatingSource = true;
+      _sourceValidationMessage = null;
+    });
+    final r = await ApiService.validateSourceUrl(url);
+    if (!mounted) return;
+    setState(() {
+      _validatingSource = false;
+      _sourceValidationOk = r.ok;
+      _sourceValidationMessage = r.ok
+          ? 'OK — ${r.itemCount} items, ${r.latencyMs}ms'
+          : (r.error ?? 'Validation failed');
+    });
+  }
+
+  Future<void> _addCustomSource() async {
+    final name = _customSourceNameController.text.trim();
+    final url = _customSourceUrlController.text.trim();
+    if (name.isEmpty || url.isEmpty) {
+      setState(() {
+        _sourceValidationOk = false;
+        _sourceValidationMessage = 'Name and URL are required';
+      });
+      return;
+    }
+    if (name.toLowerCase() == 'torrent' || _nameExists(name)) {
+      setState(() {
+        _sourceValidationOk = false;
+        _sourceValidationMessage = 'That name is already taken';
+      });
+      return;
+    }
+    setState(() => _addingSource = true);
+    try {
+      await UserService.saveCustomSource(name, url);
+      ApiService.setCustomSources([
+        ...ApiService.sources.where((s) => !_builtIn(s)),
+        VideoSource(name: name, baseUrl: url),
+      ]);
+      ApiService.clearAllCache();
+      _customSourceNameController.clear();
+      _customSourceUrlController.clear();
+      if (mounted) {
+        setState(() {
+          _sourceValidationOk = true;
+          _sourceValidationMessage = 'Added "$name"';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Custom source "$name" added'),
+            backgroundColor: const Color(0xFF1A1A1A),
+          ),
+        );
+        HomePage.refreshFromSourceChange();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _sourceValidationOk = false;
+          _sourceValidationMessage = 'Error: $e';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _addingSource = false);
+    }
+  }
+
+  bool _builtIn(VideoSource s) =>
+      s.name == 'JSZY (Jisu)' ||
+      s.name == 'BaoFeng (暴风)' ||
+      s.name == 'BDZY (Baidu)' ||
+      s.name == 'HHZY (Luxury)' ||
+      s.name == 'Wolong (卧龙)';
+
+  Future<void> _removeCustomSource(VideoSource source) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1F2E),
+        title: const Text('Remove source?', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Remove "${source.name}"? This cannot be undone.',
+          style: TextStyle(color: Colors.white.withOpacity(0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove', style: TextStyle(color: AppTheme.accent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await UserService.removeCustomSource(source.name);
+    final remaining =
+        ApiService.sources.where((s) => !_builtIn(s) && s.name != source.name);
+    ApiService.setCustomSources([...remaining]);
+    ApiService.clearAllCache();
+
+    // If the removed source was the default, fall back to HHZY.
+    if (_defaultSource == source.name) {
+      _defaultSource = 'HHZY (Luxury)';
+      ApiService.setDefaultSourceByName(_defaultSource);
+      await UserService.saveDefaultSource(_defaultSource);
+    }
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed "${source.name}"'),
+          backgroundColor: const Color(0xFF1A1A1A),
+        ),
+      );
+      HomePage.refreshFromSourceChange();
+    }
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -163,6 +338,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
+    _torBoxKeyController.dispose();
+    _customSourceNameController.dispose();
+    _customSourceUrlController.dispose();
     super.dispose();
   }
 
@@ -631,6 +809,116 @@ class _SettingsPageState extends State<SettingsPage> {
                 }).toList(),
               ),
             ),
+          if (!AuthService.isLoggedIn)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(56, 0, 24, 24),
+              child: Text(
+                'Sign in to add & sync custom sources',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.4),
+                  fontSize: 12,
+                ),
+              ),
+            )
+          else ...[
+            if (ApiService.sources.any((s) => !_builtIn(s)))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(56, 0, 24, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Custom sources',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...ApiService.sources
+                        .where((s) => !_builtIn(s))
+                        .map(
+                          (s) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    s.name,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 13),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    LucideIcons.trash2,
+                                    size: 16,
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                  onPressed: () => _removeCustomSource(s),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(56, 0, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTextField(
+                    controller: _customSourceNameController,
+                    hint: 'Source name (e.g. HongNiu)',
+                    icon: LucideIcons.server,
+                  ),
+                  const SizedBox(height: 10),
+                  _buildTextField(
+                    controller: _customSourceUrlController,
+                    hint: 'Base URL (macCMS JSON API)',
+                    icon: LucideIcons.link,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildSaveButton(
+                          label: 'Validate',
+                          loading: _validatingSource,
+                          onTap: _validateSource,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _buildSaveButton(
+                          label: 'Add Source',
+                          loading: _addingSource,
+                          onTap: _addCustomSource,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_sourceValidationMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(
+                        _sourceValidationMessage!,
+                        style: TextStyle(
+                          color: _sourceValidationOk
+                              ? Colors.greenAccent
+                              : AppTheme.accent,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -639,13 +927,20 @@ class _SettingsPageState extends State<SettingsPage> {
   // ── Torrent Toggle Tile ─────────────────────────────────────────────
 
   Widget _buildTorrentToggleTile() {
+    const modes = ['off', 'p2p', 'torbox'];
+    final modeIndex = modes.indexOf(_torrentMode).clamp(0, 2);
     return _buildCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _SettingsTile(
             icon: LucideIcons.play,
-            title: 'Enable Torrent Streams',
-            subtitle: 'Enable P2P & TorBox debrid video streaming',
+            title: 'Torrent Streaming',
+            subtitle: _torrentMode == 'off'
+                ? 'Torrent streaming is disabled'
+                : _torrentMode == 'p2p'
+                    ? 'Stream via peer-to-peer (libtorrent)'
+                    : 'Stream via TorBox debrid',
             trailing: _loadingTorrentSetting
                 ? const SizedBox(
                     width: 20,
@@ -655,15 +950,34 @@ class _SettingsPageState extends State<SettingsPage> {
                       valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
                     ),
                   )
-                : Switch(
-                    value: _enableTorrent,
-                    activeColor: AppTheme.accent,
-                    activeTrackColor: AppTheme.accent.withOpacity(0.3),
-                    inactiveThumbColor: Colors.grey,
-                    inactiveTrackColor: Colors.white10,
-                    onChanged: (val) => _saveTorrentSetting(val),
+                : _SegmentedToggle(
+                    options: const ['Off', 'P2P', 'TorBox'],
+                    selectedIndex: modeIndex,
+                    onSelected: (i) => _saveTorrentMode(modes[i]),
                   ),
           ),
+          if (_torrentMode == 'torbox') ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(56, 0, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTextField(
+                    controller: _torBoxKeyController,
+                    hint: 'TorBox API key (stored privately in your account)',
+                    icon: LucideIcons.key,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildSaveButton(
+                    label: 'Save API Key',
+                    loading: _savingTorBoxKey,
+                    onTap: _saveTorBoxApiKey,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

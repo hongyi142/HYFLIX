@@ -16,7 +16,6 @@ import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/torrent_service.dart';
 import '../services/torbox_service.dart';
-import '../config/app_config.dart';
 import '../config/memory_profile.dart';
 import '../widgets/buttons.dart';
 import 'fullscreen_stub.dart'
@@ -65,7 +64,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final VideoController _controller;
   
 
-  bool _torrentSupported = true;
   int _subDelayOffsetMs = 0;
   String? _loadedSrtContent;
   bool _showControls = true;
@@ -296,7 +294,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     debugPrint('[VideoPlayer] Starting torrent: ${stream.quality} '
         'hash=${stream.infoHash.substring(0, 16)}... fileIdx=${stream.fileIdx}');
 
-    final isTorBoxActive = torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY';
+    final isTorBoxActive = TorBoxService().isConfigured;
 
     setState(() {
       _isTorrentBuffering = true;
@@ -1903,7 +1901,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 },
               ),
             ),
-            if (isTorrent && (widget.torrentStream!.url != null || _torrentUrl != null || (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY'))) ...[
+            if (isTorrent && (widget.torrentStream!.url != null || _torrentUrl != null || (TorBoxService().isConfigured))) ...[
               const SizedBox(height: 8),
               _statRow('Type', 'TorBox Direct Play', color: Colors.cyanAccent),
               const SizedBox(height: 8),

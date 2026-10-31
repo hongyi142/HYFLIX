@@ -10,6 +10,7 @@ import '../pages/detail_page.dart';
 import '../pages/video_player_screen.dart';
 import '../services/tmdb_service.dart';
 import '../services/torrent_service.dart';
+import '../services/user_service.dart';
 import '../services/video_preview.dart';
 import 'video_preview_widget.dart';
 
@@ -331,8 +332,9 @@ class _VideoCardState extends State<VideoCard> {
         ),
       ).then((_) => widget.onWatchHistoryChanged?.call());
     } else if (hasResume && !playableUrl) {
-      if (kIsWeb) {
-        // Web: can't resume torrents, open detail page instead
+      if (kIsWeb || UserService.torrentMode != 'p2p') {
+        // Web / off / torbox modes: can't resume a raw torrent here — open
+        // the detail page, which re-routes through the correct source path.
         DetailPage.show(
           context,
           widget.content,

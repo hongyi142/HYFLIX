@@ -84,22 +84,26 @@ class _DetailPageState extends State<DetailPage> {
   List<String> _availableEncoders = [];
   Map<int, TmdbEpisodeInfo> _tmdbEpisodeDetails = {};
   String? _cachedImdbId;
-  bool _torrentSupported = true;
+  String _torrentMode = UserService.torrentMode;
 
-  /// Whether torrent streaming is available (all native content).
-  bool get _isNonChineseContent =>
-      _torrentSupported &&
-      (kIsWeb
-          ? (torboxApiKey.isNotEmpty && torboxApiKey != 'YOUR_TORBOX_API_KEY') ||
-              customTorrentioUrl.isNotEmpty
-          : true);
+  /// Whether torrent streaming is available for this content.
+  bool get _isNonChineseContent {
+    if (_torrentMode == 'off') return false;
+    if (kIsWeb) {
+      // Web only supports TorBox direct-play (no libtorrent).
+      return _torrentMode == 'torbox' &&
+          (TorBoxService().isConfigured || customTorrentioUrl.isNotEmpty);
+    }
+    // Native: both 'p2p' and 'torbox' route to the torrent path.
+    return true;
+  }
 
   Future<void> _loadTorrentSetting() async {
     try {
-      final enabled = await UserService.getEnableTorrent();
+      await UserService.loadTorrentSettings();
       if (mounted) {
         setState(() {
-          _torrentSupported = enabled;
+          _torrentMode = UserService.torrentMode;
         });
       }
     } catch (_) {}
@@ -543,60 +547,80 @@ class _DetailPageState extends State<DetailPage> {
       _selectedSource = source;
       _isLoadingEpisodes = true;
     });
-    final api = ApiService();
-    final tmdb = _tmdb;
-
-    Future<void> applyEpisodes(List<Episode>? eps) async {
+    _resolveSourceEpisodes(source).then((eps) async {
       if (!mounted || _sourceGeneration != gen) return;
-      setState(() {
-        _sourceEpisodes = eps;
-        _isLoadingEpisodes = false;
-      });
-    }
+      if (eps.isNotEmpty) {
+        setState(() {
+          _sourceEpisodes = eps;
+          _isLoadingEpisodes = false;
+        });
+        return;
+      }
 
-    if (tmdb != null) {
-      api.matchTmdbToProviderFromSource(tmdb, source).then((result) async {
-        final matchedEps = result?.episodes ?? [];
-        // If TMDB match returned results, use them
-        if (matchedEps.isNotEmpty) {
-          await applyEpisodes(matchedEps);
+      // Failover: this source has no playable copy of the title, so try the
+      // other configured sources in order and adopt the first that has one.
+      for (final alt in ApiService.sources) {
+        if (alt == source) continue;
+        final altEps = await _resolveSourceEpisodes(alt);
+        if (!mounted || _sourceGeneration != gen) return;
+        if (altEps.isNotEmpty) {
+          setState(() {
+            _selectedSource = alt;
+            _sourceEpisodes = altEps;
+            _isLoadingEpisodes = false;
+          });
           return;
         }
-        // Fallback: direct search by original title + cleaned title
-        var fallbackResults = await api.searchByTitleFromSource(
-          widget.content.title, source);
-        var allEps = <Episode>[];
-        for (final r in fallbackResults) {
-          allEps.addAll(r.episodes);
-        }
-        // If still no results and we have a TMDB ID, try Chinese title
-        if (allEps.isEmpty && tmdb.id != null) {
-          final chineseTitle = await TmdbService.fetchChineseTitle(
-            tmdb.id!, tmdb.mediaType);
-          if (chineseTitle != null && chineseTitle != widget.content.title) {
-            fallbackResults = await api.searchByTitleFromSource(
-              chineseTitle, source);
-            for (final r in fallbackResults) {
-              allEps.addAll(r.episodes);
-            }
-          }
-        }
-        await applyEpisodes(allEps.isNotEmpty ? allEps : null);
-      }).catchError((_) {
-        applyEpisodes(null);
+      }
+
+      if (!mounted || _sourceGeneration != gen) return;
+      setState(() {
+        _sourceEpisodes = null;
+        _isLoadingEpisodes = false;
       });
-    } else {
-      api
-          .searchByTitleFromSource(widget.content.title, source)
-          .then((results) async {
-        final allEps = <Episode>[];
-        for (final r in results) {
-          allEps.addAll(r.episodes);
-        }
-        await applyEpisodes(allEps.isNotEmpty ? allEps : null);
-      }).catchError((_) {
-        applyEpisodes(null);
+    }).catchError((_) {
+      if (!mounted || _sourceGeneration != gen) return;
+      setState(() {
+        _sourceEpisodes = null;
+        _isLoadingEpisodes = false;
       });
+    });
+  }
+
+  /// Resolves one VOD source to the episodes of THIS title only. Accepts a
+  /// result only when its cleaned title matches, so unrelated shows never leak
+  /// into the episode list.
+  Future<List<Episode>> _resolveSourceEpisodes(VideoSource source) async {
+    final api = ApiService();
+    final tmdb = _tmdb;
+    try {
+      if (tmdb != null) {
+        final matched = await api.matchTmdbToProviderFromSource(tmdb, source);
+        if (matched != null && matched.episodes.isNotEmpty) {
+          return matched.episodes;
+        }
+      }
+
+      final wanted = TmdbService.cleanTitle(widget.content.title);
+      var results = await api.searchByTitleFromSource(widget.content.title, source);
+      var exact = results
+          .where((r) => TmdbService.cleanTitle(r.title) == wanted)
+          .toList();
+
+      // Try the Chinese title when the English one finds nothing.
+      if (exact.isEmpty && tmdb?.id != null) {
+        final zh = await TmdbService.fetchChineseTitle(tmdb!.id!, tmdb.mediaType);
+        if (zh != null && zh.isNotEmpty && zh != widget.content.title) {
+          final zhWanted = TmdbService.cleanTitle(zh);
+          results = await api.searchByTitleFromSource(zh, source);
+          exact = results
+              .where((r) => TmdbService.cleanTitle(r.title) == zhWanted)
+              .toList();
+        }
+      }
+      return exact.expand((r) => r.episodes).toList();
+    } catch (_) {
+      return [];
     }
   }
 
@@ -658,6 +682,19 @@ class _DetailPageState extends State<DetailPage> {
     }
     if (existing?.status == DownloadStatus.completed) {
       _downloadService.deleteDownload(contentId, episodeIndex);
+      return;
+    }
+
+    // Torrent downloads resolve via TorBox only; pure-P2P streams can't be
+    // handed to the download service. Offer VOD download instead.
+    if (!TorBoxService().isConfigured && _torrentMode != 'torbox') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Torrent downloads need a TorBox API key. Use source download instead.'),
+          ),
+        );
+      }
       return;
     }
 
