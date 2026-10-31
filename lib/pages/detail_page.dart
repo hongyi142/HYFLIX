@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../core/responsive.dart';
 import '../core/proxy_url.dart';
@@ -8,6 +11,9 @@ import '../models/content_model.dart';
 import '../models/episode.dart';
 import '../pages/video_player_screen.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
+import '../services/party_service.dart';
+import '../widgets/party_sheet.dart';
 import '../services/download_service.dart';
 import '../services/torrent_service.dart';
 import '../services/torbox_service.dart';
@@ -23,8 +29,16 @@ import '../widgets/download_picker_modal.dart';
 class DetailPage extends StatefulWidget {
   final ContentModel content;
   final TmdbResult? initialTmdb;
+  /// Set when opened from a party pin: playback starts automatically on the
+  /// host's episode, using this device's own stream.
+  final PartySession? joinParty;
 
-  const DetailPage({super.key, required this.content, this.initialTmdb});
+  const DetailPage({
+    super.key,
+    required this.content,
+    this.initialTmdb,
+    this.joinParty,
+  });
 
   static Future<void> show(
     BuildContext context,
@@ -72,6 +86,10 @@ class _DetailPageState extends State<DetailPage> {
   bool _reverseEpisodes = false;
   int _sourceGeneration = 0;
 
+  // Watch party state
+  bool _autoJoined = false;
+  Timer? _autoJoinTimer;
+
   // Torrent streaming state
   Map<int, List<TorrentStream>> _torrentStreamsByEpisode = {};
   int _torrentEpisodeCount = 0;
@@ -117,6 +135,13 @@ class _DetailPageState extends State<DetailPage> {
     _watchlistService.addListener(_checkListed);
     _downloadService.addListener(_onDownloadChanged);
 
+    _startAutoJoinWatch();
+    final joined = widget.joinParty;
+    if (joined != null) {
+      joined.roomScreenOpen = true;
+      joined.live.addListener(_onPartyChanged);
+      joined.episodeNotifier.addListener(_onPartyChanged);
+    }
     _loadTorrentSetting().then((_) {
       if (!mounted) return;
       if (_tmdb == null) {
@@ -172,6 +197,13 @@ class _DetailPageState extends State<DetailPage> {
 
   @override
   void dispose() {
+    _autoJoinTimer?.cancel();
+    final joined = widget.joinParty;
+    if (joined != null) {
+      joined.live.removeListener(_onPartyChanged);
+      joined.episodeNotifier.removeListener(_onPartyChanged);
+      joined.roomScreenOpen = false;
+    }
     _watchlistService.removeListener(_checkListed);
     _downloadService.removeListener(_onDownloadChanged);
     super.dispose();
@@ -500,8 +532,29 @@ class _DetailPageState extends State<DetailPage> {
       setState(() => _isLoadingTorrents = false);
     }
 
-    // Pick the best stream for selected quality/encoder
-    final picked = _getStreamForSelection(episodeNum);
+    // Pick the best stream for selected quality/encoder. In a party, guests
+    // use the exact release the host is watching, and the host shares theirs.
+    var picked = _getStreamForSelection(episodeNum);
+    final party = _activeParty;
+    if (party != null) {
+      if (party.isHost) {
+        unawaited(party.publishEpisode(
+          episodeIndex,
+          season: _selectedSeason,
+          number: episodeIndex + 1,
+        ));
+        unawaited(party.markLive());
+        if (picked != null) {
+          unawaited(party.shareRelease(picked.infoHash, picked.fileIdx));
+        }
+      } else {
+        final wantedHash = party.currentMeta.infoHash;
+        final match = _torrentStreamsByEpisode[episodeNum]
+            ?.where((s) => s.infoHash == wantedHash)
+            .firstOrNull;
+        if (match != null) picked = match;
+      }
+    }
     if (picked == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No streams available for this episode.')),
@@ -527,6 +580,7 @@ class _DetailPageState extends State<DetailPage> {
           seasonNumber: _selectedSeason,
           posterUrl: poster,
           torrentStream: picked,
+          party: _activeParty,
           seekToSeconds: seekToSeconds,
           episodeNumber: episodeNum,
           episodeCount: _torrentEpisodeCount,
@@ -557,23 +611,21 @@ class _DetailPageState extends State<DetailPage> {
         return;
       }
 
-      // Failover: this source has no playable copy of the title, so try the
-      // other configured sources in order and adopt the first that has one.
-      for (final alt in ApiService.sources) {
-        if (alt == source) continue;
-        final altEps = await _resolveSourceEpisodes(alt);
-        if (!mounted || _sourceGeneration != gen) return;
-        if (altEps.isNotEmpty) {
-          setState(() {
-            _selectedSource = alt;
-            _sourceEpisodes = altEps;
-            _isLoadingEpisodes = false;
-          });
-          return;
-        }
+      // Failover: this source has no playable copy of the title. Ask every
+      // other source at once and adopt the first that has it, instead of
+      // waiting for each timeout in turn.
+      final alternates = ApiService.sources.where((s) => s != source).toList();
+      final winner = await _firstSourceWithEpisodes(alternates);
+      if (!mounted || _sourceGeneration != gen) return;
+      if (winner != null) {
+        setState(() {
+          _selectedSource = winner.$1;
+          _sourceEpisodes = winner.$2;
+          _isLoadingEpisodes = false;
+        });
+        return;
       }
 
-      if (!mounted || _sourceGeneration != gen) return;
       setState(() {
         _sourceEpisodes = null;
         _isLoadingEpisodes = false;
@@ -585,6 +637,24 @@ class _DetailPageState extends State<DetailPage> {
         _isLoadingEpisodes = false;
       });
     });
+  }
+
+  /// Resolves [sources] concurrently and completes with the first (source,
+  /// episodes) pair that has the title, or null if none of them does.
+  Future<(VideoSource, List<Episode>)?> _firstSourceWithEpisodes(
+      List<VideoSource> sources) {
+    final result = Completer<(VideoSource, List<Episode>)?>();
+    var pending = sources.length;
+    if (pending == 0) return Future.value(null);
+    for (final s in sources) {
+      _resolveSourceEpisodes(s).then((eps) {
+        if (eps.isNotEmpty && !result.isCompleted) result.complete((s, eps));
+      }).catchError((_) {}).whenComplete(() {
+        pending--;
+        if (pending == 0 && !result.isCompleted) result.complete(null);
+      });
+    }
+    return result.future;
   }
 
   /// Resolves one VOD source to the episodes of THIS title only. Accepts a
@@ -911,9 +981,165 @@ class _DetailPageState extends State<DetailPage> {
     return pos >= 0 ? pos + 1 : globalIndex + 1;
   }
 
-  void _play(int episodeIndex) {
+  /// Whether playback for this title goes through the torrent path.
+  bool get _routesToTorrent => _isNonChineseContent && !_torrentFailed;
+
+  /// The party this title is playing in, if any.
+  PartySession? get _activeParty {
+    final party = PartyService.current;
+    if (party == null || party.isClosed) return null;
+    return party.meta.title == widget.content.title ? party : null;
+  }
+
+  /// Opens the party sheet: host a party, join one with a code, or manage the
+  /// party already running. Starting playback is an explicit step inside it.
+  void _openPartySheet() {
+    showPartySheet(
+      context,
+      currentTitle: widget.content.title,
+      activeParty: _activeParty,
+      onHost: _hostNewParty,
+      onStart: _onPartyStart,
+    );
+  }
+
+  /// The sheet's main button. Before the show is live it only confirms the
+  /// group (the host picks an episode to start). Once live, it resumes the
+  /// episode the party is on.
+  void _onPartyStart(PartySession session) {
+    if (!session.live.value) {
+      session.showStatus(
+        session.isHost
+            ? 'Your group is ready. Pick an episode to start.'
+            : 'Waiting for the host to start',
+        hold: const Duration(seconds: 3),
+      );
+      return;
+    }
+    _playPartyEpisode(session);
+  }
+
+  /// Creates the room for this title and returns it. Playback does not start
+  /// here; the host taps Start party in the sheet, which plays the episode.
+  Future<PartySession?> _hostNewParty() async {
+    if (!AuthService.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to host a HYFLIX Party.')),
+      );
+      return null;
+    }
+    final tmdb = _tmdb;
+    final meta = PartyMeta(
+      title: widget.content.title,
+      posterUrl: tmdb?.posterUrl.isNotEmpty == true
+          ? tmdb!.posterUrl
+          : widget.content.thumbnailUrl,
+      tmdbId: tmdb?.id,
+      mediaType: tmdb?.mediaType ?? 'movie',
+      sourceName: _routesToTorrent ? 'Torrent' : _selectedSource.name,
+      year: widget.content.year,
+      streamMode: _routesToTorrent ? UserService.torrentMode : null,
+    );
+    final String pin;
+    try {
+      pin = await PartyService.createRoom(meta: meta, episode: 0);
+    } on PartyException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), duration: const Duration(seconds: 6)),
+        );
+      }
+      return null;
+    }
+    final session = PartySession(pin: pin, meta: meta, isHost: true);
+    PartyService.current = session;
+    unawaited(session.connect());
+    return session;
+  }
+
+  /// Plays the host's episode for a guest once their stream is available.
+  int _seasonOf(Episode ep) {
+    final m = RegExp(r'第(\d+)季').firstMatch(ep.name);
+    return m != null ? int.tryParse(m.group(1)!) ?? 1 : 1;
+  }
+
+  /// Season and number-within-season of the episode at [globalIndex].
+  (int, int) _seasonAndNumber(int globalIndex, List<Episode> episodes) {
+    final season = _seasonOf(episodes[globalIndex]);
+    var number = 0;
+    for (var i = 0; i <= globalIndex; i++) {
+      if (_seasonOf(episodes[i]) == season) number++;
+    }
+    return (season, number);
+  }
+
+  /// Global index of episode [number] in [season], or -1 if there isn't one.
+  int _globalIndexFor(int season, int number, List<Episode> episodes) {
+    var seen = 0;
+    for (var i = 0; i < episodes.length; i++) {
+      if (_seasonOf(episodes[i]) != season) continue;
+      seen++;
+      if (seen == number) return i;
+    }
+    return -1;
+  }
+
+  /// Plays the episode the party is on. Matching is by season and number, so
+  /// each device finds the same episode in its own list, including multi-season
+  /// shows.
+  void _playPartyEpisode(PartySession party) {
+    if (_routesToTorrent) {
+      // Torrent episodes are listed per season, so switch to the host's season.
+      _selectedSeason = party.episodeSeason;
+      _play(party.episodeNumber - 1);
+      return;
+    }
+    final eps = _sourceEpisodes ?? widget.content.episodes;
+    final index = _globalIndexFor(party.episodeSeason, party.episodeNumber, eps);
+    _play(index >= 0 ? index : party.episode);
+  }
+
+  void _maybeAutoJoinPlayback() {
+    final party = widget.joinParty;
+    if (party == null || _autoJoined || !mounted || party.isClosed) return;
+    // Guests wait in the room until the host has started the show.
+    if (!party.live.value || party.playerOpen.value) return;
+    if (_routesToTorrent) {
+      if (_isLoadingTorrents || _torrentEpisodeCount == 0) return;
+    } else {
+      final eps = _sourceEpisodes ?? widget.content.episodes;
+      if (eps.isEmpty || _isLoadingEpisodes) return;
+    }
+    _autoJoined = true;
+    _autoJoinTimer?.cancel();
+    _playPartyEpisode(party);
+  }
+
+  /// The host started the show or changed episode: bring this guest in, if they
+  /// aren't already watching.
+  void _onPartyChanged() {
+    final party = widget.joinParty;
+    if (party == null || !mounted) return;
+    if (!party.live.value || party.playerOpen.value) return;
+    _autoJoined = false;
+    _startAutoJoinWatch();
+  }
+
+  /// Guests poll until their stream metadata is ready, then start playback.
+  void _startAutoJoinWatch() {
+    if (widget.joinParty == null) return;
+    _autoJoinTimer?.cancel();
+    var tries = 0;
+    _autoJoinTimer = Timer.periodic(const Duration(milliseconds: 500), (t) {
+      tries++;
+      _maybeAutoJoinPlayback();
+      if (_autoJoined || tries > 120) t.cancel();
+    });
+  }
+
+  Future<void> _play(int episodeIndex) async {
     // Route to torrent if supported (unless torrent already failed)
-    if (_isNonChineseContent && !_torrentFailed) {
+    if (_routesToTorrent) {
       _playWithTorrent(episodeIndex);
       return;
     }
@@ -939,6 +1165,12 @@ class _DetailPageState extends State<DetailPage> {
       return;
     }
     final isTvShow = episodes.length > 1;
+    final hostParty = _activeParty;
+    if (hostParty != null && hostParty.isHost) {
+      final (season, number) = _seasonAndNumber(episodeIndex, episodes);
+      unawaited(hostParty.publishEpisode(episodeIndex, season: season, number: number));
+      unawaited(hostParty.markLive());
+    }
     final poster = _tmdb?.posterUrl.isNotEmpty == true
         ? _tmdb!.posterUrl
         : widget.content.thumbnailUrl;
@@ -959,6 +1191,7 @@ class _DetailPageState extends State<DetailPage> {
           posterUrl: poster,
           episodeNumber: _episodeNumberInSeason(episodeIndex, episodes),
           videoSourceName: _selectedSource.name,
+          party: _activeParty,
         ),
       ),
     );
@@ -1860,6 +2093,45 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                         ),
                       ),
+                      if (!kIsWeb)
+                        HoverButton(
+                          onTap: _openPartySheet,
+                          backgroundColor: _activeParty != null
+                              ? AppTheme.accent.withOpacity(0.2)
+                              : const Color(0x662F3640),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 28,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  LucideIcons.users,
+                                  color: _activeParty != null
+                                      ? AppTheme.accent
+                                      : Colors.white,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _activeParty != null
+                                      ? 'Party ${_activeParty!.pin}'
+                                      : 'Watch Party',
+                                  style: TextStyle(
+                                    color: _activeParty != null
+                                        ? AppTheme.accent
+                                        : Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                    decoration: TextDecoration.none,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       _actionButton(LucideIcons.thumbsUp, ''),
                     ],
                   ),

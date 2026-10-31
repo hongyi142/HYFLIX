@@ -16,6 +16,7 @@ import '../models/torrent_stream.dart';
 import '../widgets/buttons.dart';
 import 'fullscreen_web.dart';
 import '../services/subtitle_service.dart';
+import '../services/party_service.dart';
 
 /// Lightweight web video controller using an HTML <video> element + hls.js.
 class _WebVideoController {
@@ -203,8 +204,11 @@ class VideoPlayerScreen extends StatefulWidget {
   final int? episodeNumber;
   final int episodeCount;
   final String? videoSourceName;
+  /// Watch parties are native-only for now; accepted here so callers compile.
+  final PartySession? party;
 
   const VideoPlayerScreen({
+    this.party,
     super.key,
     required this.videoUrl,
     this.title = '',

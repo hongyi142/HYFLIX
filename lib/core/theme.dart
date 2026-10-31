@@ -41,8 +41,15 @@ class AppTheme {
       scaffoldBackgroundColor: background,
       primaryColor: accent,
       fontFamily: sfPro,
-      snackBarTheme: const SnackBarThemeData(
-        contentTextStyle: TextStyle(color: Colors.white, fontSize: 14, fontFamily: sfPro),
+      // Dark surface with white text on every snackbar. Without an explicit
+      // background, Material's dark theme uses a light one, so white text vanished.
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: const Color(0xFF1F1F1F),
+        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: sfPro),
+        actionTextColor: accent,
+        behavior: SnackBarBehavior.floating,
+        elevation: 6,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       textTheme: const TextTheme(
         displayLarge: TextStyle(

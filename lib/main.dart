@@ -4,7 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'desktop_init.dart';
 import 'services/media_init.dart';
+import 'core/app_keys.dart';
 import 'core/theme.dart';
+import 'services/party_service.dart';
+import 'widgets/party_badge.dart';
+import 'widgets/party_sheet.dart';
+import 'widgets/party_ui.dart';
 import 'pages/splash_page.dart';
 import 'pages/auth_page.dart';
 import 'services/auth_service.dart';
@@ -63,6 +68,15 @@ class _HyflixAppState extends State<HyflixApp> {
   @override
   void initState() {
     super.initState();
+    PartyService.onRoomLive = (session) {
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx != null) openPartyShow(ctx, session);
+    };
+    PartyService.announce = (message) {
+      appMessengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+      );
+    };
     AuthService.addAuthListener((loggedIn) {
       if (mounted) setState(() => _isLoggedIn = loggedIn);
     });
@@ -82,6 +96,25 @@ class _HyflixAppState extends State<HyflixApp> {
       title: 'HYFLIX',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
+      navigatorKey: appNavigatorKey,
+      scaffoldMessengerKey: appMessengerKey,
+      // The party badge sits above every page for as long as a party is active.
+      builder: (context, child) => Stack(
+        children: [
+          child ?? const SizedBox.shrink(),
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: PartyGlobalStatus(),
+          ),
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(child: const PartyBadge()),
+          ),
+        ],
+      ),
       shortcuts: {
         ...WidgetsApp.defaultShortcuts,
         const SingleActivator(LogicalKeyboardKey.select): const ActivateIntent(),

@@ -4,9 +4,11 @@ import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/party_service.dart';
 import '../services/tmdb_service.dart';
 import '../services/torbox_service.dart';
 import '../services/user_service.dart';
+import 'auth_page.dart';
 import 'home_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -244,7 +246,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await UserService.saveCustomSource(name, url);
       ApiService.setCustomSources([
-        ...ApiService.sources.where((s) => !_builtIn(s)),
+        ...ApiService.customSources,
         VideoSource(name: name, baseUrl: url),
       ]);
       ApiService.clearAllCache();
@@ -275,12 +277,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  bool _builtIn(VideoSource s) =>
-      s.name == 'JSZY (Jisu)' ||
-      s.name == 'BaoFeng (暴风)' ||
-      s.name == 'BDZY (Baidu)' ||
-      s.name == 'HHZY (Luxury)' ||
-      s.name == 'Wolong (卧龙)';
+  bool _builtIn(VideoSource s) => ApiService.isBuiltIn(s);
 
   Future<void> _removeCustomSource(VideoSource source) async {
     final confirmed = await showDialog<bool>(
@@ -308,7 +305,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     await UserService.removeCustomSource(source.name);
     final remaining =
-        ApiService.sources.where((s) => !_builtIn(s) && s.name != source.name);
+        ApiService.customSources.where((s) => s.name != source.name);
     ApiService.setCustomSources([...remaining]);
     ApiService.clearAllCache();
 
@@ -570,6 +567,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     _buildSectionHeader('Account', LucideIcons.userCog),
                     const SizedBox(height: 12),
                     _buildAccountSection(),
+                    const SizedBox(height: 10),
+                    _buildLogoutTile(),
                     const SizedBox(height: 36),
                     _buildSectionHeader('Danger Zone', LucideIcons.alertTriangle),
                     const SizedBox(height: 12),
@@ -1086,6 +1085,110 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  // ── Log Out ────────────────────────────────────────────────────────
+
+  Widget _buildLogoutTile() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(LucideIcons.logOut, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Log Out',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  AuthService.email ?? 'Sign out of this device',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.35),
+                    fontSize: 12,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 36,
+            child: OutlinedButton(
+              onPressed: _confirmLogout,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white24),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('Log Out'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1F2E),
+        title: const Text('Log out of HYFLIX?',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'You will need to sign in again to watch.',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Log out',
+                style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Leave any watch party first so others don't keep waiting on this device.
+    final party = PartyService.current;
+    if (party != null) await PartyService.endOrLeave(party);
+
+    await AuthService.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthPage()),
+      (route) => false,
     );
   }
 

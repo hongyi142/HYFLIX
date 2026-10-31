@@ -16,6 +16,8 @@ import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/torrent_service.dart';
 import '../services/torbox_service.dart';
+import '../services/party_service.dart';
+import '../widgets/party_ui.dart';
 import '../config/memory_profile.dart';
 import '../widgets/buttons.dart';
 import 'fullscreen_stub.dart'
@@ -36,9 +38,12 @@ class VideoPlayerScreen extends StatefulWidget {
   /// Total episode count for torrent TV shows (episodes list is empty for torrents).
   final int episodeCount;
   final String? videoSourceName;
+  /// Active watch party this playback belongs to, if any.
+  final PartySession? party;
 
   const VideoPlayerScreen({
     super.key,
+    this.party,
     required this.videoUrl,
     this.title = '',
     this.originalTitle = '',
@@ -57,6 +62,43 @@ class VideoPlayerScreen extends StatefulWidget {
 
   @override
   State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
+}
+
+/// Exposes a media_kit [Player] to the watch-party sync.
+class _MediaKitPartyPlayer implements PartyPlayer {
+  final Player _p;
+  _MediaKitPartyPlayer(this._p);
+
+  @override
+  bool get playing => _p.state.playing;
+  @override
+  bool get buffering => _p.state.buffering;
+  @override
+  double get rate => _p.state.rate;
+  @override
+  Duration get position => _p.state.position;
+  @override
+  Duration get duration => _p.state.duration;
+
+  @override
+  Stream<bool> get playingStream => _p.stream.playing;
+  @override
+  Stream<double> get rateStream => _p.stream.rate;
+  @override
+  Stream<Duration> get positionStream => _p.stream.position;
+  @override
+  Stream<Duration> get durationStream => _p.stream.duration;
+  @override
+  Stream<bool> get bufferingStream => _p.stream.buffering;
+
+  @override
+  void play() => _p.play();
+  @override
+  void pause() => _p.pause();
+  @override
+  void seek(Duration position) => _p.seek(position);
+  @override
+  void setRate(double rate) => _p.setRate(rate);
 }
 
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
@@ -111,6 +153,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Map<String, dynamic>? _streamBufferInfo;
   StreamSubscription<Map<int, dynamic>>? _streamInfoSub;
   String? _torrentUrl;
+  /// Which path this torrent stream actually plays through: 'torbox' (direct
+  /// HTTPS from TorBox), 'p2p' (libtorrent), or '' until it is decided.
+  String _playbackRoute = '';
+  /// Specific reason for a failed stream, when known.
+  String? _errorDetail;
 
   // Next episode autoplay
   bool _showAutoplay = false;
@@ -214,6 +261,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       ),
     );
 
+    final party = widget.party;
+    if (party != null) {
+      party.onRemoteEpisode = _onRemoteEpisode;
+      party.attach(_MediaKitPartyPlayer(_player));
+    }
+
     if (widget.torrentStream != null) {
       _startTorrentPlayback();
     } else {
@@ -242,6 +295,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     // Check if we have a direct debrid play link
     if (stream.url != null && stream.url!.isNotEmpty) {
       debugPrint('[VideoPlayer] Starting debrid direct stream: ${stream.url}');
+      _playbackRoute = 'torbox';
       setState(() {
         _isTorrentBuffering = true;
         _torrentStatus = 'Opening TorBox stream...';
@@ -318,7 +372,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         setState(() {
           _torrentStats = TorrentService().getStreamStats();
           // Update status text based on stats
-          if (_torrentStats != null && _isTorrentBuffering) {
+          // A speed reading is only meaningful for P2P. TorBox direct play has no swarm rate.
+          if (_torrentStats != null && _isTorrentBuffering && _playbackRoute == 'p2p') {
             final rate = _torrentStats!['downloadRate'] as int? ?? 0;
             if (rate > 0) {
               _torrentStatus = 'Downloading... ${_formatBytes(rate)}/s';
@@ -328,14 +383,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
     });
 
+    // Use this account's saved torrent mode, not a default that may not have
+    // loaded yet. That default is what made playback fall back to P2P.
+    await UserService.ensureTorrentSettings();
+    if (!mounted) return;
+
     final result = await TorrentService().startStream(stream);
     if (!mounted) return;
 
     if (result == null) {
-      debugPrint('[VideoPlayer] Torrent stream failed');
+      debugPrint('[VideoPlayer] Torrent stream failed (mode=${UserService.torrentMode})');
       setState(() {
         _isTorrentBuffering = false;
         _hasError = true;
+        _errorDetail = UserService.torrentMode == 'torbox'
+            ? 'TorBox could not start this stream. Check your TorBox key, or try another release.'
+            : null;
       });
       return;
     }
@@ -344,7 +407,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _torrentUrl = url;
 
     // Check if the stream was resolved to a direct HTTPS debrid link (TorBox)
-    if (streamId == 0 || url.startsWith('http://') || url.startsWith('https://')) {
+    final direct = streamId == 0 || url.startsWith('http://') || url.startsWith('https://');
+    _playbackRoute = direct ? 'torbox' : 'p2p';
+    debugPrint('[VideoPlayer] Playback route: $_playbackRoute (mode=${UserService.torrentMode}, '
+        'torboxKey=${TorBoxService().isConfigured})');
+    if (direct) {
       debugPrint('[VideoPlayer] Direct TorBox debrid stream ready: $url');
       setState(() {
         _isTorrentBuffering = false;
@@ -1032,13 +1099,35 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  /// Another party member switched episode. Follow them when this player has
+  /// the episode list; torrent episodes must be picked from the list.
+  void _onRemoteEpisode(int index) {
+    if (!mounted) return;
+    if (widget.episodes.isNotEmpty &&
+        index >= 0 &&
+        index < widget.episodes.length) {
+      _playEpisode(index);
+      _showPartyNotice('Host switched to ${widget.episodes[index].name}');
+      return;
+    }
+    _showPartyNotice('Your host moved to episode ${index + 1}');
+  }
+
+
+  /// Shows a party event on the single status line over the player.
+  void _showPartyNotice(String message) {
+    widget.party?.showStatus(message);
+  }
+
   void _playEpisode(int index) {
     if (index < 0 || index >= _effectiveEpisodeCount) return;
     // For torrent content (no episode URLs), pop with the target episode index
     if (widget.episodes.isEmpty && widget.torrentStream != null) {
+      widget.party?.publishEpisode(index);
       Navigator.of(context).pop(index);
       return;
     }
+    widget.party?.publishEpisode(index);
     final ep = widget.episodes[index];
     setState(() {
       _currentEpIndex = index;
@@ -1090,6 +1179,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    // The party stays open; only this player stops following it.
+    final party = widget.party;
+    if (party != null) {
+      party.detach();
+      party.onRemoteEpisode = null;
+      party.onEnded = null;
+    }
     try {
       _cancelAutoplay();
       _periodicSaveTimer?.cancel();
@@ -1754,6 +1850,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   ),
                 ),
               ),
+              if (widget.party != null)
+                Positioned(
+                  top: 104,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(child: PartyStatusPill(party: widget.party!)),
+                ),
             ],
           ),
         ),
@@ -1901,7 +2004,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 },
               ),
             ),
-            if (isTorrent && (widget.torrentStream!.url != null || _torrentUrl != null || (TorBoxService().isConfigured))) ...[
+            if (isTorrent && _playbackRoute == 'torbox') ...[
               const SizedBox(height: 8),
               _statRow('Type', 'TorBox Direct Play', color: Colors.cyanAccent),
               const SizedBox(height: 8),
@@ -1912,7 +2015,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               _statRow('Size', widget.torrentStream!.size.isNotEmpty ? widget.torrentStream!.size : 'Unknown'),
               const SizedBox(height: 8),
               _statRow('Source', widget.torrentStream!.source),
-            ] else if (isTorrent && stats != null) ...[
+            ] else if (isTorrent && _playbackRoute == 'p2p' && stats != null) ...[
+              const SizedBox(height: 8),
+              _statRow('Type', 'P2P (libtorrent)', color: Colors.orangeAccent),
               const SizedBox(height: 8),
               _statRow('Download', '${_formatBytes(stats['downloadRate'] ?? 0)}/s'),
               const SizedBox(height: 8),
@@ -1943,6 +2048,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               ],
               const SizedBox(height: 8),
               _statRow('Source', widget.torrentStream!.source),
+            ] else if (isTorrent && _playbackRoute.isEmpty) ...[
+              const SizedBox(height: 8),
+              _statRow('Type', 'Resolving stream…'),
             ] else if (!isTorrent) ...[
               const SizedBox(height: 8),
               _statRow('Type', 'VOD Stream'),
@@ -1984,7 +2092,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         children: [
           const Icon(LucideIcons.alertCircle, color: AppTheme.accent, size: 56),
           const SizedBox(height: 16),
-          const Text('Failed to load stream.', style: TextStyle(color: Colors.white, fontSize: 18)),
+          Text(_errorDetail ?? 'Failed to load stream.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 18)),
           const SizedBox(height: 24),
           TextButton(onPressed: _exitPlayer,
               child: const Text('Go Back', style: TextStyle(color: AppTheme.accent, fontSize: 16))),
@@ -2053,7 +2163,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         children: [
           // Top bar
           Positioned(
-            top: 32, left: 20, right: 20,
+            // Leave room under the app-wide party badge while a party is active.
+            top: widget.party != null ? 64 : 32, left: 20, right: 20,
             child: Row(
               children: [
                 _buildTopBarItem(

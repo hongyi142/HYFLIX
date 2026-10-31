@@ -301,6 +301,8 @@ class TorrentService {
     // Respect the user's torrent mode: 'off' and 'torbox' never reach the
     // pure-P2P path. Only 'p2p' streams via libtorrent.
     final mode = UserService.torrentMode;
+    debugPrint('[TorrentService] Route decision: mode=$mode '
+        'torboxKey=${TorBoxService().isConfigured}');
     if (mode == 'off') {
       debugPrint('[TorrentService] Torrent mode is "off"; not streaming.');
       return null;

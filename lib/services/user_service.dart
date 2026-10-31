@@ -128,6 +128,16 @@ class UserService {
   static Future<void> loadTorrentSettings() async {
     torrentMode = await FirestoreService.getTorrentMode();
     TorBoxService.apiKey = await FirestoreService.getTorBoxApiKey();
+    _torrentSettingsLoaded = true;
+  }
+
+  static bool _torrentSettingsLoaded = false;
+
+  /// Loads the account's torrent settings once, before a stream starts, so the
+  /// playback route never uses an unloaded default.
+  static Future<void> ensureTorrentSettings() async {
+    if (_torrentSettingsLoaded) return;
+    await loadTorrentSettings();
   }
 
   static Future<void> saveTorrentMode(String mode) async {

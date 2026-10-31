@@ -371,13 +371,25 @@ class _TvFieldWrapperState extends State<_TvFieldWrapper> {
   void initState() {
     super.initState();
     widget.focusNode.addListener(_onFocusChange);
+    _fieldFocusNode.addListener(_onFieldFocusChange);
   }
 
   @override
   void dispose() {
     widget.focusNode.removeListener(_onFocusChange);
+    _fieldFocusNode.removeListener(_onFieldFocusChange);
     _fieldFocusNode.dispose();
     super.dispose();
+  }
+
+  /// A tap or click lands on the text field itself, and its own tap handler
+  /// wins over the wrapper's, so the wrapper never sees it. Treat focusing
+  /// the field as the start of editing. D-pad navigation focuses the outer
+  /// node instead, so remote navigation still doesn't open the keyboard.
+  void _onFieldFocusChange() {
+    if (_fieldFocusNode.hasFocus && !_isEditing) {
+      _startEditing();
+    }
   }
 
   void _onFocusChange() {
@@ -398,6 +410,12 @@ class _TvFieldWrapperState extends State<_TvFieldWrapper> {
     // is silently ignored because EditableText is still in read-only mode.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_isEditing && mounted) {
+        // The field often already holds focus from the tap, while it was still
+        // read-only. Requesting focus again does nothing then, so the text
+        // input never opens. Move focus to the outer node and back so the
+        // field re-attaches as editable. The outer node still counts as focused
+        // during the move, so editing isn't cancelled.
+        widget.focusNode.requestFocus();
         _fieldFocusNode.requestFocus();
         SystemChannels.textInput.invokeMethod('TextInput.show');
       }

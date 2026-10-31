@@ -15,6 +15,9 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
 
+  // One shared client keeps connections alive, so each request skips the TCP/TLS handshake.
+  static final http.Client _client = http.Client();
+
   static final Map<String, List<Map<String, dynamic>>> _rawSearchCache = {};
   static final Map<String, ContentModel?> _tmdbMatchCache = {};
   static SharedPreferences? _prefs;
@@ -40,10 +43,12 @@ class ApiService {
   /// Clear all cached content (call when language changes).
   static void clearAllCache() {
     _rawSearchCache.clear();
+    _sourceSearchCache.clear();
     _tmdbMatchCache.clear();
     final prefs = _prefs;
     if (prefs != null) {
-      final keys = prefs.getKeys().where((k) => k.startsWith('cache_'));
+      final keys = prefs.getKeys().where(
+          (k) => k.startsWith('cache_') || k.startsWith('vodmatch_'));
       for (final key in keys) {
         prefs.remove(key);
       }
@@ -224,7 +229,7 @@ class ApiService {
 
   Future<List<ContentModel>> _fetch(Uri uri) async {
     try {
-      final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
+      final res = await _client.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
@@ -247,7 +252,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> _fetchRaw(Uri uri) async {
     try {
-      final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
+      final res = await _client.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
@@ -260,7 +265,7 @@ class ApiService {
   /// Fetch raw results with pagination info: [items, pagecount, total].
   Future<(List<Map<String, dynamic>>, int, int)> _fetchRawPaged(Uri uri) async {
     try {
-      final res = await http.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
+      final res = await _client.get(_proxyUri(uri)).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return (<Map<String, dynamic>>[], 0, 0);
       final body = json.decode(res.body) as Map<String, dynamic>;
       final list = body['list'] as List<dynamic>? ?? [];
@@ -808,16 +813,25 @@ class ApiService {
     final list = await UserService.getCustomSources();
     _customSources
       ..clear()
-      ..addAll(list.map(
-          (m) => VideoSource(name: m['name']!, baseUrl: m['baseUrl']!)));
+      ..addAll(list
+          .map((m) => VideoSource(name: m['name']!, baseUrl: m['baseUrl']!))
+          .where((s) => !isBuiltIn(s)));
     _customLoaded = true;
   }
+
+  /// Whether [s] ships with the app, as opposed to a source the user added.
+  static bool isBuiltIn(VideoSource s) =>
+      _builtInSources.any((b) => b.name == s.name);
+
+  /// The user's own sources only. Built-in sources are never stored here, so
+  /// they can't be duplicated when the list is rebuilt.
+  static List<VideoSource> get customSources => List.unmodifiable(_customSources);
 
   /// Replaces the in-memory custom source list (e.g. after add/remove).
   static void setCustomSources(List<VideoSource> v) {
     _customSources
       ..clear()
-      ..addAll(v);
+      ..addAll(v.where((s) => !isBuiltIn(s)));
     _customLoaded = true;
   }
 
@@ -896,7 +910,55 @@ class ApiService {
         '${source.baseUrl}?ac=videolist&wd=${Uri.encodeQueryComponent(query)}'));
   }
 
+  /// Matches a TMDB title to one source. Hits are kept for 12 hours and misses
+  /// for 30 minutes, both across app restarts. Concurrent callers for the same
+  /// title share one lookup.
+  static final Map<String, Future<ContentModel?>> _matchInFlight = {};
+
   Future<ContentModel?> matchTmdbToProviderFromSource(
+      TmdbResult tmdb, VideoSource source) {
+    final key =
+        '${source.name}_${tmdb.mediaType}_${tmdb.id ?? tmdb.englishTitle}_${tmdb.year}';
+    return _matchInFlight.putIfAbsent(
+      key,
+      () => _matchWithPersistence(key, tmdb, source)
+          .whenComplete(() => _matchInFlight.remove(key)),
+    );
+  }
+
+  Future<ContentModel?> _matchWithPersistence(
+      String key, TmdbResult tmdb, VideoSource source) async {
+    final prefs = _prefs;
+    final storeKey = 'vodmatch_v1_$key';
+    if (prefs != null) {
+      final raw = prefs.getString(storeKey);
+      final savedAt = prefs.getInt('${storeKey}_time') ?? 0;
+      final age = DateTime.now().millisecondsSinceEpoch - savedAt;
+      if (raw != null) {
+        if (raw == 'null') {
+          if (age < const Duration(minutes: 30).inMilliseconds) return null;
+        } else if (age < const Duration(hours: 12).inMilliseconds) {
+          try {
+            return ContentModel.fromJson(json.decode(raw) as Map<String, dynamic>);
+          } catch (_) {
+            // Corrupted entry: fall through and look it up again.
+          }
+        }
+      }
+    }
+
+    final result = await _matchTmdbToProviderFromSourceUncached(tmdb, source);
+    if (prefs != null) {
+      prefs.setString(
+        storeKey,
+        result == null ? 'null' : json.encode(result.toJson()),
+      );
+      prefs.setInt('${storeKey}_time', DateTime.now().millisecondsSinceEpoch);
+    }
+    return result;
+  }
+
+  Future<ContentModel?> _matchTmdbToProviderFromSourceUncached(
       TmdbResult tmdb, VideoSource source) async {
     final cacheKey =
         '${source.name}_${tmdb.mediaType}_${tmdb.id ?? tmdb.englishTitle}_${tmdb.year}';
@@ -946,9 +1008,14 @@ class ApiService {
     if (bestScore < 35 && tmdb.englishTitle.isNotEmpty) {
       final chineseTitles =
           await TmdbService.findChineseTitles(tmdb.englishTitle);
-      for (final ct in chineseTitles) {
-        if (ct.trim().isEmpty) continue;
-        final results = await _searchRawByTitleFromSource(ct, source);
+      // Search every Chinese title at once rather than one after another.
+      final titles = chineseTitles.where((ct) => ct.trim().isNotEmpty).toList();
+      final resultsPerTitle = await Future.wait(
+        titles.map((ct) => _searchRawByTitleFromSource(ct, source)),
+      );
+      for (var i = 0; i < titles.length; i++) {
+        final ct = titles[i];
+        final results = resultsPerTitle[i];
         for (final r in results) {
           final key =
               '${r['vod_id']}_${TmdbService.cleanTitle(r['vod_name'] as String? ?? '')}';
@@ -999,7 +1066,30 @@ class ApiService {
     return result;
   }
 
+  /// Title searches are cached per source for a short time. Concurrent callers
+  /// asking the same question share one request. Empty or failed results are
+  /// dropped so a later attempt retries.
+  static final Map<String, Future<List<Map<String, dynamic>>>> _sourceSearchCache = {};
+  static const Duration _sourceSearchTtl = Duration(minutes: 10);
+
   Future<List<Map<String, dynamic>>> _searchRawByTitleFromSource(
+      String title, VideoSource source) {
+    final key = '${source.baseUrl}|${title.trim()}';
+    final cached = _sourceSearchCache[key];
+    if (cached != null) return cached;
+
+    final future = _fetchSourceSearch(title, source);
+    _sourceSearchCache[key] = future;
+    future.then((items) {
+      if (items.isEmpty) _sourceSearchCache.remove(key);
+    }, onError: (_) => _sourceSearchCache.remove(key));
+    Future.delayed(_sourceSearchTtl, () {
+      _sourceSearchCache.remove(key);
+    });
+    return future;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchSourceSearch(
       String title, VideoSource source) async {
     final encoded = Uri.encodeQueryComponent(title);
     final base = '${source.baseUrl}?ac=videolist&wd=$encoded';
